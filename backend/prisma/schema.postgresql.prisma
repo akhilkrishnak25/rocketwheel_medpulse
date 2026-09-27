@@ -16,6 +16,8 @@ model User {
   name          String
   phone         String?
   isActive      Boolean        @default(true)
+  status        String         @default("ACTIVE")
+  lastLoginAt   DateTime?
   hospitalAdmin HospitalAdmin?
   doctor        Doctor?
   auditLogs     AuditLog[]
@@ -28,6 +30,8 @@ model Hospital {
   name                String
   slug                String          @unique
   code                String          @unique
+  status              String          @default("ACTIVE")
+  website             String?
   logoUrl             String?
   imageUrl            String?
   address             String
@@ -103,6 +107,7 @@ model Doctor {
   breakStart          String?          @default("13:00")
   breakEnd            String?          @default("14:00")
   isActive            Boolean          @default(true)
+  status              String           @default("ACTIVE")
   schedules           DoctorSchedule[]
   leaves              DoctorLeave[]
   appointments        Appointment[]
@@ -321,3 +326,17 @@ model OtpVerification {
 
   @@index([mobileNumber, otpCode])
 }
+
+model AccountToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  email     String
+  type      String   // ACTIVATION, PASSWORD_RESET
+  expiresAt DateTime
+  isUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([token, type])
+  @@index([email])
+}
+
