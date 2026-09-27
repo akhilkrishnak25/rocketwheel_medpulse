@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased selection:bg-royal-500 selection:text-white;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    touch-action: manipulation;
+  }
+
+  /* Prevent iOS zoom on input focus while keeping desktop crisp */
+  input, select, textarea {
+    font-size: 16px;
+  }
+  @screen sm {
+    input, select, textarea {
+      font-size: 0.875rem; /* 14px */
+    }
+  }
+
+  /* Guarantee high-contrast visible text and icons inside buttons across all browsers and link wrappers */
+  button.bg-royal-600,
+  button[class*="bg-royal-600"],
+  button[class*="bg-royal-700"],
+  button[class*="bg-[#FF1D6B]"],
+  button[class*="bg-pink-"],
+  button[class*="bg-rose-"],
+  button[class*="bg-emerald-"],
+  a.bg-royal-600,
+  a[class*="bg-royal-600"] {
+    color: #ffffff !important;
+  }
+
+  button.bg-royal-600 svg,
+  button[class*="bg-royal-600"] svg,
+  button[class*="bg-royal-700"] svg,
+  button[class*="bg-[#FF1D6B]"] svg,
+  button[class*="bg-pink-"] svg {
+    color: #ffffff !important;
+    stroke: #ffffff !important;
+  }
+}
+
+@layer utilities {
+  /* Hide scrollbars for mobile swipeable carousels */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Safe area padding for iPhone home indicator and bottom nav */
+  .safe-area-bottom {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  .safe-area-top {
+    padding-top: max(0.75rem, env(safe-area-inset-top));
+  }
+}
+
+/* Print Styles for Digital OP Slip */
+@media print {
+  body {
+    background-color: white !important;
+  }
+  header, footer, aside, button, nav, .print\:hidden, .mobile-nav-bar {
+    display: none !important;
+  }
+}

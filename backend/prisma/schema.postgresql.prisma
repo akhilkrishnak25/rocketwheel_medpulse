@@ -1,0 +1,323 @@
+// Production PostgreSQL Prisma Schema
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String         @id @default(uuid())
+  email         String         @unique
+  passwordHash  String
+  role          String
+  name          String
+  phone         String?
+  isActive      Boolean        @default(true)
+  hospitalAdmin HospitalAdmin?
+  doctor        Doctor?
+  auditLogs     AuditLog[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model Hospital {
+  id                  String          @id @default(uuid())
+  name                String
+  slug                String          @unique
+  code                String          @unique
+  logoUrl             String?
+  imageUrl            String?
+  address             String
+  city                String
+  state               String
+  pincode             String
+  phone               String
+  email               String
+  emergencyContact    String
+  openingHours        String
+  about               String          @db.Text
+  facilities          String          @db.Text
+  rating              Float           @default(4.5)
+  isEmergencyAvailable Boolean        @default(true)
+  departments         Department[]
+  doctors             Doctor[]
+  appointments        Appointment[]
+  hospitalAdmins      HospitalAdmin[]
+  notifications       Notification[]
+  reviews             Review[]
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+}
+
+model HospitalAdmin {
+  id          String    @id @default(uuid())
+  userId      String    @unique
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hospitalId  String
+  hospital    Hospital  @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  roleTitle   String    @default("Hospital Administrator")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Department {
+  id          String        @id @default(uuid())
+  hospitalId  String
+  hospital    Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  name        String
+  slug        String
+  code        String
+  description String?       @db.Text
+  icon        String?
+  doctors     Doctor[]
+  appointments Appointment[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@unique([hospitalId, slug])
+}
+
+model Doctor {
+  id                  String           @id @default(uuid())
+  userId              String?          @unique
+  user                User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  hospitalId          String
+  hospital            Hospital         @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  departmentId        String
+  department          Department       @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  name                String
+  photoUrl            String?
+  qualification       String
+  specialization      String
+  experienceYears     Int              @default(5)
+  consultationFee     Float            @default(500)
+  languages           String
+  about               String           @db.Text
+  workingDays         String
+  workingHoursStart   String           @default("09:00")
+  workingHoursEnd     String           @default("17:00")
+  slotDurationMinutes Int              @default(30)
+  breakStart          String?          @default("13:00")
+  breakEnd            String?          @default("14:00")
+  isActive            Boolean          @default(true)
+  schedules           DoctorSchedule[]
+  leaves              DoctorLeave[]
+  appointments        Appointment[]
+  slots               AppointmentSlot[]
+  reviews             Review[]
+  prescriptions       Prescription[]
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+}
+
+model DoctorSchedule {
+  id                  String   @id @default(uuid())
+  doctorId            String
+  doctor              Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  dayOfWeek           Int
+  startTime           String
+  endTime             String
+  slotDurationMinutes Int      @default(30)
+  isAvailable         Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([doctorId, dayOfWeek])
+}
+
+model DoctorLeave {
+  id        String   @id @default(uuid())
+  doctorId  String
+  doctor    Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  startDate DateTime
+  endDate   DateTime
+  reason    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Patient {
+  id               String          @id @default(uuid())
+  fullName         String
+  mobileNumber     String
+  email            String
+  dateOfBirth      String?
+  gender           String?
+  address          String?         @db.Text
+  bloodGroup       String?
+  emergencyContact String?
+  appointments     Appointment[]
+  medicalRecords   MedicalRecord[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([mobileNumber])
+  @@index([email])
+}
+
+model Appointment {
+  id                 String           @id @default(uuid())
+  appointmentNumber  String           @unique
+  hospitalId         String
+  hospital           Hospital         @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  doctorId           String
+  doctor             Doctor           @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  patientId          String
+  patient            Patient          @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  departmentId       String
+  department         Department       @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  appointmentDate    String
+  timeSlot           String
+  tokenNumber        Int
+  status             String           @default("PENDING_PAYMENT")
+  consultationFee    Float
+  platformFee        Float            @default(20)
+  totalAmount        Float
+  cancellationReason String?
+  notes              String?          @db.Text
+  payment            Payment?
+  digitalOp          DigitalOP?
+  prescription       Prescription?
+  medicalRecord      MedicalRecord?
+  appointmentSlot    AppointmentSlot?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@index([hospitalId, appointmentDate])
+  @@index([doctorId, appointmentDate])
+  @@index([patientId])
+}
+
+model AppointmentSlot {
+  id            String       @id @default(uuid())
+  doctorId      String
+  doctor        Doctor       @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  date          String
+  startTime     String
+  endTime       String
+  isBooked      Boolean      @default(false)
+  isLocked      Boolean      @default(false)
+  lockedUntil   DateTime?
+  appointmentId String?      @unique
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([doctorId, date, startTime])
+}
+
+model Payment {
+  id                 String       @id @default(uuid())
+  appointmentId      String       @unique
+  appointment        Appointment  @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  razorpayOrderId    String       @unique
+  razorpayPaymentId  String?      @unique
+  razorpaySignature  String?
+  amount             Float
+  currency           String       @default("INR")
+  status             String       @default("PENDING")
+  paymentMethod      String?
+  failureReason      String?
+  idempotencyKey     String       @unique
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+}
+
+model DigitalOP {
+  id            String      @id @default(uuid())
+  opNumber      String      @unique
+  secureToken   String      @unique
+  appointmentId String      @unique
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  generatedAt   DateTime    @default(now())
+  pdfUrl        String?
+  qrData        String
+  isVerified    Boolean     @default(false)
+  verifiedAt    DateTime?
+  downloadCount Int         @default(0)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model Notification {
+  id            String    @id @default(uuid())
+  hospitalId    String
+  hospital      Hospital  @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  recipientType String
+  recipientId   String?
+  title         String
+  message       String    @db.Text
+  type          String
+  isRead        Boolean   @default(false)
+  readAt        DateTime?
+  metadata      String?   @db.Text
+  createdAt     DateTime  @default(now())
+}
+
+model Prescription {
+  id            String      @id @default(uuid())
+  appointmentId String      @unique
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  doctorId      String
+  doctor        Doctor      @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  diagnosis     String      @db.Text
+  medicines     String      @db.Text
+  instructions  String?     @db.Text
+  followUpDate  String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model MedicalRecord {
+  id            String      @id @default(uuid())
+  appointmentId String      @unique
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  patientId     String
+  patient       Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  symptoms      String?     @db.Text
+  vitals        String?     @db.Text
+  clinicalNotes String?     @db.Text
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model Review {
+  id          String   @id @default(uuid())
+  doctorId    String
+  doctor      Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  hospitalId  String
+  hospital    Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  patientName String
+  rating      Int      @default(5)
+  comment     String?  @db.Text
+  isApproved  Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  details   String?  @db.Text
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+}
+
+model OtpVerification {
+  id           String   @id @default(uuid())
+  mobileNumber String
+  appointmentId String?
+  otpCode      String
+  expiresAt    DateTime
+  isUsed       Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@index([mobileNumber, otpCode])
+}
