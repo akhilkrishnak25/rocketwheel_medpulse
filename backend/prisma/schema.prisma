@@ -1,6 +1,6 @@
-// Prisma Schema for MediPulse Multi-Hospital Platform
+// Production PostgreSQL Prisma Schema
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -8,16 +8,15 @@ generator client {
   provider = "prisma-client-js"
 }
 
-// Staff user (Super Admin, Hospital Admin, Doctor)
 model User {
   id            String         @id @default(uuid())
   email         String         @unique
   passwordHash  String
-  role          String         // SUPER_ADMIN, HOSPITAL_ADMIN, DOCTOR
+  role          String
   name          String
   phone         String?
   isActive      Boolean        @default(true)
-  status        String         @default("ACTIVE") // ACTIVE, PENDING, REJECTED, SUSPENDED, INVITED
+  status        String         @default("ACTIVE")
   lastLoginAt   DateTime?
   hospitalAdmin HospitalAdmin?
   doctor        Doctor?
@@ -30,8 +29,8 @@ model Hospital {
   id                  String          @id @default(uuid())
   name                String
   slug                String          @unique
-  code                String          @unique // e.g. APOL-HYD
-  status              String          @default("ACTIVE") // PENDING, APPROVED, ACTIVE, REJECTED, INACTIVE
+  code                String          @unique
+  status              String          @default("ACTIVE")
   website             String?
   logoUrl             String?
   imageUrl            String?
@@ -42,9 +41,9 @@ model Hospital {
   phone               String
   email               String
   emergencyContact    String
-  openingHours        String          // e.g. "24/7" or "08:00 AM - 08:00 PM"
-  about               String
-  facilities          String          // JSON array or comma separated
+  openingHours        String
+  about               String          @db.Text
+  facilities          String          @db.Text
   rating              Float           @default(4.5)
   isEmergencyAvailable Boolean        @default(true)
   departments         Department[]
@@ -74,9 +73,9 @@ model Department {
   hospital    Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
   name        String
   slug        String
-  code        String        // e.g. CARD, ORTHO
-  description String?
-  icon        String?       // Lucide icon name
+  code        String
+  description String?       @db.Text
+  icon        String?
   doctors     Doctor[]
   appointments Appointment[]
   createdAt   DateTime      @default(now())
@@ -95,20 +94,20 @@ model Doctor {
   department          Department       @relation(fields: [departmentId], references: [id], onDelete: Restrict)
   name                String
   photoUrl            String?
-  qualification       String           // e.g. MBBS, MD (Cardiology)
-  specialization      String           // e.g. Interventional Cardiologist
+  qualification       String
+  specialization      String
   experienceYears     Int              @default(5)
   consultationFee     Float            @default(500)
-  languages           String           // e.g. "English, Hindi, Telugu"
-  about               String
-  workingDays         String           // e.g. "Mon,Tue,Wed,Thu,Fri,Sat"
+  languages           String
+  about               String           @db.Text
+  workingDays         String
   workingHoursStart   String           @default("09:00")
   workingHoursEnd     String           @default("17:00")
   slotDurationMinutes Int              @default(30)
   breakStart          String?          @default("13:00")
   breakEnd            String?          @default("14:00")
   isActive            Boolean          @default(true)
-  status              String           @default("ACTIVE") // PENDING, APPROVED, ACTIVE, REJECTED, SUSPENDED
+  status              String           @default("ACTIVE")
   schedules           DoctorSchedule[]
   leaves              DoctorLeave[]
   appointments        Appointment[]
@@ -123,9 +122,9 @@ model DoctorSchedule {
   id                  String   @id @default(uuid())
   doctorId            String
   doctor              Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
-  dayOfWeek           Int      // 0 = Sunday, 1 = Monday, ... 6 = Saturday
-  startTime           String   // "09:00"
-  endTime             String   // "17:00"
+  dayOfWeek           Int
+  startTime           String
+  endTime             String
   slotDurationMinutes Int      @default(30)
   isAvailable         Boolean  @default(true)
   createdAt           DateTime @default(now())
@@ -150,10 +149,10 @@ model Patient {
   fullName         String
   mobileNumber     String
   email            String
-  dateOfBirth      String?         // YYYY-MM-DD
-  gender           String?         // Male, Female, Other
-  address          String?
-  bloodGroup       String?         // A+, B+, O+, AB+, etc.
+  dateOfBirth      String?
+  gender           String?
+  address          String?         @db.Text
+  bloodGroup       String?
   emergencyContact String?
   appointments     Appointment[]
   medicalRecords   MedicalRecord[]
@@ -166,7 +165,7 @@ model Patient {
 
 model Appointment {
   id                 String           @id @default(uuid())
-  appointmentNumber  String           @unique // e.g. APT-2026-0001
+  appointmentNumber  String           @unique
   hospitalId         String
   hospital           Hospital         @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
   doctorId           String
@@ -175,16 +174,15 @@ model Appointment {
   patient            Patient          @relation(fields: [patientId], references: [id], onDelete: Restrict)
   departmentId       String
   department         Department       @relation(fields: [departmentId], references: [id], onDelete: Restrict)
-  appointmentDate    String           // YYYY-MM-DD
-  timeSlot           String           // e.g. "10:30 AM" or "10:30"
-  tokenNumber        Int              // e.g. 4 (4th token for that doctor on that date)
-  status             String           @default("PENDING_PAYMENT") 
-  // PENDING_PAYMENT, CONFIRMED, WAITING, IN_CONSULTATION, COMPLETED, CANCELLED, NO_SHOW
+  appointmentDate    String
+  timeSlot           String
+  tokenNumber        Int
+  status             String           @default("PENDING_PAYMENT")
   consultationFee    Float
   platformFee        Float            @default(20)
   totalAmount        Float
   cancellationReason String?
-  notes              String?
+  notes              String?          @db.Text
   payment            Payment?
   digitalOp          DigitalOP?
   prescription       Prescription?
@@ -202,9 +200,9 @@ model AppointmentSlot {
   id            String       @id @default(uuid())
   doctorId      String
   doctor        Doctor       @relation(fields: [doctorId], references: [id], onDelete: Cascade)
-  date          String       // YYYY-MM-DD
-  startTime     String       // "10:30"
-  endTime       String       // "11:00"
+  date          String
+  startTime     String
+  endTime       String
   isBooked      Boolean      @default(false)
   isLocked      Boolean      @default(false)
   lockedUntil   DateTime?
@@ -225,9 +223,8 @@ model Payment {
   razorpaySignature  String?
   amount             Float
   currency           String       @default("INR")
-  status             String       @default("PENDING") 
-  // PENDING, SUCCESS, FAILED, REFUNDED, CANCELLED
-  paymentMethod      String?      // UPI, Card, Netbanking
+  status             String       @default("PENDING")
+  paymentMethod      String?
   failureReason      String?
   idempotencyKey     String       @unique
   createdAt          DateTime     @default(now())
@@ -236,13 +233,13 @@ model Payment {
 
 model DigitalOP {
   id            String      @id @default(uuid())
-  opNumber      String      @unique // e.g. OP-2026-0926-000123
-  secureToken   String      @unique // cryptographically secure random token for public/QR verification
+  opNumber      String      @unique
+  secureToken   String      @unique
   appointmentId String      @unique
   appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
   generatedAt   DateTime    @default(now())
   pdfUrl        String?
-  qrData        String      // URL or verification string
+  qrData        String
   isVerified    Boolean     @default(false)
   verifiedAt    DateTime?
   downloadCount Int         @default(0)
@@ -254,14 +251,14 @@ model Notification {
   id            String    @id @default(uuid())
   hospitalId    String
   hospital      Hospital  @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
-  recipientType String    // HOSPITAL_ADMIN, DOCTOR, PATIENT
-  recipientId   String?   // User id or Doctor id
+  recipientType String
+  recipientId   String?
   title         String
-  message       String
-  type          String    // NEW_APPOINTMENT, PAYMENT_SUCCESS, APPOINTMENT_CANCELLED, SYSTEM
+  message       String    @db.Text
+  type          String
   isRead        Boolean   @default(false)
   readAt        DateTime?
-  metadata      String?   // JSON string with extra details (OP number, amounts, etc.)
+  metadata      String?   @db.Text
   createdAt     DateTime  @default(now())
 }
 
@@ -271,10 +268,10 @@ model Prescription {
   appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
   doctorId      String
   doctor        Doctor      @relation(fields: [doctorId], references: [id], onDelete: Restrict)
-  diagnosis     String
-  medicines     String      // JSON array of { name, dosage, frequency, duration, instructions }
-  instructions  String?
-  followUpDate  String?     // YYYY-MM-DD
+  diagnosis     String      @db.Text
+  medicines     String      @db.Text
+  instructions  String?     @db.Text
+  followUpDate  String?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 }
@@ -285,9 +282,9 @@ model MedicalRecord {
   appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
   patientId     String
   patient       Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  symptoms      String?
-  vitals        String?     // JSON of { bp, pulse, temperature, weight, spo2 }
-  clinicalNotes String?
+  symptoms      String?     @db.Text
+  vitals        String?     @db.Text
+  clinicalNotes String?     @db.Text
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 }
@@ -300,7 +297,7 @@ model Review {
   hospital    Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
   patientName String
   rating      Int      @default(5)
-  comment     String?
+  comment     String?  @db.Text
   isApproved  Boolean  @default(true)
   createdAt   DateTime @default(now())
 }
@@ -309,10 +306,10 @@ model AuditLog {
   id        String   @id @default(uuid())
   userId    String?
   user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  action    String   // e.g. "LOGIN", "CANCEL_APPOINTMENT", "UPDATE_SCHEDULE"
-  entity    String   // "Appointment", "Doctor", "Payment"
+  action    String
+  entity    String
   entityId  String?
-  details   String?  // JSON string
+  details   String?  @db.Text
   ipAddress String?
   userAgent String?
   createdAt DateTime @default(now())
