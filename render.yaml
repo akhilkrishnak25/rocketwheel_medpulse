@@ -42,8 +42,9 @@ services:
   # ==============================================================
   # 2. Frontend Application (React 18 + Vite + Tailwind SPA)
   # ==============================================================
-  - type: static_site
+  - type: web
     name: medipulse-frontend
+    runtime: static
     region: oregon
     plan: free
     rootDir: frontend
