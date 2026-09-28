@@ -7,6 +7,14 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Starting database seed...');
 
+  const existingUsers = await prisma.user.count();
+  const forceSeed = process.env.FORCE_SEED === 'true';
+
+  if (existingUsers > 0 && !forceSeed) {
+    console.log(`✅ Database already contains ${existingUsers} users. Skipping seed to preserve production records.`);
+    return;
+  }
+
   // Clear existing data in reverse order of foreign key dependencies
   await prisma.auditLog.deleteMany();
   await prisma.accountToken.deleteMany();

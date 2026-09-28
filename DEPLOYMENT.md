@@ -2,6 +2,38 @@
 
 This guide provides end-to-end instructions for deploying the **Multi-Hospital Doctor Appointment Booking Platform** into production environments.
 
+> **Current deployment contract:** the active Prisma schema must be PostgreSQL, `backend/.env.production` must be created from `backend/.env.production.example`, and `PAYMENT_MODE=disabled` must remain set until Razorpay is implemented. Do not use the old demo secrets shown elsewhere in this document.
+
+## Verified Deployment Commands
+
+From the repository root:
+
+```bash
+cp backend/.env.production.example backend/.env.production
+# Edit backend/.env.production and replace every placeholder.
+docker compose config
+docker compose up -d --build
+docker compose exec backend npx prisma db push
+docker compose exec backend npm run seed
+docker compose ps
+curl -i http://127.0.0.1:5000/api/health
+```
+
+The service commands are:
+
+```bash
+# Local build
+npm run build
+
+# Backend production process without Docker
+npm run start:backend
+
+# Full Docker deployment
+npm run docker:up
+```
+
+For a fresh checkout, confirm `backend/prisma/schema.prisma` begins with `provider = "postgresql"` before building. The frontend is served by Nginx on port 80 and proxies `/api` to the backend container.
+
 ---
 
 ## 1. System Architecture Overview

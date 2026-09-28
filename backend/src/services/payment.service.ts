@@ -15,6 +15,14 @@ export class PaymentService {
    */
   static async createOrder(params: CreateOrderParams) {
     const { appointmentId, amount, currency = 'INR', receipt } = params;
+    if (ENV.PAYMENT_MODE === 'disabled') {
+      throw new Error('Online payments are temporarily unavailable');
+    }
+
+    if (ENV.PAYMENT_MODE === 'razorpay') {
+      throw new Error('Razorpay integration is not configured yet');
+    }
+
     const amountInPaise = Math.round(amount * 100);
 
     // If using real Razorpay API with actual credentials or in dev/sandbox mode:
@@ -43,6 +51,7 @@ export class PaymentService {
     signature: string;
   }): boolean {
     const { orderId, paymentId, signature } = params;
+    if (ENV.PAYMENT_MODE === 'disabled') return false;
 
     // Calculate expected HMAC
     const expectedSignature = crypto
@@ -50,26 +59,26 @@ export class PaymentService {
       .update(`${orderId}|${paymentId}`)
       .digest('hex');
 
-    // Safe comparison or check if test signature matches
-    const isExactMatch =
-      expectedSignature === signature ||
-      signature === `test_sig_${orderId}` ||
-      signature === `sig_${paymentId}` ||
-      signature.startsWith('simulated_sig_');
+    if (ENV.PAYMENT_MODE === 'demo') {
+      return signature.startsWith('simulated_sig_') || signature.startsWith('test_sig_') || signature.startsWith('sig_');
+    }
 
-    return isExactMatch;
+    if (expectedSignature.length !== signature.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(signature));
   }
 
   /**
    * Verifies incoming webhook signature from Razorpay
    */
   static verifyWebhookSignature(bodyString: string, signature: string): boolean {
+    if (ENV.PAYMENT_MODE !== 'razorpay' || !ENV.RAZORPAY_WEBHOOK_SECRET) return false;
     const expected = crypto
       .createHmac('sha256', ENV.RAZORPAY_WEBHOOK_SECRET)
       .update(bodyString)
       .digest('hex');
 
-    return expected === signature;
+    if (!signature || expected.length !== signature.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
   }
 
   /**

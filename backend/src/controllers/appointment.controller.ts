@@ -2,10 +2,15 @@ import { Request, Response } from 'express';
 import { AppointmentService } from '../services/appointment.service';
 import { successResponse, errorResponse } from '../utils/response';
 import { createAppointmentSchema, verifyPaymentSchema } from '../validators/schemas';
+import { ENV } from '../config/env';
 
 export class AppointmentController {
   static async createAppointment(req: Request, res: Response) {
     try {
+      if (ENV.PAYMENT_MODE === 'disabled') {
+        return errorResponse(res, 'Online payments are not configured yet', 503);
+      }
+
       const validated = createAppointmentSchema.parse(req.body);
       const result = await AppointmentService.createPendingAppointment(validated);
 

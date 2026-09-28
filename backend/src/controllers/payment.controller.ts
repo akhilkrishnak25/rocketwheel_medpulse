@@ -25,18 +25,17 @@ export class PaymentController {
   static async handleWebhook(req: Request, res: Response) {
     try {
       const signature = req.headers['x-razorpay-signature'] as string;
-      const rawBody = JSON.stringify(req.body);
-
-      // Verify webhook signature if configured
-      if (signature) {
-        const isValid = PaymentService.verifyWebhookSignature(rawBody, signature);
-        if (!isValid) {
-          console.warn('⚠️ Razorpay webhook signature verification failed');
-          return errorResponse(res, 'Invalid webhook signature', 400);
-        }
+      if (!signature || !Buffer.isBuffer(req.body)) {
+        return errorResponse(res, 'Invalid webhook request', 400);
       }
 
-      const result = await PaymentService.handleWebhookEvent(req.body);
+      const rawBody = req.body.toString('utf8');
+      if (!PaymentService.verifyWebhookSignature(rawBody, signature)) {
+        console.warn('Razorpay webhook signature verification failed');
+        return errorResponse(res, 'Invalid webhook signature', 400);
+      }
+
+      const result = await PaymentService.handleWebhookEvent(JSON.parse(rawBody));
       return res.status(200).json({ status: 'ok', result });
     } catch (error: any) {
       console.error('Webhook error:', error);

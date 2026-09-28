@@ -1,16 +1,10 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
     container_name: medipulse-postgres
     restart: unless-stopped
-    environment:
-      POSTGRES_USER: medipulse_admin
-      POSTGRES_PASSWORD: medipulse_secure_password_2026
-      POSTGRES_DB: medipulse_db
-    ports:
-      - '5432:5432'
+    env_file:
+      - ./backend/.env.production
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -23,8 +17,6 @@ services:
     image: redis:7-alpine
     container_name: medipulse-redis
     restart: unless-stopped
-    ports:
-      - '6379:6379'
     volumes:
       - redis_data:/data
 
@@ -37,20 +29,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    environment:
-      PORT: 5000
-      NODE_ENV: production
-      DATABASE_URL: postgresql://medipulse_admin:medipulse_secure_password_2026@postgres:5432/medipulse_db?schema=public
-      JWT_SECRET: medipulse_production_jwt_secret_key_2026_super_secure
-      JWT_REFRESH_SECRET: medipulse_production_jwt_refresh_secret_key_2026
-      RAZORPAY_KEY_ID: rzp_test_medipulse_demo_key
-      RAZORPAY_KEY_SECRET: rzp_test_medipulse_secret_sample
-      RAZORPAY_WEBHOOK_SECRET: sample_webhook_secret_medipulse_2026
-      CLIENT_URL: http://localhost:80
-      BASE_URL: http://localhost:5000
-      PLATFORM_FEE: 20
+    env_file:
+      - ./backend/.env.production
     ports:
-      - '5000:5000'
+      - '127.0.0.1:5000:5000'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:5000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   frontend:
     build:
@@ -59,7 +46,8 @@ services:
     container_name: medipulse-frontend
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - '80:80'
 
