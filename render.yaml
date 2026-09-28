@@ -8,7 +8,7 @@ services:
     region: oregon
     plan: free
     rootDir: backend
-    buildCommand: cp prisma/schema.postgresql.prisma prisma/schema.prisma && npm ci && npx prisma generate && npm run build
+    buildCommand: cp prisma/schema.postgresql.prisma prisma/schema.prisma && npm ci --include=dev && npx prisma generate && npm run build
     startCommand: npx prisma db push && npm run seed && node dist/server.js
     healthCheckPath: /api/health
     envVars:

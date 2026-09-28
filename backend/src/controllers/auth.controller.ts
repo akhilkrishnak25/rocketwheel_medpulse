@@ -143,7 +143,8 @@ export class AuthController {
       let resetLink: string | undefined;
 
       if (user) {
-        resetToken = crypto.randomBytes(32).toString('hex');
+        const token = crypto.randomBytes(32).toString('hex');
+        resetToken = token;
 
         // Invalidate older unused reset tokens
         await prisma.accountToken.deleteMany({
@@ -153,14 +154,14 @@ export class AuthController {
         // Store new reset token (valid for 1 hour)
         await prisma.accountToken.create({
           data: {
-            token: resetToken,
+            token,
             email,
             type: 'PASSWORD_RESET',
             expiresAt: new Date(Date.now() + 60 * 60 * 1000),
           },
         });
 
-        resetLink = `/staff/reset-password?token=${resetToken}`;
+        resetLink = `/staff/reset-password?token=${token}`;
 
         await prisma.auditLog.create({
           data: {
