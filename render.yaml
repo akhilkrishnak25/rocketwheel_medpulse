@@ -17,9 +17,7 @@ services:
       - key: PORT
         value: 5000
       - key: DATABASE_URL
-        fromDatabase:
-          name: medipulse-db
-          property: connectionString
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
@@ -59,12 +57,4 @@ services:
       - key: VITE_API_URL
         value: /api
 
-databases:
-  # ==============================================================
-  # 3. Managed PostgreSQL Database
-  # ==============================================================
-  - name: medipulse-db
-    databaseName: medipulse_db
-    user: medipulse_admin
-    region: oregon
-    plan: free
+
