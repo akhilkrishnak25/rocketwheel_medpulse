@@ -17,7 +17,7 @@ services:
       - key: PORT
         value: 5000
       - key: DATABASE_URL
-        sync: false
+        value: postgresql://rocketwheel_op_user:0YYh9BNKP8iDBxoMbGVXfPqCN8bnNJZQ@dpg-dasjahojo6nc73c1n0cg-a.oregon-postgres.render.com/rocketwheel_op
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
