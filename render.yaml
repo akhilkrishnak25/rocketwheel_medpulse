@@ -27,9 +27,9 @@ services:
       - key: JWT_REFRESH_EXPIRES_IN
         value: 7d
       - key: CLIENT_URL
-        value: https://medipulse-frontend.onrender.com
+        value: https://medipulse-frontend-cflt.onrender.com
       - key: BASE_URL
-        value: https://medipulse-backend.onrender.com
+        value: https://medipulse-backend-veca.onrender.com
       - key: PLATFORM_FEE
         value: 20
       - key: PAYMENT_MODE
@@ -49,12 +49,12 @@ services:
     routes:
       - type: rewrite
         source: /api/*
-        destination: https://medipulse-backend.onrender.com/api/*
+        destination: https://medipulse-backend-veca.onrender.com/api/*
       - type: rewrite
         source: /*
         destination: /index.html
     envVars:
       - key: VITE_API_URL
-        value: /api
+        value: https://medipulse-backend-veca.onrender.com/api
 
 

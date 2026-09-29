@@ -20,7 +20,18 @@ app.use(
 // CORS configuration
 app.use(
   cors({
-    origin: [ENV.CLIENT_URL, 'http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: (requestOrigin, callback) => {
+      if (!requestOrigin) return callback(null, true);
+      if (
+        requestOrigin === ENV.CLIENT_URL ||
+        requestOrigin.endsWith('.onrender.com') ||
+        requestOrigin.includes('localhost') ||
+        requestOrigin.includes('127.0.0.1')
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-razorpay-signature'],
