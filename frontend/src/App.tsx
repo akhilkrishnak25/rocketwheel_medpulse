@@ -18,10 +18,13 @@ import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { ActivateAccountPage } from './pages/ActivateAccountPage';
 import { HospitalRegistrationPage } from './pages/HospitalRegistrationPage';
-
 import { HospitalAdminDashboardPage } from './pages/HospitalAdminDashboardPage';
 import { DoctorDashboardPage } from './pages/DoctorDashboardPage';
 import { SuperAdminDashboardPage } from './pages/SuperAdminDashboardPage';
+import { SupportStaffDashboardPage } from './pages/SupportStaffDashboardPage';
+import { LabTechnicianDashboardPage } from './pages/LabTechnicianDashboardPage';
+import { PharmacyDashboardPage } from './pages/PharmacyDashboardPage';
+import { StaffRegistrationPage } from './pages/StaffRegistrationPage';
 import { Button } from './components/ui/Button';
 
 // 404 Not Found Component
@@ -62,11 +65,12 @@ export const App: React.FC = () => {
         <Route path="/staff/activate" element={<ActivateAccountPage />} />
         <Route path="/activate" element={<ActivateAccountPage />} />
         <Route path="/register-hospital" element={<HospitalRegistrationPage />} />
+        <Route path="/register-staff" element={<StaffRegistrationPage />} />
 
         <Route path="*" element={<NotFoundPage />} />
       </Route>
 
-      {/* Hospital Admin Portal */}
+      {/* Hospital Admin Portal (Hospital Admin & Sub-Admin) */}
       <Route path="/admin" element={<AdminLayout />}>
         <Route index element={<HospitalAdminDashboardPage />} />
       </Route>
@@ -75,6 +79,15 @@ export const App: React.FC = () => {
       <Route path="/doctor" element={<DoctorLayout />}>
         <Route index element={<DoctorDashboardPage />} />
       </Route>
+
+      {/* Support Staff Triage Queue Portal */}
+      <Route path="/staff/queue" element={<SupportStaffDashboardPage />} />
+
+      {/* Diagnostic Lab Portal */}
+      <Route path="/lab/queue" element={<LabTechnicianDashboardPage />} />
+
+      {/* Pharmacy Portal */}
+      <Route path="/pharmacy/queue" element={<PharmacyDashboardPage />} />
 
       {/* Super Admin Platform Oversight */}
       <Route path="/super-admin" element={<SuperAdminLayout />}>

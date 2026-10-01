@@ -35,10 +35,16 @@ export const StaffLoginPage: React.FC = () => {
       // Strict database-driven role routing
       if (user.role === 'SUPER_ADMIN') {
         navigate('/super-admin');
-      } else if (user.role === 'HOSPITAL_ADMIN') {
+      } else if (user.role === 'HOSPITAL_ADMIN' || user.role === 'HOSPITAL_SUB_ADMIN') {
         navigate('/admin');
       } else if (user.role === 'DOCTOR') {
         navigate('/doctor');
+      } else if (user.role === 'SUPPORT_STAFF') {
+        navigate('/staff/queue');
+      } else if (user.role === 'LAB_TECHNICIAN') {
+        navigate('/lab/queue');
+      } else if (user.role === 'PHARMACY_STAFF') {
+        navigate('/pharmacy/queue');
       } else {
         navigate('/');
       }
@@ -139,16 +145,26 @@ export const StaffLoginPage: React.FC = () => {
           </form>
 
           {/* New Hospital Partner Registration CTA */}
-          <div className="border-t border-slate-100 pt-5 text-center">
-            <p className="text-xs text-slate-500 mb-2">
+          <div className="border-t border-slate-100 pt-5 text-center space-y-2">
+            <p className="text-xs text-slate-500">
               Is your healthcare institution new to the MediPulse network?
             </p>
-            <Link
-              to="/register-hospital"
-              className="inline-flex items-center justify-center gap-1.5 text-xs font-bold text-royal-600 hover:text-royal-800 transition"
-            >
-              <Building2 className="w-3.5 h-3.5" /> Register / Onboard Hospital
-            </Link>
+            <div>
+              <Link
+                to="/register-hospital"
+                className="inline-flex items-center justify-center gap-1.5 text-xs font-bold text-royal-600 hover:text-royal-800 transition"
+              >
+                <Building2 className="w-3.5 h-3.5" /> Register / Onboard Hospital
+              </Link>
+            </div>
+            <div className="pt-2 border-t border-dashed border-slate-200">
+              <Link
+                to="/register-staff"
+                className="inline-flex items-center justify-center gap-1.5 text-xs font-bold text-pink-600 hover:text-pink-800 transition"
+              >
+                Doctor, Nurse, Lab, or Pharmacy? Register Here →
+              </Link>
+            </div>
           </div>
         </Card>
 

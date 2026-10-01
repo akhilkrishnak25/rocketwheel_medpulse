@@ -1,4 +1,6 @@
 import bcrypt from 'bcryptjs';
+import ExcelJS from 'exceljs';
+import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuditService } from '../utils/audit';
 
@@ -506,4 +508,354 @@ export class SuperAdminService {
       },
     });
   }
+
+  // -------------------------------------------------------------
+  // LAB ACCREDITATION & APPROVAL MANAGEMENT
+  // -------------------------------------------------------------
+  static async getAllLabs() {
+    return prisma.lab.findMany({
+      include: {
+        hospital: { select: { id: true, name: true, code: true } },
+        technicians: {
+          include: {
+            user: { select: { id: true, name: true, email: true, phone: true } },
+          },
+        },
+        _count: {
+          select: { testRequests: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  static async approveLab(labId: string, requestingUserId?: string) {
+    const lab = await prisma.lab.findUnique({
+      where: { id: labId },
+      include: { technicians: true },
+    });
+    if (!lab) throw new Error('Laboratory not found');
+
+    return prisma.$transaction(async (tx) => {
+      const updatedLab = await tx.lab.update({
+        where: { id: labId },
+        data: { status: 'APPROVED' },
+      });
+
+      // Activate all technicians linked to this lab
+      for (const tech of lab.technicians) {
+        await tx.labTechnician.update({
+          where: { id: tech.id },
+          data: { status: 'ACTIVE' },
+        });
+
+        await tx.user.update({
+          where: { id: tech.userId },
+          data: { status: 'ACTIVE', isActive: true },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: requestingUserId,
+          action: 'APPROVE_LABORATORY',
+          entity: 'Lab',
+          entityId: labId,
+          details: JSON.stringify({ name: lab.name, type: lab.type }),
+        },
+      });
+
+      return updatedLab;
+    });
+  }
+
+  static async rejectLab(labId: string, requestingUserId?: string) {
+    const lab = await prisma.lab.findUnique({ where: { id: labId } });
+    if (!lab) throw new Error('Laboratory not found');
+
+    return prisma.$transaction(async (tx) => {
+      const updatedLab = await tx.lab.update({
+        where: { id: labId },
+        data: { status: 'REJECTED' },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          userId: requestingUserId,
+          action: 'REJECT_LABORATORY',
+          entity: 'Lab',
+          entityId: labId,
+          details: JSON.stringify({ name: lab.name }),
+        },
+      });
+
+      return updatedLab;
+    });
+  }
+
+  // -------------------------------------------------------------
+  // OP / BOOKING ANALYTICS (REAL DATABASE CALCULATIONS)
+  // -------------------------------------------------------------
+  static async getOpAnalytics(filters: {
+    startDate?: string;
+    endDate?: string;
+    date?: string;
+    hospitalId?: string;
+    doctorId?: string;
+    status?: string;
+    bookingType?: string;
+  }) {
+    const where: any = {};
+
+    if (filters.date) {
+      where.appointmentDate = filters.date;
+    } else if (filters.startDate || filters.endDate) {
+      where.appointmentDate = {};
+      if (filters.startDate) where.appointmentDate.gte = filters.startDate;
+      if (filters.endDate) where.appointmentDate.lte = filters.endDate;
+    }
+
+    if (filters.hospitalId) where.hospitalId = filters.hospitalId;
+    if (filters.doctorId) where.doctorId = filters.doctorId;
+    if (filters.status) where.status = filters.status;
+    if (filters.bookingType) where.bookingType = filters.bookingType;
+
+    const appointments = await prisma.appointment.findMany({
+      where,
+      select: {
+        id: true,
+        appointmentNumber: true,
+        hospitalId: true,
+        doctorId: true,
+        departmentId: true,
+        appointmentDate: true,
+        status: true,
+        bookingType: true,
+        totalAmount: true,
+        consultationFee: true,
+        hospital: { select: { id: true, name: true, code: true } },
+        doctor: { select: { id: true, name: true, specialization: true } },
+      },
+      orderBy: { appointmentDate: 'desc' },
+    });
+
+    const totalOpCount = appointments.length;
+    let onlineBookingCount = 0;
+    let offlineBookingCount = 0;
+    let completedCount = 0;
+    let cancelledCount = 0;
+    let totalRevenue = 0;
+
+    // Hierarchical analysis: Hospital -> Doctor breakdown
+    const hospitalMap = new Map<
+      string,
+      {
+        hospitalId: string;
+        hospitalName: string;
+        hospitalCode: string;
+        totalOp: number;
+        onlineOp: number;
+        offlineOp: number;
+        completedOp: number;
+        cancelledOp: number;
+        doctors: Map<
+          string,
+          {
+            doctorId: string;
+            doctorName: string;
+            specialization: string;
+            totalOp: number;
+            onlineOp: number;
+            offlineOp: number;
+            completedOp: number;
+            cancelledOp: number;
+          }
+        >;
+      }
+    >();
+
+    for (const apt of appointments) {
+      if (apt.bookingType === 'OFFLINE') {
+        offlineBookingCount++;
+      } else {
+        onlineBookingCount++;
+      }
+
+      if (apt.status === 'COMPLETED') {
+        completedCount++;
+      } else if (apt.status === 'CANCELLED') {
+        cancelledCount++;
+      }
+
+      totalRevenue += apt.totalAmount;
+
+      // Group by hospital
+      const hId = apt.hospitalId;
+      if (!hospitalMap.has(hId)) {
+        hospitalMap.set(hId, {
+          hospitalId: hId,
+          hospitalName: apt.hospital?.name || 'Unknown Hospital',
+          hospitalCode: apt.hospital?.code || 'HOSP',
+          totalOp: 0,
+          onlineOp: 0,
+          offlineOp: 0,
+          completedOp: 0,
+          cancelledOp: 0,
+          doctors: new Map(),
+        });
+      }
+
+      const hStats = hospitalMap.get(hId)!;
+      hStats.totalOp++;
+      if (apt.bookingType === 'OFFLINE') hStats.offlineOp++;
+      else hStats.onlineOp++;
+      if (apt.status === 'COMPLETED') hStats.completedOp++;
+      else if (apt.status === 'CANCELLED') hStats.cancelledOp++;
+
+      // Group by doctor
+      const dId = apt.doctorId;
+      if (!hStats.doctors.has(dId)) {
+        hStats.doctors.set(dId, {
+          doctorId: dId,
+          doctorName: apt.doctor?.name || 'Unknown Doctor',
+          specialization: apt.doctor?.specialization || 'General',
+          totalOp: 0,
+          onlineOp: 0,
+          offlineOp: 0,
+          completedOp: 0,
+          cancelledOp: 0,
+        });
+      }
+
+      const dStats = hStats.doctors.get(dId)!;
+      dStats.totalOp++;
+      if (apt.bookingType === 'OFFLINE') dStats.offlineOp++;
+      else dStats.onlineOp++;
+      if (apt.status === 'COMPLETED') dStats.completedOp++;
+      else if (apt.status === 'CANCELLED') dStats.cancelledOp++;
+    }
+
+    const hierarchical = Array.from(hospitalMap.values()).map((h) => ({
+      ...h,
+      doctors: Array.from(h.doctors.values()),
+    }));
+
+    return {
+      summary: {
+        totalOpCount,
+        onlineBookingCount,
+        offlineBookingCount,
+        completedCount,
+        cancelledCount,
+        totalRevenue,
+      },
+      hierarchical,
+    };
+  }
+
+  // -------------------------------------------------------------
+  // EXPORT TO EXCEL
+  // -------------------------------------------------------------
+  static async exportBookingsToExcel(
+    filters: {
+      startDate?: string;
+      endDate?: string;
+      date?: string;
+      hospitalId?: string;
+      doctorId?: string;
+      status?: string;
+      bookingType?: string;
+    },
+    res: Response
+  ) {
+    const where: any = {};
+
+    if (filters.date) {
+      where.appointmentDate = filters.date;
+    } else if (filters.startDate || filters.endDate) {
+      where.appointmentDate = {};
+      if (filters.startDate) where.appointmentDate.gte = filters.startDate;
+      if (filters.endDate) where.appointmentDate.lte = filters.endDate;
+    }
+
+    if (filters.hospitalId) where.hospitalId = filters.hospitalId;
+    if (filters.doctorId) where.doctorId = filters.doctorId;
+    if (filters.status) where.status = filters.status;
+    if (filters.bookingType) where.bookingType = filters.bookingType;
+
+    const appointments = await prisma.appointment.findMany({
+      where,
+      include: {
+        hospital: { select: { name: true, code: true } },
+        doctor: { select: { name: true, specialization: true } },
+        department: { select: { name: true } },
+        patient: { select: { id: true, patientIdNumber: true, fullName: true, mobileNumber: true } },
+        payment: { select: { status: true, paymentMethod: true } },
+      },
+      orderBy: { appointmentDate: 'desc' },
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'RocketWheel MedPulse Platform';
+    workbook.created = new Date();
+
+    const worksheet = workbook.addWorksheet('OP Bookings Report');
+
+    worksheet.columns = [
+      { header: 'Patient ID', key: 'patientId', width: 18 },
+      { header: 'Patient Name', key: 'patientName', width: 22 },
+      { header: 'Patient Mobile', key: 'patientMobile', width: 16 },
+      { header: 'Hospital', key: 'hospital', width: 25 },
+      { header: 'Doctor', key: 'doctor', width: 22 },
+      { header: 'Department', key: 'department', width: 20 },
+      { header: 'Booking ID', key: 'bookingId', width: 22 },
+      { header: 'Booking Date', key: 'bookingDate', width: 14 },
+      { header: 'Booking Time', key: 'bookingTime', width: 16 },
+      { header: 'Booking Type', key: 'bookingType', width: 15 },
+      { header: 'Booking Status', key: 'bookingStatus', width: 16 },
+      { header: 'Payment Status', key: 'paymentStatus', width: 16 },
+      { header: 'Consultation Fee (INR)', key: 'fee', width: 22 },
+    ];
+
+    // Style the header row
+    const headerRow = worksheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1E40AF' }, // Navy blue
+    };
+    headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    for (const apt of appointments) {
+      worksheet.addRow({
+        patientId: apt.patient.patientIdNumber || apt.patient.id.substring(0, 8),
+        patientName: apt.patient.fullName,
+        patientMobile: apt.patient.mobileNumber,
+        hospital: apt.hospital.name,
+        doctor: apt.doctor.name,
+        department: apt.department.name,
+        bookingId: apt.appointmentNumber,
+        bookingDate: apt.appointmentDate,
+        bookingTime: apt.timeSlot,
+        bookingType: apt.bookingType,
+        bookingStatus: apt.status,
+        paymentStatus: apt.payment?.status || (apt.bookingType === 'OFFLINE' ? 'PAID_COUNTER' : 'PENDING'),
+        fee: apt.consultationFee,
+      });
+    }
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="MedPulse_OP_Bookings_${new Date().toISOString().split('T')[0]}.xlsx"`
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+  }
 }
+

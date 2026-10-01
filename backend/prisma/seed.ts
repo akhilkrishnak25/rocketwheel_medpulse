@@ -19,8 +19,16 @@ async function main() {
   await prisma.auditLog.deleteMany();
   await prisma.accountToken.deleteMany();
   await prisma.review.deleteMany();
+  await prisma.labReport.deleteMany();
+  await prisma.labTestRequest.deleteMany();
+  await prisma.labTechnician.deleteMany();
+  await prisma.lab.deleteMany();
+  await prisma.pharmacyStaff.deleteMany();
+  await prisma.pharmacy.deleteMany();
+  await prisma.prescriptionTemplate.deleteMany();
   await prisma.medicalRecord.deleteMany();
   await prisma.prescription.deleteMany();
+  await prisma.patientVital.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.digitalOP.deleteMany();
   await prisma.payment.deleteMany();
@@ -31,6 +39,8 @@ async function main() {
   await prisma.doctorLeave.deleteMany();
   await prisma.doctorSchedule.deleteMany();
   await prisma.doctor.deleteMany();
+  await prisma.supportStaff.deleteMany();
+  await prisma.hospitalSubAdmin.deleteMany();
   await prisma.department.deleteMany();
   await prisma.hospitalAdmin.deleteMany();
   await prisma.hospital.deleteMany();

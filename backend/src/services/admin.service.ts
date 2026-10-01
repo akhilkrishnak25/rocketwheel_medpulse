@@ -192,18 +192,13 @@ export class AdminService {
     return prisma.$transaction(async (tx) => {
       let userId: string | null = null;
 
-      // Create linked user login for doctor if credentials provided
-      if (doctorData.userAccount?.email && doctorData.userAccount?.password) {
-        const hashedPassword = await bcrypt.hash(doctorData.userAccount.password, 10);
-        const user = await tx.user.create({
-          data: {
-            name: doctorData.name,
-            email: doctorData.userAccount.email.toLowerCase(),
-            passwordHash: hashedPassword,
-            role: 'DOCTOR',
-          },
-        });
-        userId = user.id;
+      // Associate with existing doctor account if doctorEmail is provided
+      const doctorEmail = (doctorData.doctorEmail || doctorData.userAccount?.email)?.toLowerCase();
+      if (doctorEmail) {
+        const existingUser = await tx.user.findUnique({ where: { email: doctorEmail } });
+        if (existingUser && existingUser.role === 'DOCTOR') {
+          userId = existingUser.id;
+        }
       }
 
       const doctor = await tx.doctor.create({
@@ -775,4 +770,285 @@ export class AdminService {
 
     return updated;
   }
+
+  // -------------------------------------------------------------
+  // DOCTOR ASSOCIATION & APPROVAL
+  // -------------------------------------------------------------
+  static async getPendingDoctors(hospitalId: string) {
+    return prisma.doctor.findMany({
+      where: { hospitalId, status: 'PENDING' },
+      include: { department: true, user: { select: { email: true, phone: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  // -------------------------------------------------------------
+  // HOSPITAL PATIENT RECORDS MANAGEMENT
+  // -------------------------------------------------------------
+  static async getHospitalPatients(
+    hospitalId: string,
+    query: { search?: string; page?: number; limit?: number }
+  ) {
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    const where: any = {
+      OR: [
+        { hospitalId },
+        { appointments: { some: { hospitalId } } },
+      ],
+    };
+
+    if (query.search) {
+      where.AND = [
+        {
+          OR: [
+            { fullName: { contains: query.search } },
+            { mobileNumber: { contains: query.search } },
+            { patientIdNumber: { contains: query.search } },
+            { email: { contains: query.search } },
+          ],
+        },
+      ];
+    }
+
+    const [patients, total] = await Promise.all([
+      prisma.patient.findMany({
+        where,
+        include: {
+          _count: {
+            select: {
+              appointments: { where: { hospitalId } },
+              prescriptions: { where: { hospitalId } },
+              labRequests: { where: { hospitalId } },
+              vitals: { where: { hospitalId } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.patient.count({ where }),
+    ]);
+
+    return {
+      patients,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  static async getPatientDetails(hospitalId: string, patientId: string) {
+    const patient = await prisma.patient.findFirst({
+      where: {
+        id: patientId,
+        OR: [
+          { hospitalId },
+          { appointments: { some: { hospitalId } } },
+        ],
+      },
+      include: {
+        appointments: {
+          where: { hospitalId },
+          include: {
+            doctor: { select: { id: true, name: true, specialization: true } },
+            department: { select: { name: true } },
+            digitalOp: true,
+            payment: true,
+          },
+          orderBy: { appointmentDate: 'desc' },
+        },
+        vitals: {
+          where: { hospitalId },
+          orderBy: { createdAt: 'desc' },
+        },
+        prescriptions: {
+          where: { hospitalId },
+          include: {
+            doctor: { select: { id: true, name: true } },
+            pharmacy: { select: { name: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+        labRequests: {
+          where: { hospitalId },
+          include: {
+            doctor: { select: { id: true, name: true } },
+            lab: { select: { name: true } },
+            report: true,
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    if (!patient) throw new Error('Patient record not found at this hospital');
+    return patient;
+  }
+
+  // -------------------------------------------------------------
+  // SUPPORT STAFF APPROVAL & MANAGEMENT
+  // -------------------------------------------------------------
+  static async getSupportStaff(hospitalId: string) {
+    return prisma.supportStaff.findMany({
+      where: { hospitalId },
+      include: {
+        user: { select: { id: true, name: true, email: true, phone: true, status: true, lastLoginAt: true } },
+        department: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  static async updateSupportStaffStatus(hospitalId: string, staffId: string, status: 'APPROVED' | 'REJECTED' | 'ACTIVE', requestingUserId?: string) {
+    const staff = await prisma.supportStaff.findFirst({
+      where: { id: staffId, hospitalId },
+      include: { user: true },
+    });
+    if (!staff) throw new Error('Support staff member not found at this hospital');
+
+    const isApproved = status === 'APPROVED' || status === 'ACTIVE';
+
+    return prisma.$transaction(async (tx) => {
+      const updated = await tx.supportStaff.update({
+        where: { id: staffId },
+        data: {
+          status,
+          approvedBy: isApproved ? requestingUserId : null,
+          approvedAt: isApproved ? new Date() : null,
+        },
+      });
+
+      await tx.user.update({
+        where: { id: staff.userId },
+        data: {
+          status: isApproved ? 'ACTIVE' : 'REJECTED',
+          isActive: isApproved,
+        },
+      });
+
+      return updated;
+    });
+  }
+
+  // -------------------------------------------------------------
+  // HOSPITAL SUB-ADMIN MANAGEMENT
+  // -------------------------------------------------------------
+  static async createSubAdmin(
+    hospitalId: string,
+    data: { name: string; email: string; password: string; phone?: string | null; roleTitle?: string; permissions: string[] },
+    requestingUserId?: string
+  ) {
+    const existing = await prisma.user.findUnique({ where: { email: data.email.toLowerCase() } });
+    if (existing) throw new Error('User with this email already exists');
+
+    const passwordHash = await bcrypt.hash(data.password, 10);
+
+    return prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          name: data.name,
+          email: data.email.toLowerCase(),
+          phone: data.phone,
+          passwordHash,
+          role: 'HOSPITAL_SUB_ADMIN',
+          status: 'ACTIVE',
+          isActive: true,
+        },
+      });
+
+      const subAdmin = await tx.hospitalSubAdmin.create({
+        data: {
+          userId: user.id,
+          hospitalId,
+          roleTitle: data.roleTitle || 'Hospital Sub-Administrator',
+          permissions: JSON.stringify(data.permissions || []),
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          userId: requestingUserId,
+          action: 'CREATE_HOSPITAL_SUB_ADMIN',
+          entity: 'HospitalSubAdmin',
+          entityId: subAdmin.id,
+          details: JSON.stringify({ name: data.name, email: data.email, permissions: data.permissions }),
+        },
+      });
+
+      return { user, subAdmin };
+    });
+  }
+
+  static async getSubAdmins(hospitalId: string) {
+    const subAdmins = await prisma.hospitalSubAdmin.findMany({
+      where: { hospitalId },
+      include: {
+        user: { select: { id: true, name: true, email: true, phone: true, status: true, lastLoginAt: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return subAdmins.map((sa) => ({
+      ...sa,
+      permissionsList: JSON.parse(sa.permissions || '[]'),
+    }));
+  }
+
+  static async updateSubAdminPermissions(
+    hospitalId: string,
+    subAdminId: string,
+    data: { permissions: string[]; roleTitle?: string },
+    requestingUserId?: string
+  ) {
+    const subAdmin = await prisma.hospitalSubAdmin.findFirst({ where: { id: subAdminId, hospitalId } });
+    if (!subAdmin) throw new Error('Sub-admin not found');
+
+    const updated = await prisma.hospitalSubAdmin.update({
+      where: { id: subAdminId },
+      data: {
+        permissions: JSON.stringify(data.permissions),
+        roleTitle: data.roleTitle || subAdmin.roleTitle,
+      },
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'UPDATE_SUB_ADMIN_PERMISSIONS',
+      entity: 'HospitalSubAdmin',
+      entityId: subAdminId,
+      details: data,
+    });
+
+    return {
+      ...updated,
+      permissionsList: data.permissions,
+    };
+  }
+
+  static async deleteSubAdmin(hospitalId: string, subAdminId: string, requestingUserId?: string) {
+    const subAdmin = await prisma.hospitalSubAdmin.findFirst({ where: { id: subAdminId, hospitalId } });
+    if (!subAdmin) throw new Error('Sub-admin not found');
+
+    await prisma.$transaction([
+      prisma.hospitalSubAdmin.delete({ where: { id: subAdminId } }),
+      prisma.user.delete({ where: { id: subAdmin.userId } }),
+    ]);
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'DELETE_SUB_ADMIN',
+      entity: 'HospitalSubAdmin',
+      entityId: subAdminId,
+    });
+
+    return { success: true };
+  }
 }
+

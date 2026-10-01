@@ -17,6 +17,13 @@ import {
   CheckCircle2,
   Clock,
   Filter,
+  Download,
+  ChevronDown,
+  ChevronRight,
+  FlaskConical,
+  FileSpreadsheet,
+  Check,
+  X,
 } from 'lucide-react';
 import { superAdminApi } from '../api/superAdmin.api';
 import { Button } from '../components/ui/Button';
@@ -29,7 +36,21 @@ export const SuperAdminDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
   const toast = useToast();
 
-  const [activeTab, setActiveTab] = useState<'hospitals' | 'pending' | 'doctors' | 'appointments' | 'audit'>('hospitals');
+  const [activeTab, setActiveTab] = useState<'hospitals' | 'pending' | 'doctors' | 'appointments' | 'audit' | 'analytics' | 'labs'>('hospitals');
+
+  // Analytics Filter States
+  const [analyticsStartDate, setAnalyticsStartDate] = useState('');
+  const [analyticsEndDate, setAnalyticsEndDate] = useState('');
+  const [analyticsHospitalId, setAnalyticsHospitalId] = useState('');
+  const [analyticsDoctorId, setAnalyticsDoctorId] = useState('');
+  const [analyticsStatus, setAnalyticsStatus] = useState('');
+  const [analyticsBookingType, setAnalyticsBookingType] = useState('');
+  const [expandedHospitals, setExpandedHospitals] = useState<Record<string, boolean>>({});
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Lab approval & rejection states
+  const [rejectingLab, setRejectingLab] = useState<any | null>(null);
+  const [labRejectReason, setLabRejectReason] = useState('');
 
   // Modal states
   const [isAddHospitalOpen, setIsAddHospitalOpen] = useState(false);
@@ -105,6 +126,101 @@ export const SuperAdminDashboardPage: React.FC = () => {
     queryFn: () => superAdminApi.getAuditLogs(50),
     enabled: activeTab === 'audit',
   });
+
+  // OP & Booking Analytics Query
+  const { data: opAnalytics, isLoading: analyticsLoading } = useQuery({
+    queryKey: [
+      'super-admin-op-analytics',
+      analyticsStartDate,
+      analyticsEndDate,
+      analyticsHospitalId,
+      analyticsDoctorId,
+      analyticsStatus,
+      analyticsBookingType,
+    ],
+    queryFn: () =>
+      superAdminApi.getOpAnalytics({
+        startDate: analyticsStartDate || undefined,
+        endDate: analyticsEndDate || undefined,
+        hospitalId: analyticsHospitalId || undefined,
+        doctorId: analyticsDoctorId || undefined,
+        status: analyticsStatus || undefined,
+        bookingType: analyticsBookingType || undefined,
+      }),
+    enabled: activeTab === 'analytics',
+  });
+
+  // Independent Labs Query
+  const { data: pendingLabs, isLoading: pendingLabsLoading } = useQuery({
+    queryKey: ['super-admin-pending-labs'],
+    queryFn: () => superAdminApi.getPendingLabs(),
+    enabled: activeTab === 'labs',
+  });
+
+  // Lab Approval & Rejection Mutations
+  const approveLabMutation = useMutation({
+    mutationFn: (id: string) => superAdminApi.approveLab(id),
+    onSuccess: () => {
+      toast.success('Lab Accredited', 'Diagnostic laboratory accreditation approved successfully');
+      queryClient.invalidateQueries({ queryKey: ['super-admin-pending-labs'] });
+    },
+    onError: (err: any) => {
+      toast.error('Approval Error', err.message);
+    },
+  });
+
+  const rejectLabMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) => superAdminApi.rejectLab(id, reason),
+    onSuccess: () => {
+      toast.info('Lab Application Rejected', 'Diagnostic laboratory application has been rejected');
+      setRejectingLab(null);
+      setLabRejectReason('');
+      queryClient.invalidateQueries({ queryKey: ['super-admin-pending-labs'] });
+    },
+    onError: (err: any) => {
+      toast.error('Rejection Error', err.message);
+    },
+  });
+
+  const handleExportExcel = async () => {
+    setIsExporting(true);
+    try {
+      const token = localStorage.getItem('token');
+      const url = superAdminApi.getExportExcelUrl({
+        startDate: analyticsStartDate || undefined,
+        endDate: analyticsEndDate || undefined,
+        hospitalId: analyticsHospitalId || undefined,
+        doctorId: analyticsDoctorId || undefined,
+        status: analyticsStatus || undefined,
+        bookingType: analyticsBookingType || undefined,
+      });
+
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to download Excel report');
+      }
+
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `MedPulse_OP_Analytics_${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+      toast.success('Export Successful', 'OP Booking Analytics report exported to Excel');
+    } catch (err: any) {
+      toast.error('Export Error', err.message || 'Could not export Excel file');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // Approval & Status Mutations
   const approveHospitalMutation = useMutation({
@@ -315,6 +431,29 @@ export const SuperAdminDashboardPage: React.FC = () => {
           >
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
             Audit Logs
+          </button>
+          <button
+            onClick={() => setActiveTab('analytics')}
+            className={`px-3.5 py-2 rounded-lg transition-colors shrink-0 flex items-center gap-1.5 ${
+              activeTab === 'analytics' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5 text-royal-600" />
+            OP & Booking Analytics
+          </button>
+          <button
+            onClick={() => setActiveTab('labs')}
+            className={`px-3.5 py-2 rounded-lg transition-colors shrink-0 flex items-center gap-1.5 ${
+              activeTab === 'labs' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <FlaskConical className="w-3.5 h-3.5 text-purple-600" />
+            Labs Accreditation
+            {(pendingLabs || []).length > 0 && (
+              <span className="bg-purple-600 text-white text-[10px] font-extrabold px-1.5 py-0.2 rounded-full">
+                {(pendingLabs || []).length}
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -859,6 +998,428 @@ export const SuperAdminDashboardPage: React.FC = () => {
         </Card>
       )}
 
+      {/* TAB 5: REAL-TIME HIERARCHICAL OP & BOOKING ANALYTICS */}
+      {activeTab === 'analytics' && (
+        <div className="space-y-6">
+          {/* Controls Bar */}
+          <Card className="rounded-2xl border-slate-200 shadow-sm p-4 sm:p-5">
+            <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 flex-1">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
+                    Start Date
+                  </label>
+                  <input
+                    type="date"
+                    value={analyticsStartDate}
+                    onChange={(e) => setAnalyticsStartDate(e.target.value)}
+                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-royal-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
+                    End Date
+                  </label>
+                  <input
+                    type="date"
+                    value={analyticsEndDate}
+                    onChange={(e) => setAnalyticsEndDate(e.target.value)}
+                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-royal-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
+                    Hospital Filter
+                  </label>
+                  <select
+                    value={analyticsHospitalId}
+                    onChange={(e) => setAnalyticsHospitalId(e.target.value)}
+                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-royal-500"
+                  >
+                    <option value="">All Hospitals</option>
+                    {(hospitals || []).map((h: any) => (
+                      <option key={h.id} value={h.id}>
+                        {h.name} ({h.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
+                    Status
+                  </label>
+                  <select
+                    value={analyticsStatus}
+                    onChange={(e) => setAnalyticsStatus(e.target.value)}
+                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-royal-500"
+                  >
+                    <option value="">All Statuses</option>
+                    <option value="CONFIRMED">Confirmed / Booked</option>
+                    <option value="WAITING">Waiting (Triage Done)</option>
+                    <option value="IN_CONSULTATION">In Consultation</option>
+                    <option value="COMPLETED">Completed</option>
+                    <option value="CANCELLED">Cancelled</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
+                    Booking Channel
+                  </label>
+                  <select
+                    value={analyticsBookingType}
+                    onChange={(e) => setAnalyticsBookingType(e.target.value)}
+                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-royal-500"
+                  >
+                    <option value="">Online & Walk-in</option>
+                    <option value="ONLINE">Online Portal</option>
+                    <option value="OFFLINE">Offline Walk-in OP</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2 pt-2 lg:pt-5 shrink-0">
+                {(analyticsStartDate || analyticsEndDate || analyticsHospitalId || analyticsStatus || analyticsBookingType) && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setAnalyticsStartDate('');
+                      setAnalyticsEndDate('');
+                      setAnalyticsHospitalId('');
+                      setAnalyticsDoctorId('');
+                      setAnalyticsStatus('');
+                      setAnalyticsBookingType('');
+                    }}
+                    className="text-xs"
+                  >
+                    Reset
+                  </Button>
+                )}
+
+                <Button
+                  size="sm"
+                  onClick={handleExportExcel}
+                  isLoading={isExporting}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5 shadow-sm"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  Export to Excel (.xlsx)
+                </Button>
+              </div>
+            </div>
+          </Card>
+
+          {/* Analytics Summary Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+              <span className="text-[10px] uppercase font-bold text-slate-400">Total OP Bookings</span>
+              <div className="text-2xl font-black text-royal-600">
+                {opAnalytics?.summary?.totalAppointments ?? 0}
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+              <span className="text-[10px] uppercase font-bold text-blue-500">Online OP</span>
+              <div className="text-2xl font-black text-blue-600">
+                {opAnalytics?.summary?.onlineAppointments ?? 0}
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+              <span className="text-[10px] uppercase font-bold text-amber-500">Offline Walk-ins</span>
+              <div className="text-2xl font-black text-amber-600">
+                {opAnalytics?.summary?.offlineAppointments ?? 0}
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+              <span className="text-[10px] uppercase font-bold text-emerald-500">Completed OP</span>
+              <div className="text-2xl font-black text-emerald-600">
+                {opAnalytics?.summary?.completedAppointments ?? 0}
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+              <span className="text-[10px] uppercase font-bold text-indigo-500">Confirmed / In Queue</span>
+              <div className="text-2xl font-black text-indigo-600">
+                {opAnalytics?.summary?.confirmedAppointments ?? 0}
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1">
+              <span className="text-[10px] uppercase font-bold text-slate-500">Revenue Computed</span>
+              <div className="text-2xl font-black text-slate-900">
+                ₹{opAnalytics?.summary?.totalRevenue ?? 0}
+              </div>
+            </div>
+          </div>
+
+          {/* Hierarchical Breakdown Table: Hospital -> Doctors */}
+          <Card className="rounded-2xl border-slate-200 shadow-sm overflow-hidden">
+            <CardHeader className="p-5 border-b border-slate-100 flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-royal-600" />
+                  Hierarchical Hospital → Doctor OPD Breakdown
+                </CardTitle>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Click any hospital row to expand and view doctor-wise OP counts, channels, and completion rates
+                </p>
+              </div>
+              <Badge variant="outline" className="text-xs font-mono">
+                {opAnalytics?.hospitals?.length || 0} Facilities
+              </Badge>
+            </CardHeader>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-600 uppercase tracking-wider font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="px-5 py-3 w-10"></th>
+                    <th className="px-5 py-3">Hospital Name</th>
+                    <th className="px-5 py-3 text-center">Total OP</th>
+                    <th className="px-5 py-3 text-center">Online</th>
+                    <th className="px-5 py-3 text-center">Offline Walk-in</th>
+                    <th className="px-5 py-3 text-center">Completed</th>
+                    <th className="px-5 py-3 text-right">Consultation Revenue</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {analyticsLoading ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-10 text-slate-400">
+                        Computing real-time OP metrics from live database...
+                      </td>
+                    </tr>
+                  ) : (opAnalytics?.hospitals || []).length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-10 text-slate-400">
+                        No appointments found matching the selected filter criteria.
+                      </td>
+                    </tr>
+                  ) : (
+                    (opAnalytics?.hospitals || []).map((hosp: any) => {
+                      const isExpanded = !!expandedHospitals[hosp.id];
+                      return (
+                        <React.Fragment key={hosp.id}>
+                          {/* Hospital Level Row */}
+                          <tr
+                            onClick={() =>
+                              setExpandedHospitals((prev) => ({
+                                ...prev,
+                                [hosp.id]: !prev[hosp.id],
+                              }))
+                            }
+                            className="hover:bg-royal-50/50 cursor-pointer font-semibold transition-colors bg-white"
+                          >
+                            <td className="px-5 py-3.5 text-center text-slate-400">
+                              {isExpanded ? (
+                                <ChevronDown className="w-4 h-4 text-royal-600 inline" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 inline" />
+                              )}
+                            </td>
+                            <td className="px-5 py-3.5">
+                              <div className="font-bold text-slate-900 text-sm">{hosp.name}</div>
+                              <div className="text-[11px] text-slate-400 font-mono">
+                                Code: {hosp.code} • {hosp.city}, {hosp.state}
+                              </div>
+                            </td>
+                            <td className="px-5 py-3.5 text-center font-bold text-royal-700 text-sm">
+                              {hosp.totalAppointments}
+                            </td>
+                            <td className="px-5 py-3.5 text-center">
+                              <span className="bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded-full text-[11px]">
+                                {hosp.onlineAppointments}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3.5 text-center">
+                              <span className="bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-full text-[11px]">
+                                {hosp.offlineAppointments}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3.5 text-center">
+                              <span className="bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-full text-[11px]">
+                                {hosp.completedAppointments}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3.5 text-right font-black text-slate-900">
+                              ₹{hosp.totalRevenue?.toLocaleString('en-IN') || 0}
+                            </td>
+                          </tr>
+
+                          {/* Expanded Doctors Breakdown */}
+                          {isExpanded && (
+                            <tr>
+                              <td colSpan={7} className="p-0 bg-slate-50/70 border-y border-slate-200">
+                                <div className="p-4 sm:px-8 space-y-2">
+                                  <div className="text-[11px] font-bold uppercase text-slate-500 tracking-wider">
+                                    Doctor Performance Breakdown ({hosp.name})
+                                  </div>
+                                  {(hosp.doctors || []).length === 0 ? (
+                                    <div className="text-xs text-slate-400 py-3">
+                                      No doctors recorded with appointments under this filter.
+                                    </div>
+                                  ) : (
+                                    <table className="w-full text-xs text-left bg-white rounded-xl border border-slate-200 overflow-hidden">
+                                      <thead className="bg-slate-100 text-slate-600 font-semibold text-[11px] border-b border-slate-200">
+                                        <tr>
+                                          <th className="px-4 py-2.5">Doctor</th>
+                                          <th className="px-4 py-2.5">Department</th>
+                                          <th className="px-4 py-2.5 text-center">Total OP</th>
+                                          <th className="px-4 py-2.5 text-center">Online</th>
+                                          <th className="px-4 py-2.5 text-center">Offline</th>
+                                          <th className="px-4 py-2.5 text-center">Completed</th>
+                                          <th className="px-4 py-2.5 text-right">Fee Rate</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100">
+                                        {hosp.doctors.map((doc: any) => (
+                                          <tr key={doc.id} className="hover:bg-slate-50">
+                                            <td className="px-4 py-2.5 font-bold text-slate-800">
+                                              Dr. {doc.name}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-slate-500">
+                                              {doc.department || doc.specialization}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-center font-bold text-royal-600">
+                                              {doc.totalAppointments}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-center text-blue-600 font-semibold">
+                                              {doc.onlineAppointments}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-center text-amber-600 font-semibold">
+                                              {doc.offlineAppointments}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-center text-emerald-600 font-semibold">
+                                              {doc.completedAppointments}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-right font-mono text-slate-600">
+                                              ₹{doc.consultationFee || 0}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* TAB 6: DIAGNOSTIC LABS ACCREDITATION & APPROVALS */}
+      {activeTab === 'labs' && (
+        <Card className="rounded-2xl border-slate-200 shadow-sm overflow-hidden">
+          <CardHeader className="p-5 border-b border-slate-100 flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <FlaskConical className="w-4 h-4 text-purple-600" />
+                Diagnostic Laboratory Accreditation Requests
+              </CardTitle>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Review and approve independent laboratory networks seeking platform diagnostic authorization
+              </p>
+            </div>
+            <Badge variant="outline" className="text-xs">
+              {(pendingLabs || []).length} Pending
+            </Badge>
+          </CardHeader>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
+                <tr>
+                  <th className="px-5 py-3">Laboratory Name</th>
+                  <th className="px-5 py-3">License & Accreditation</th>
+                  <th className="px-5 py-3">Type</th>
+                  <th className="px-5 py-3">Contact</th>
+                  <th className="px-5 py-3">Location</th>
+                  <th className="px-5 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-slate-700">
+                {pendingLabsLoading ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-8 text-slate-400">
+                      Loading pending laboratory applications...
+                    </td>
+                  </tr>
+                ) : (pendingLabs || []).length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-12 text-slate-400">
+                      <FlaskConical className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      No pending diagnostic laboratory applications awaiting approval.
+                    </td>
+                  </tr>
+                ) : (
+                  (pendingLabs || []).map((lab: any) => (
+                    <tr key={lab.id} className="hover:bg-slate-50">
+                      <td className="px-5 py-3.5">
+                        <div className="font-bold text-slate-900">{lab.name}</div>
+                        <div className="text-[11px] text-slate-400">
+                          Applied: {new Date(lab.createdAt).toLocaleDateString()}
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5 font-mono text-[11px] text-slate-600">
+                        {lab.licenseNumber || 'Under Review'}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <Badge
+                          variant={lab.type === 'INDEPENDENT' ? 'primary' : 'outline'}
+                          className="text-[10px]"
+                        >
+                          {lab.type}
+                        </Badge>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="font-medium text-slate-800">{lab.email}</div>
+                        <div className="text-slate-400 text-[11px]">{lab.phone}</div>
+                      </td>
+                      <td className="px-5 py-3.5 text-slate-600">
+                        {lab.city}, {lab.state}
+                      </td>
+                      <td className="px-5 py-3.5 text-right space-x-2">
+                        <Button
+                          size="sm"
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                          onClick={() => approveLabMutation.mutate(lab.id)}
+                          isLoading={approveLabMutation.isPending}
+                        >
+                          <Check className="w-3.5 h-3.5 mr-1" /> Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-rose-600 hover:bg-rose-50 border-rose-200 text-xs"
+                          onClick={() => setRejectingLab(lab)}
+                        >
+                          <X className="w-3.5 h-3.5 mr-1" /> Reject
+                        </Button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
       {/* ONBOARD HOSPITAL MODAL */}
       {isAddHospitalOpen && (
         <Modal
@@ -1169,6 +1730,58 @@ export const SuperAdminDashboardPage: React.FC = () => {
                 isLoading={rejectHospitalMutation.isPending}
               >
                 Confirm Rejection
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Reject Diagnostic Lab Application Modal */}
+      {rejectingLab && (
+        <Modal
+          isOpen={!!rejectingLab}
+          onClose={() => setRejectingLab(null)}
+          title="Reject Diagnostic Lab Accreditation"
+        >
+          <div className="space-y-4 text-xs">
+            <p className="text-slate-600">
+              You are about to reject the accreditation application for{' '}
+              <strong className="text-slate-900">{rejectingLab.name}</strong>.
+            </p>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Rejection Reason (Recorded in platform audit logs)
+              </label>
+              <textarea
+                value={labRejectReason}
+                onChange={(e) => setLabRejectReason(e.target.value)}
+                rows={3}
+                placeholder="State the reason for rejecting this diagnostic laboratory..."
+                className="w-full text-xs p-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setRejectingLab(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
+                onClick={() => {
+                  rejectLabMutation.mutate({
+                    id: rejectingLab.id,
+                    reason: labRejectReason || undefined,
+                  });
+                }}
+                isLoading={rejectLabMutation.isPending}
+              >
+                Confirm Lab Rejection
               </Button>
             </div>
           </div>

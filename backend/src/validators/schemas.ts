@@ -265,4 +265,145 @@ export const completeConsultationSchema = z.object({
     })
     .optional(),
   clinicalNotes: z.string().optional(),
+  sendToPharmacy: z.boolean().optional().default(false),
+  pharmacyId: z.string().optional().nullable(),
 });
+
+export const registerDoctorSchema = z.object({
+  name: z.string().min(2, 'Full name is required'),
+  email: z.string().email('Valid professional email required'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  phone: z.string().min(7, 'Phone number is required'),
+  hospitalId: z.string().min(1, 'Associated hospital is required'),
+  departmentId: z.string().min(1, 'Medical department is required'),
+  qualification: z.string().min(2, 'Medical qualifications (e.g. MBBS, MD) required'),
+  specialization: z.string().min(2, 'Specialization is required'),
+  experienceYears: z.number().int().min(0).default(5),
+  consultationFee: z.number().min(0).default(500),
+  languages: z.string().optional().default('English, Hindi'),
+  about: z.string().min(10, 'Professional biography is required'),
+  workingDays: z.string().optional().default('Mon,Tue,Wed,Thu,Fri,Sat'),
+  workingHoursStart: z.string().regex(/^\d{2}:\d{2}$/).optional().default('09:00'),
+  workingHoursEnd: z.string().regex(/^\d{2}:\d{2}$/).optional().default('17:00'),
+  slotDurationMinutes: z.number().int().min(10).max(120).optional().default(30),
+});
+
+export const registerLabSchema = z.object({
+  name: z.string().min(3, 'Laboratory name required'),
+  type: z.enum(['HOSPITAL', 'INDEPENDENT']).default('INDEPENDENT'),
+  hospitalId: z.string().optional().nullable(),
+  email: z.string().email('Valid laboratory email required'),
+  phone: z.string().min(7, 'Contact phone required'),
+  address: z.string().min(5, 'Laboratory facility address required'),
+  city: z.string().min(2, 'City is required'),
+  licenseNumber: z.string().min(3, 'Accreditation / Clinical license number required'),
+  adminName: z.string().min(2, 'Lab director / technician name required'),
+  adminPassword: z.string().min(6, 'Password must be at least 6 characters'),
+});
+
+export const registerSupportStaffSchema = z.object({
+  name: z.string().min(2, 'Full name required'),
+  email: z.string().email('Valid staff email required'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  phone: z.string().min(7, 'Contact phone required'),
+  hospitalId: z.string().min(1, 'Hospital affiliation required'),
+  departmentId: z.string().optional().nullable(),
+  roleTitle: z.string().optional().default('Support Staff / Nurse'),
+});
+
+export const registerPharmacySchema = z.object({
+  name: z.string().min(3, 'Pharmacy name required'),
+  hospitalId: z.string().optional().nullable(),
+  email: z.string().email('Valid pharmacy email required'),
+  phone: z.string().min(7, 'Contact phone required'),
+  address: z.string().optional().nullable(),
+  licenseNumber: z.string().min(3, 'Drug license number required'),
+  staffName: z.string().min(2, 'Pharmacist / manager name required'),
+  staffPassword: z.string().min(6, 'Password must be at least 6 characters'),
+});
+
+export const createOfflineAppointmentSchema = z.object({
+  hospitalId: z.string().min(1, 'Hospital is required'),
+  doctorId: z.string().min(1, 'Doctor is required'),
+  departmentId: z.string().min(1, 'Department is required'),
+  appointmentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
+  timeSlot: z.string().optional().default('Walk-in / Immediate'),
+  patient: z.object({
+    fullName: z.string().min(2, 'Patient name is required'),
+    mobileNumber: z.string().min(10, 'Valid 10-digit mobile number required'),
+    email: z.string().email().optional().or(z.literal('')).nullable(),
+    dateOfBirth: z.string().optional().nullable(),
+    gender: z.string().optional().nullable(),
+    age: z.number().int().min(0).max(130).optional().nullable(),
+    address: z.string().optional().nullable(),
+    bloodGroup: z.string().optional().nullable(),
+    emergencyContact: z.string().optional().nullable(),
+  }),
+  notes: z.string().optional().nullable(),
+  consultationFee: z.number().min(0).optional(),
+});
+
+export const recordVitalsSchema = z.object({
+  appointmentId: z.string().min(1, 'Appointment ID is required'),
+  patientId: z.string().min(1, 'Patient ID is required'),
+  bpSystolic: z.number().int().min(50).max(300).optional().nullable(),
+  bpDiastolic: z.number().int().min(30).max(200).optional().nullable(),
+  bloodPressure: z.string().optional().nullable(), // e.g. "120/80"
+  pulseRate: z.number().int().min(30).max(250).optional().nullable(),
+  temperature: z.number().min(85).max(115).optional().nullable(), // Fahrenheit
+  spo2: z.number().int().min(50).max(100).optional().nullable(), // percentage
+  weight: z.number().min(1).max(500).optional().nullable(), // kg
+  height: z.number().min(30).max(300).optional().nullable(), // cm
+  notes: z.string().optional().nullable(),
+});
+
+export const prescriptionTemplateSchema = z.object({
+  diseaseName: z.string().min(2, 'Disease / Condition name required (e.g. Fever, Hypertension)'),
+  diagnosis: z.string().optional().nullable(),
+  medicines: z.array(
+    z.object({
+      name: z.string().min(1, 'Medicine name required'),
+      dosage: z.string().min(1, 'Dosage required (e.g. 500mg)'),
+      frequency: z.string().min(1, 'Frequency required (e.g. 1-0-1 after food)'),
+      duration: z.string().min(1, 'Duration required (e.g. 5 days)'),
+      instructions: z.string().optional().nullable(),
+    })
+  ).min(1, 'At least one medicine is required in the template'),
+  instructions: z.string().optional().nullable(),
+});
+
+export const createLabRequestSchema = z.object({
+  appointmentId: z.string().optional().nullable(),
+  patientId: z.string().min(1, 'Patient ID is required'),
+  labId: z.string().optional().nullable(),
+  tests: z.array(
+    z.object({
+      name: z.string().min(1, 'Test name is required'),
+      code: z.string().optional().nullable(),
+      notes: z.string().optional().nullable(),
+    })
+  ).min(1, 'At least one diagnostic test is required'),
+  clinicalNotes: z.string().optional().nullable(),
+  priority: z.enum(['NORMAL', 'URGENT']).default('NORMAL'),
+});
+
+export const submitLabReportSchema = z.object({
+  results: z.string().min(2, 'Test results summary or findings required'),
+  fileUrl: z.string().optional().nullable(),
+  remarks: z.string().optional().nullable(),
+});
+
+export const createSubAdminSchema = z.object({
+  name: z.string().min(2, 'Name is required'),
+  email: z.string().email('Valid email is required'),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+  phone: z.string().optional().nullable(),
+  roleTitle: z.string().optional().default('Hospital Sub-Administrator'),
+  permissions: z.array(z.string()).min(1, 'Select at least one administrative permission'),
+});
+
+export const updateSubAdminPermissionsSchema = z.object({
+  permissions: z.array(z.string()).min(1, 'Select at least one administrative permission'),
+  roleTitle: z.string().optional(),
+});
+

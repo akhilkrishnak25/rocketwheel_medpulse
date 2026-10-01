@@ -5,6 +5,8 @@ import {
   completeConsultationSchema,
   doctorLeaveSchema,
   doctorScheduleUpdateSchema,
+  prescriptionTemplateSchema,
+  createLabRequestSchema,
 } from '../validators/schemas';
 
 export class DoctorDashboardController {
@@ -177,4 +179,101 @@ export class DoctorDashboardController {
       return errorResponse(res, error.message || 'Failed to fetch prescription', 500);
     }
   }
+
+  static async getConsultationDetails(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const appointmentId = req.params.appointmentId as string;
+      const details = await DoctorDashboardService.getConsultationDetails(doctorId, appointmentId);
+      return successResponse(res, details, 'Consultation workspace loaded with patient history and vitals');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch consultation details', 500);
+    }
+  }
+
+  // -------------------------------------------------------------
+  // PRESCRIPTION TEMPLATES
+  // -------------------------------------------------------------
+  static async getTemplates(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const templates = await DoctorDashboardService.getPrescriptionTemplates(doctorId);
+      return successResponse(res, templates, 'Prescription templates retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch templates', 500);
+    }
+  }
+
+  static async createTemplate(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const validated = prescriptionTemplateSchema.parse(req.body);
+      const template = await DoctorDashboardService.createPrescriptionTemplate(doctorId, validated, req.user?.id);
+      return successResponse(res, template, 'Prescription template saved', 201);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to save template', 400, error.errors);
+    }
+  }
+
+  static async updateTemplate(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const templateId = req.params.templateId as string;
+      const validated = prescriptionTemplateSchema.partial().parse(req.body);
+      const updated = await DoctorDashboardService.updatePrescriptionTemplate(doctorId, templateId, validated, req.user?.id);
+      return successResponse(res, updated, 'Template updated successfully');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to update template', 400, error.errors);
+    }
+  }
+
+  static async deleteTemplate(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const templateId = req.params.templateId as string;
+      await DoctorDashboardService.deletePrescriptionTemplate(doctorId, templateId, req.user?.id);
+      return successResponse(res, null, 'Template deleted successfully');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to delete template', 400);
+    }
+  }
+
+  // -------------------------------------------------------------
+  // LAB TEST REQUESTS
+  // -------------------------------------------------------------
+  static async createLabRequest(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const validated = createLabRequestSchema.parse(req.body);
+      const request = await DoctorDashboardService.createLabTestRequest(doctorId, validated, req.user?.id);
+      return successResponse(res, request, 'Diagnostic lab request sent successfully', 201);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to submit lab test request', 400, error.errors);
+    }
+  }
+
+  static async getLabRequests(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const requests = await DoctorDashboardService.getDoctorLabRequests(doctorId);
+      return successResponse(res, requests, 'Laboratory test requests and reports retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch lab requests', 500);
+    }
+  }
 }
+

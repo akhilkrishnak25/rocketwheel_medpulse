@@ -14,9 +14,18 @@ export class DoctorDashboardService {
       include: {
         patient: true,
         department: true,
-        prescription: true,
+        prescription: {
+          include: { pharmacy: true },
+        },
         medicalRecord: true,
         digitalOp: true,
+        vitals: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+        labRequests: {
+          include: { lab: true, report: true },
+        },
       },
       orderBy: { tokenNumber: 'asc' },
     });
@@ -230,6 +239,8 @@ export class DoctorDashboardService {
       symptoms?: string;
       vitals?: { bp?: string; pulse?: string; temperature?: string; weight?: string; spo2?: string };
       clinicalNotes?: string;
+      sendToPharmacy?: boolean;
+      pharmacyId?: string | null;
     },
     requestingUserId?: string
   ) {
@@ -252,7 +263,16 @@ export class DoctorDashboardService {
         },
       });
 
-      // 2. Create Prescription
+      // Determine pharmacy assignment
+      let targetPharmacyId = data.pharmacyId;
+      if (data.sendToPharmacy && !targetPharmacyId) {
+        const defaultPharmacy = await tx.pharmacy.findFirst({
+          where: { hospitalId: apt.hospitalId, status: 'ACTIVE' },
+        });
+        targetPharmacyId = defaultPharmacy ? defaultPharmacy.id : null;
+      }
+
+      // 2. Create / Update Prescription
       const prescription = await tx.prescription.upsert({
         where: { appointmentId },
         update: {
@@ -260,14 +280,24 @@ export class DoctorDashboardService {
           medicines: JSON.stringify(data.medicines || []),
           instructions: data.instructions,
           followUpDate: data.followUpDate,
+          patientId: apt.patientId,
+          hospitalId: apt.hospitalId,
+          pharmacyId: targetPharmacyId,
+          pharmacyStatus: data.sendToPharmacy ? 'SENT' : 'NONE',
+          sentToPharmacyAt: data.sendToPharmacy ? new Date() : null,
         },
         create: {
           appointmentId,
           doctorId,
+          patientId: apt.patientId,
+          hospitalId: apt.hospitalId,
           diagnosis: data.diagnosis,
           medicines: JSON.stringify(data.medicines || []),
           instructions: data.instructions,
           followUpDate: data.followUpDate,
+          pharmacyId: targetPharmacyId,
+          pharmacyStatus: data.sendToPharmacy ? 'SENT' : 'NONE',
+          sentToPharmacyAt: data.sendToPharmacy ? new Date() : null,
         },
       });
 
@@ -296,10 +326,240 @@ export class DoctorDashboardService {
       action: 'COMPLETE_CONSULTATION',
       entity: 'Appointment',
       entityId: appointmentId,
-      details: { diagnosis: data.diagnosis, medicinesCount: data.medicines?.length || 0 },
+      details: {
+        diagnosis: data.diagnosis,
+        medicineCount: data.medicines?.length || 0,
+        sentToPharmacy: data.sendToPharmacy,
+      },
     });
 
     return result;
+  }
+
+  static async getConsultationDetails(doctorId: string, appointmentId: string) {
+    const apt = await prisma.appointment.findFirst({
+      where: { id: appointmentId, doctorId },
+      include: {
+        patient: {
+          include: {
+            vitals: {
+              where: { hospitalId: undefined },
+              orderBy: { createdAt: 'desc' },
+              take: 5,
+            },
+            appointments: {
+              where: {
+                id: { not: appointmentId },
+                status: 'COMPLETED',
+              },
+              include: {
+                doctor: { select: { id: true, name: true, specialization: true } },
+                prescription: true,
+                medicalRecord: true,
+              },
+              orderBy: { appointmentDate: 'desc' },
+              take: 5,
+            },
+            prescriptions: {
+              include: { doctor: { select: { id: true, name: true } } },
+              orderBy: { createdAt: 'desc' },
+              take: 5,
+            },
+            labRequests: {
+              include: { doctor: { select: { name: true } }, lab: { select: { name: true } }, report: true },
+              orderBy: { createdAt: 'desc' },
+            },
+          },
+        },
+        department: true,
+        vitals: {
+          orderBy: { createdAt: 'desc' },
+        },
+        prescription: true,
+        medicalRecord: true,
+        labRequests: {
+          include: { report: true, lab: true },
+        },
+      },
+    });
+
+    if (!apt) throw new Error('Appointment not found');
+
+    const templates = await prisma.prescriptionTemplate.findMany({
+      where: { doctorId },
+      orderBy: { diseaseName: 'asc' },
+    });
+
+    return {
+      appointment: apt,
+      currentVitals: apt.vitals[0] || apt.patient.vitals[0] || null,
+      patientHistory: {
+        previousAppointments: apt.patient.appointments,
+        previousPrescriptions: apt.patient.prescriptions,
+        previousLabRequests: apt.patient.labRequests,
+      },
+      templates: templates.map((t) => ({
+        ...t,
+        medicinesList: JSON.parse(t.medicines || '[]'),
+      })),
+    };
+  }
+
+  // -------------------------------------------------------------
+  // DISEASE-BASED PRESCRIPTION TEMPLATES
+  // -------------------------------------------------------------
+  static async getPrescriptionTemplates(doctorId: string) {
+    const templates = await prisma.prescriptionTemplate.findMany({
+      where: { doctorId },
+      orderBy: { diseaseName: 'asc' },
+    });
+
+    return templates.map((t) => ({
+      ...t,
+      medicinesList: JSON.parse(t.medicines || '[]'),
+    }));
+  }
+
+  static async createPrescriptionTemplate(
+    doctorId: string,
+    data: { diseaseName: string; diagnosis?: string | null; medicines: any[]; instructions?: string | null },
+    requestingUserId?: string
+  ) {
+    const template = await prisma.prescriptionTemplate.create({
+      data: {
+        doctorId,
+        diseaseName: data.diseaseName,
+        diagnosis: data.diagnosis,
+        medicines: JSON.stringify(data.medicines || []),
+        instructions: data.instructions,
+      },
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'CREATE_PRESCRIPTION_TEMPLATE',
+      entity: 'PrescriptionTemplate',
+      entityId: template.id,
+      details: { diseaseName: data.diseaseName },
+    });
+
+    return {
+      ...template,
+      medicinesList: data.medicines,
+    };
+  }
+
+  static async updatePrescriptionTemplate(
+    doctorId: string,
+    templateId: string,
+    data: { diseaseName?: string; diagnosis?: string | null; medicines?: any[]; instructions?: string | null },
+    requestingUserId?: string
+  ) {
+    const existing = await prisma.prescriptionTemplate.findFirst({
+      where: { id: templateId, doctorId },
+    });
+    if (!existing) throw new Error('Template not found');
+
+    const updated = await prisma.prescriptionTemplate.update({
+      where: { id: templateId },
+      data: {
+        diseaseName: data.diseaseName !== undefined ? data.diseaseName : existing.diseaseName,
+        diagnosis: data.diagnosis !== undefined ? data.diagnosis : existing.diagnosis,
+        medicines: data.medicines !== undefined ? JSON.stringify(data.medicines) : existing.medicines,
+        instructions: data.instructions !== undefined ? data.instructions : existing.instructions,
+      },
+    });
+
+    return {
+      ...updated,
+      medicinesList: data.medicines || JSON.parse(updated.medicines || '[]'),
+    };
+  }
+
+  static async deletePrescriptionTemplate(doctorId: string, templateId: string, requestingUserId?: string) {
+    const existing = await prisma.prescriptionTemplate.findFirst({
+      where: { id: templateId, doctorId },
+    });
+    if (!existing) throw new Error('Template not found');
+
+    await prisma.prescriptionTemplate.delete({ where: { id: templateId } });
+    return { success: true };
+  }
+
+  // -------------------------------------------------------------
+  // LAB TEST REQUESTS
+  // -------------------------------------------------------------
+  static async createLabTestRequest(
+    doctorId: string,
+    data: {
+      appointmentId?: string | null;
+      patientId: string;
+      labId?: string | null;
+      tests: Array<{ name: string; code?: string | null; notes?: string | null }>;
+      clinicalNotes?: string | null;
+      priority?: 'NORMAL' | 'URGENT';
+    },
+    requestingUserId?: string
+  ) {
+    const doctor = await prisma.doctor.findUnique({
+      where: { id: doctorId },
+      include: { hospital: true },
+    });
+    if (!doctor) throw new Error('Doctor not found');
+
+    // Auto-select lab if not provided
+    let targetLabId = data.labId;
+    if (!targetLabId) {
+      const hospitalLab = await prisma.lab.findFirst({
+        where: { hospitalId: doctor.hospitalId, status: { in: ['ACTIVE', 'APPROVED'] } },
+      });
+      targetLabId = hospitalLab ? hospitalLab.id : null;
+    }
+
+    const count = await prisma.labTestRequest.count({ where: { hospitalId: doctor.hospitalId } });
+    const requestNumber = `LAB-REQ-${doctor.hospital.code || 'HOSP'}-${String(count + 1).padStart(5, '0')}`;
+
+    const request = await prisma.labTestRequest.create({
+      data: {
+        requestNumber,
+        hospitalId: doctor.hospitalId,
+        doctorId,
+        patientId: data.patientId,
+        appointmentId: data.appointmentId,
+        labId: targetLabId,
+        tests: JSON.stringify(data.tests),
+        clinicalNotes: data.clinicalNotes,
+        priority: data.priority || 'NORMAL',
+        status: 'REQUESTED',
+      },
+      include: {
+        patient: true,
+        doctor: { select: { id: true, name: true } },
+        lab: true,
+      },
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'CREATE_LAB_REQUEST',
+      entity: 'LabTestRequest',
+      entityId: request.id,
+      details: { requestNumber, testsCount: data.tests.length },
+    });
+
+    return request;
+  }
+
+  static async getDoctorLabRequests(doctorId: string) {
+    return prisma.labTestRequest.findMany({
+      where: { doctorId },
+      include: {
+        patient: { select: { id: true, fullName: true, mobileNumber: true, patientIdNumber: true } },
+        lab: { select: { id: true, name: true, phone: true } },
+        report: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   static async getPrescription(doctorId: string, appointmentId: string) {

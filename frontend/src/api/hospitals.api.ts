@@ -23,6 +23,8 @@ export const hospitalsApi = {
     return api.get<Hospital[]>(`/hospitals${queryString ? `?${queryString}` : ''}`);
   },
 
+  getAll: () => api.get<Hospital[]>('/hospitals'),
+
   getById: (id: string) => api.get<Hospital>(`/hospitals/${id}`),
 
   getDoctors: (hospitalId: string, params: {

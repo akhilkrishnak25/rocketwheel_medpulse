@@ -11,6 +11,10 @@ import {
   resetPasswordSchema,
   activateAccountSchema,
   registerHospitalSchema,
+  registerDoctorSchema,
+  registerLabSchema,
+  registerSupportStaffSchema,
+  registerPharmacySchema,
 } from '../validators/schemas';
 
 export class AuthController {
@@ -25,8 +29,20 @@ export class AuthController {
           hospitalAdmin: {
             include: { hospital: true },
           },
+          hospitalSubAdmin: {
+            include: { hospital: true },
+          },
           doctor: {
             include: { hospital: true, department: true },
+          },
+          supportStaff: {
+            include: { hospital: true, department: true },
+          },
+          labTechnician: {
+            include: { lab: { include: { hospital: true } } },
+          },
+          pharmacyStaff: {
+            include: { pharmacy: { include: { hospital: true } } },
           },
         },
       });
@@ -43,7 +59,7 @@ export class AuthController {
 
       // Enforce user lifecycle status
       if (user.status === 'PENDING') {
-        return errorResponse(res, 'Your account is awaiting approval from the system administrator.', 403);
+        return errorResponse(res, 'Your account is awaiting approval from the administration.', 403);
       }
       if (user.status === 'REJECTED') {
         return errorResponse(res, 'Your registration was not approved. Please contact support.', 403);
@@ -58,8 +74,15 @@ export class AuthController {
         return errorResponse(res, 'Your account is currently inactive.', 403);
       }
 
-      // Enforce hospital lifecycle status (for Hospital Admin and Doctor)
-      const hospital = user.hospitalAdmin?.hospital || user.doctor?.hospital;
+      // Enforce hospital lifecycle status
+      const hospital =
+        user.hospitalAdmin?.hospital ||
+        user.hospitalSubAdmin?.hospital ||
+        user.doctor?.hospital ||
+        user.supportStaff?.hospital ||
+        user.labTechnician?.lab?.hospital ||
+        user.pharmacyStaff?.pharmacy?.hospital;
+
       if (user.role !== 'SUPER_ADMIN' && hospital) {
         if (hospital.status !== 'ACTIVE') {
           return errorResponse(res, 'This hospital account is currently inactive. Contact platform support.', 403);
@@ -79,6 +102,33 @@ export class AuthController {
         }
       }
 
+      // Enforce support staff status
+      if (user.role === 'SUPPORT_STAFF' && user.supportStaff) {
+        if (user.supportStaff.status === 'PENDING') {
+          return errorResponse(res, 'Your support staff registration is pending approval by the Hospital Administrator.', 403);
+        }
+        if (user.supportStaff.status === 'REJECTED') {
+          return errorResponse(res, 'Your support staff registration was not approved.', 403);
+        }
+      }
+
+      // Enforce lab status
+      if (user.role === 'LAB_TECHNICIAN' && user.labTechnician) {
+        if (user.labTechnician.lab.status === 'PENDING') {
+          return errorResponse(res, 'Your laboratory account is awaiting approval by the administrator.', 403);
+        }
+      }
+
+      // Extract sub-admin permissions
+      let subAdminPermissions: string[] | undefined;
+      if (user.hospitalSubAdmin?.permissions) {
+        try {
+          subAdminPermissions = JSON.parse(user.hospitalSubAdmin.permissions);
+        } catch {
+          subAdminPermissions = [];
+        }
+      }
+
       // Record last login timestamp
       await prisma.user.update({
         where: { id: user.id },
@@ -89,8 +139,11 @@ export class AuthController {
         userId: user.id,
         email: user.email,
         role: user.role as any,
-        hospitalId: user.hospitalAdmin?.hospitalId || user.doctor?.hospitalId,
+        hospitalId: hospital?.id,
         doctorId: user.doctor?.id,
+        subAdminPermissions,
+        labId: user.labTechnician?.labId,
+        pharmacyId: user.pharmacyStaff?.pharmacyId,
       };
 
       const tokens = generateTokens(payload);
@@ -118,8 +171,13 @@ export class AuthController {
             role: user.role,
             status: user.status,
             lastLoginAt: user.lastLoginAt,
-            hospital: user.hospitalAdmin?.hospital || user.doctor?.hospital,
+            hospital,
             doctor: user.doctor,
+            hospitalSubAdmin: user.hospitalSubAdmin,
+            supportStaff: user.supportStaff,
+            labTechnician: user.labTechnician,
+            pharmacyStaff: user.pharmacyStaff,
+            subAdminPermissions,
           },
           ...tokens,
         },
@@ -583,14 +641,43 @@ export class AuthController {
           hospitalAdmin: {
             include: { hospital: true },
           },
+          hospitalSubAdmin: {
+            include: { hospital: true },
+          },
           doctor: {
             include: { hospital: true, department: true },
+          },
+          supportStaff: {
+            include: { hospital: true, department: true },
+          },
+          labTechnician: {
+            include: { lab: { include: { hospital: true } } },
+          },
+          pharmacyStaff: {
+            include: { pharmacy: { include: { hospital: true } } },
           },
         },
       });
 
       if (!user) {
         return errorResponse(res, 'User not found', 404);
+      }
+
+      const hospital =
+        user.hospitalAdmin?.hospital ||
+        user.hospitalSubAdmin?.hospital ||
+        user.doctor?.hospital ||
+        user.supportStaff?.hospital ||
+        user.labTechnician?.lab?.hospital ||
+        user.pharmacyStaff?.pharmacy?.hospital;
+
+      let subAdminPermissions: string[] | undefined;
+      if (user.hospitalSubAdmin?.permissions) {
+        try {
+          subAdminPermissions = JSON.parse(user.hospitalSubAdmin.permissions);
+        } catch {
+          subAdminPermissions = [];
+        }
       }
 
       return successResponse(res, {
@@ -600,11 +687,375 @@ export class AuthController {
         role: user.role,
         status: user.status,
         lastLoginAt: user.lastLoginAt,
-        hospital: user.hospitalAdmin?.hospital || user.doctor?.hospital,
+        hospital,
         doctor: user.doctor,
+        hospitalSubAdmin: user.hospitalSubAdmin,
+        supportStaff: user.supportStaff,
+        labTechnician: user.labTechnician,
+        pharmacyStaff: user.pharmacyStaff,
+        subAdminPermissions,
       });
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to fetch user profile', 500);
     }
   }
+
+  static async registerDoctor(req: Request, res: Response) {
+    try {
+      const validated = registerDoctorSchema.parse(req.body);
+      const {
+        name,
+        email,
+        password,
+        phone,
+        hospitalId,
+        departmentId,
+        qualification,
+        specialization,
+        experienceYears,
+        consultationFee,
+        languages,
+        about,
+        workingDays,
+        workingHoursStart,
+        workingHoursEnd,
+        slotDurationMinutes,
+      } = validated;
+
+      const existingUser = await prisma.user.findUnique({
+        where: { email: email.toLowerCase() },
+      });
+      if (existingUser) {
+        return errorResponse(res, 'An account with this email address already exists', 400);
+      }
+
+      const hospital = await prisma.hospital.findUnique({ where: { id: hospitalId } });
+      if (!hospital) return errorResponse(res, 'Selected hospital does not exist', 404);
+
+      const department = await prisma.department.findUnique({ where: { id: departmentId } });
+      if (!department) return errorResponse(res, 'Selected department does not exist', 404);
+
+      const passwordHash = await bcrypt.hash(password, 10);
+
+      const result = await prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            name,
+            email: email.toLowerCase(),
+            phone,
+            passwordHash,
+            role: 'DOCTOR',
+            status: 'PENDING',
+            isActive: false, // Awaiting hospital admin approval
+          },
+        });
+
+        const doctor = await tx.doctor.create({
+          data: {
+            userId: user.id,
+            hospitalId,
+            departmentId,
+            name,
+            qualification,
+            specialization,
+            experienceYears,
+            consultationFee,
+            languages,
+            about,
+            workingDays,
+            workingHoursStart,
+            workingHoursEnd,
+            slotDurationMinutes,
+            status: 'PENDING',
+            isActive: false,
+          },
+        });
+
+        // Initialize default schedules
+        for (let day = 1; day <= 6; day++) {
+          await tx.doctorSchedule.create({
+            data: {
+              doctorId: doctor.id,
+              dayOfWeek: day,
+              startTime: workingHoursStart,
+              endTime: workingHoursEnd,
+              slotDurationMinutes,
+              isAvailable: true,
+            },
+          });
+        }
+
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            action: 'DOCTOR_SELF_REGISTRATION',
+            entity: 'Doctor',
+            entityId: doctor.id,
+            details: JSON.stringify({ doctorName: name, email, hospitalId }),
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent'] as string,
+          },
+        });
+
+        return { user, doctor };
+      });
+
+      return successResponse(
+        res,
+        {
+          id: result.doctor.id,
+          name: result.doctor.name,
+          email: result.user.email,
+          status: 'PENDING',
+        },
+        'Doctor account registered successfully! Awaiting approval from Hospital Administration.',
+        201
+      );
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Doctor registration failed', 400, error.errors);
+    }
+  }
+
+  static async registerLab(req: Request, res: Response) {
+    try {
+      const validated = registerLabSchema.parse(req.body);
+      const {
+        name,
+        type,
+        hospitalId,
+        email,
+        phone,
+        address,
+        city,
+        licenseNumber,
+        adminName,
+        adminPassword,
+      } = validated;
+
+      const existingUser = await prisma.user.findUnique({
+        where: { email: email.toLowerCase() },
+      });
+      if (existingUser) {
+        return errorResponse(res, 'An account with this email address already exists', 400);
+      }
+
+      const passwordHash = await bcrypt.hash(adminPassword, 10);
+
+      const result = await prisma.$transaction(async (tx) => {
+        const lab = await tx.lab.create({
+          data: {
+            name,
+            type,
+            hospitalId: hospitalId || null,
+            email: email.toLowerCase(),
+            phone,
+            address,
+            city,
+            licenseNumber,
+            status: 'PENDING', // Awaiting super admin (or hospital admin) approval
+          },
+        });
+
+        const user = await tx.user.create({
+          data: {
+            name: adminName,
+            email: email.toLowerCase(),
+            phone,
+            passwordHash,
+            role: 'LAB_TECHNICIAN',
+            status: 'PENDING',
+            isActive: false,
+          },
+        });
+
+        const technician = await tx.labTechnician.create({
+          data: {
+            userId: user.id,
+            labId: lab.id,
+            hospitalId: hospitalId || null,
+            roleTitle: 'Chief Lab Technician',
+            status: 'PENDING',
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            action: 'LAB_REGISTRATION',
+            entity: 'Lab',
+            entityId: lab.id,
+            details: JSON.stringify({ labName: name, type, email }),
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent'] as string,
+          },
+        });
+
+        return { lab, user, technician };
+      });
+
+      return successResponse(
+        res,
+        {
+          labId: result.lab.id,
+          labName: result.lab.name,
+          status: 'PENDING',
+        },
+        'Laboratory registered successfully! Registration is pending administrator approval.',
+        201
+      );
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Lab registration failed', 400, error.errors);
+    }
+  }
+
+  static async registerSupportStaff(req: Request, res: Response) {
+    try {
+      const validated = registerSupportStaffSchema.parse(req.body);
+      const { name, email, password, phone, hospitalId, departmentId, roleTitle } = validated;
+
+      const existingUser = await prisma.user.findUnique({
+        where: { email: email.toLowerCase() },
+      });
+      if (existingUser) {
+        return errorResponse(res, 'An account with this email address already exists', 400);
+      }
+
+      const hospital = await prisma.hospital.findUnique({ where: { id: hospitalId } });
+      if (!hospital) return errorResponse(res, 'Selected hospital not found', 404);
+
+      const passwordHash = await bcrypt.hash(password, 10);
+
+      const result = await prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            name,
+            email: email.toLowerCase(),
+            phone,
+            passwordHash,
+            role: 'SUPPORT_STAFF',
+            status: 'PENDING',
+            isActive: false,
+          },
+        });
+
+        const staff = await tx.supportStaff.create({
+          data: {
+            userId: user.id,
+            hospitalId,
+            departmentId: departmentId || null,
+            roleTitle,
+            status: 'PENDING',
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            action: 'SUPPORT_STAFF_REGISTRATION',
+            entity: 'SupportStaff',
+            entityId: staff.id,
+            details: JSON.stringify({ name, email, hospitalId }),
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent'] as string,
+          },
+        });
+
+        return { user, staff };
+      });
+
+      return successResponse(
+        res,
+        {
+          id: result.staff.id,
+          name: result.user.name,
+          email: result.user.email,
+          status: 'PENDING',
+        },
+        'Support staff registration submitted successfully! Awaiting Hospital Administrator approval.',
+        201
+      );
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Support staff registration failed', 400, error.errors);
+    }
+  }
+
+  static async registerPharmacy(req: Request, res: Response) {
+    try {
+      const validated = registerPharmacySchema.parse(req.body);
+      const { name, hospitalId, email, phone, address, licenseNumber, staffName, staffPassword } = validated;
+
+      const existingUser = await prisma.user.findUnique({
+        where: { email: email.toLowerCase() },
+      });
+      if (existingUser) {
+        return errorResponse(res, 'An account with this email address already exists', 400);
+      }
+
+      const passwordHash = await bcrypt.hash(staffPassword, 10);
+
+      const result = await prisma.$transaction(async (tx) => {
+        const pharmacy = await tx.pharmacy.create({
+          data: {
+            name,
+            hospitalId: hospitalId || null,
+            email: email.toLowerCase(),
+            phone,
+            address,
+            licenseNumber,
+            status: 'ACTIVE',
+          },
+        });
+
+        const user = await tx.user.create({
+          data: {
+            name: staffName,
+            email: email.toLowerCase(),
+            phone,
+            passwordHash,
+            role: 'PHARMACY_STAFF',
+            status: 'ACTIVE',
+            isActive: true,
+          },
+        });
+
+        const staff = await tx.pharmacyStaff.create({
+          data: {
+            userId: user.id,
+            pharmacyId: pharmacy.id,
+            hospitalId: hospitalId || null,
+            roleTitle: 'Chief Pharmacist',
+            status: 'ACTIVE',
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            action: 'PHARMACY_REGISTRATION',
+            entity: 'Pharmacy',
+            entityId: pharmacy.id,
+            details: JSON.stringify({ name, email, hospitalId }),
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent'] as string,
+          },
+        });
+
+        return { pharmacy, user, staff };
+      });
+
+      return successResponse(
+        res,
+        {
+          pharmacyId: result.pharmacy.id,
+          name: result.pharmacy.name,
+          status: 'ACTIVE',
+        },
+        'Pharmacy registered successfully!',
+        201
+      );
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Pharmacy registration failed', 400, error.errors);
+    }
+  }
 }
+

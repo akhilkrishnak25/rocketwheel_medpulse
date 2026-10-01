@@ -1,4 +1,13 @@
-export type UserRole = 'SUPER_ADMIN' | 'HOSPITAL_ADMIN' | 'DOCTOR';
+export type UserRole =
+  | 'SUPER_ADMIN'
+  | 'HOSPITAL_ADMIN'
+  | 'HOSPITAL_SUB_ADMIN'
+  | 'DOCTOR'
+  | 'SUPPORT_STAFF'
+  | 'LAB_TECHNICIAN'
+  | 'PHARMACY_STAFF'
+  | 'PATIENT';
+
 export type UserStatus = 'ACTIVE' | 'PENDING' | 'REJECTED' | 'SUSPENDED' | 'INVITED';
 export type HospitalStatus = 'PENDING' | 'APPROVED' | 'ACTIVE' | 'REJECTED' | 'INACTIVE';
 export type DoctorStatus = 'PENDING' | 'APPROVED' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED';
@@ -18,6 +27,13 @@ export interface User {
     status?: HospitalStatus;
   };
   doctor?: Doctor;
+  hospitalSubAdmin?: HospitalSubAdmin;
+  supportStaff?: SupportStaff;
+  labTechnician?: any;
+  pharmacyStaff?: any;
+  lab?: any;
+  pharmacy?: any;
+  subAdminPermissions?: string[];
 }
 
 export interface Hospital {
@@ -118,8 +134,12 @@ export type AppointmentStatus =
   | 'CANCELLED'
   | 'NO_SHOW';
 
+export type BookingType = 'ONLINE' | 'OFFLINE';
+
 export interface Patient {
   id: string;
+  patientIdNumber?: string;
+  hospitalId?: string;
   fullName: string;
   mobileNumber: string;
   email: string;
@@ -128,6 +148,12 @@ export interface Patient {
   address?: string;
   bloodGroup?: string;
   emergencyContact?: string;
+  _count?: {
+    appointments?: number;
+    prescriptions?: number;
+    labRequests?: number;
+    vitals?: number;
+  };
 }
 
 export interface DigitalOP {
@@ -153,10 +179,119 @@ export interface Payment {
 
 export interface Prescription {
   id: string;
+  appointmentId?: string;
+  appointment?: Appointment;
   diagnosis: string;
-  medicines: string; // JSON
+  medicines: string; // JSON string
+  medicinesList?: Array<{ name: string; dosage: string; frequency: string; duration: string; instructions?: string }>;
   instructions?: string;
   followUpDate?: string;
+  pharmacyStatus?: 'NONE' | 'SENT' | 'ACCEPTED' | 'PROCESSING' | 'COMPLETED';
+  sentToPharmacyAt?: string;
+  dispensedAt?: string;
+  dispensedBy?: string;
+  doctor?: Doctor;
+  pharmacy?: { name: string };
+  createdAt: string;
+}
+
+export interface PatientVital {
+  id: string;
+  hospitalId: string;
+  patientId: string;
+  appointmentId?: string;
+  recordedBy?: string;
+  recordedByName?: string;
+  bpSystolic?: number;
+  bpDiastolic?: number;
+  bloodPressure?: string;
+  pulseRate?: number;
+  temperature?: number;
+  spo2?: number;
+  weight?: number;
+  height?: number;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface PrescriptionTemplate {
+  id: string;
+  doctorId: string;
+  diseaseName: string;
+  diagnosis?: string;
+  medicines: string;
+  medicinesList?: Array<{ name: string; dosage: string; frequency: string; duration: string; instructions?: string }>;
+  instructions?: string;
+  createdAt: string;
+}
+
+export interface Lab {
+  id: string;
+  name: string;
+  type: 'HOSPITAL' | 'INDEPENDENT';
+  hospitalId?: string;
+  hospital?: { name: string; code: string };
+  email: string;
+  phone: string;
+  address?: string;
+  city?: string;
+  licenseNumber?: string;
+  status: 'PENDING' | 'APPROVED' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED';
+  _count?: { testRequests?: number };
+}
+
+export interface LabReport {
+  id: string;
+  testRequestId: string;
+  technicianName?: string;
+  results: string;
+  fileUrl?: string;
+  remarks?: string;
+  completedAt: string;
+}
+
+export interface LabTestRequest {
+  id: string;
+  requestNumber: string;
+  patientId: string;
+  hospitalId: string;
+  doctorId: string;
+  appointmentId?: string;
+  labId?: string;
+  tests: string;
+  testsList?: Array<{ name: string; code?: string; notes?: string }>;
+  clinicalNotes?: string;
+  priority: 'NORMAL' | 'URGENT';
+  status: 'REQUESTED' | 'ACCEPTED' | 'PROCESSING' | 'COMPLETED' | 'CANCELLED';
+  report?: LabReport;
+  patient?: Patient;
+  doctor?: Doctor;
+  hospital?: Hospital;
+  lab?: Lab;
+  createdAt: string;
+}
+
+export interface SupportStaff {
+  id: string;
+  userId: string;
+  user?: { name: string; email: string; phone?: string; status: string; lastLoginAt?: string };
+  hospitalId: string;
+  departmentId?: string;
+  roleTitle: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ACTIVE';
+  approvedAt?: string;
+  createdAt: string;
+}
+
+export interface HospitalSubAdmin {
+  id: string;
+  userId: string;
+  user?: { name: string; email: string; phone?: string; status: string; lastLoginAt?: string };
+  hospitalId: string;
+  roleTitle: string;
+  permissions: string;
+  permissionsList?: string[];
+  createdAt: string;
 }
 
 export interface Appointment {
@@ -170,6 +305,7 @@ export interface Appointment {
   timeSlot: string;
   tokenNumber: number;
   status: AppointmentStatus;
+  bookingType: BookingType;
   consultationFee: number;
   platformFee: number;
   totalAmount: number;
@@ -182,6 +318,8 @@ export interface Appointment {
   payment?: Payment;
   digitalOp?: DigitalOP;
   prescription?: Prescription;
+  vitals?: PatientVital[];
+  labRequests?: LabTestRequest[];
   createdAt: string;
 }
 
@@ -215,4 +353,39 @@ export interface AdminMetrics {
   patientCount: number;
   totalAppointments: number;
   recentNotifications: Notification[];
+}
+
+export interface HierarchicalDoctorStats {
+  doctorId: string;
+  doctorName: string;
+  specialization: string;
+  totalOp: number;
+  onlineOp: number;
+  offlineOp: number;
+  completedOp: number;
+  cancelledOp: number;
+}
+
+export interface HierarchicalHospitalStats {
+  hospitalId: string;
+  hospitalName: string;
+  hospitalCode: string;
+  totalOp: number;
+  onlineOp: number;
+  offlineOp: number;
+  completedOp: number;
+  cancelledOp: number;
+  doctors: HierarchicalDoctorStats[];
+}
+
+export interface OpAnalyticsResponse {
+  summary: {
+    totalOpCount: number;
+    onlineBookingCount: number;
+    offlineBookingCount: number;
+    completedCount: number;
+    cancelledCount: number;
+    totalRevenue: number;
+  };
+  hierarchical: HierarchicalHospitalStats[];
 }

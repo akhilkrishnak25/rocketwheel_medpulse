@@ -28,4 +28,13 @@ router.post('/hospitals/:id/admin', SuperAdminController.createHospitalAdmin);
 router.get('/doctors', SuperAdminController.getAllDoctors);
 router.get('/appointments', SuperAdminController.getAllAppointments);
 
+// Lab Accreditation & Approvals
+router.get('/labs', SuperAdminController.getAllLabs);
+router.patch('/labs/:id/approve', SuperAdminController.approveLab);
+router.patch('/labs/:id/reject', SuperAdminController.rejectLab);
+
+// Detailed Hierarchical OP Analytics & Excel Export
+router.get('/analytics/op', SuperAdminController.getOpAnalytics);
+router.get('/export/excel', SuperAdminController.exportBookingsExcel);
+
 export default router;

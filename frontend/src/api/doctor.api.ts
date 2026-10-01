@@ -54,4 +54,22 @@ export const doctorDashboardApi = {
 
   cancelLeave: (leaveId: string) =>
     api.delete<any>(`/doctor/leaves/${leaveId}`),
+
+  // Consultation Details (History + Support Staff Vitals)
+  getConsultationDetails: (appointmentId: string) =>
+    api.get<any>(`/doctor/appointments/${appointmentId}/consultation`),
+
+  // Disease-Based Prescription Templates
+  getTemplates: () => api.get<any[]>('/doctor/templates'),
+
+  createTemplate: (data: any) => api.post<any>('/doctor/templates', data),
+
+  updateTemplate: (templateId: string, data: any) => api.patch<any>(`/doctor/templates/${templateId}`, data),
+
+  deleteTemplate: (templateId: string) => api.delete<any>(`/doctor/templates/${templateId}`),
+
+  // Lab Test Requests
+  createLabRequest: (data: any) => api.post<any>('/doctor/lab-requests', data),
+
+  getLabRequests: () => api.get<any[]>('/doctor/lab-requests'),
 };

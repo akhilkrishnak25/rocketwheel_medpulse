@@ -9,9 +9,20 @@ router.use(authenticate, requireRole(['DOCTOR']));
 
 // Queue & Appointments
 router.get('/appointments', DoctorDashboardController.getAppointments);
+router.get('/appointments/:appointmentId/consultation', DoctorDashboardController.getConsultationDetails);
 router.post('/appointments/:appointmentId/start', DoctorDashboardController.startConsultation);
 router.post('/appointments/:appointmentId/complete', DoctorDashboardController.completeConsultation);
 router.get('/appointments/:appointmentId/prescription', DoctorDashboardController.getPrescription);
+
+// Prescription Templates
+router.get('/templates', DoctorDashboardController.getTemplates);
+router.post('/templates', DoctorDashboardController.createTemplate);
+router.patch('/templates/:templateId', DoctorDashboardController.updateTemplate);
+router.delete('/templates/:templateId', DoctorDashboardController.deleteTemplate);
+
+// Lab Requests
+router.post('/lab-requests', DoctorDashboardController.createLabRequest);
+router.get('/lab-requests', DoctorDashboardController.getLabRequests);
 
 // Doctor Profile & Analytics
 router.get('/profile', DoctorDashboardController.getProfile);

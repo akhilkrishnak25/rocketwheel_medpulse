@@ -14,7 +14,11 @@ router.get('/verify-token', AuthController.verifyToken);
 router.post('/reset-password', AuthController.resetPassword);
 router.post('/activate', AuthController.activateAccount);
 
-// Public hospital partner registration
+// Public registrations
 router.post('/register-hospital', AuthController.registerHospital);
+router.post('/register-doctor', AuthController.registerDoctor);
+router.post('/register-lab', AuthController.registerLab);
+router.post('/register-support-staff', AuthController.registerSupportStaff);
+router.post('/register-pharmacy', AuthController.registerPharmacy);
 
 export default router;

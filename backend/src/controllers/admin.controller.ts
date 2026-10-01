@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { AdminService } from '../services/admin.service';
+import { AppointmentService } from '../services/appointment.service';
 import { NotificationService } from '../services/notification.service';
 import { successResponse, errorResponse } from '../utils/response';
 import {
@@ -10,6 +11,9 @@ import {
   doctorLeaveSchema,
   doctorScheduleUpdateSchema,
   updateHospitalSchema,
+  createOfflineAppointmentSchema,
+  createSubAdminSchema,
+  updateSubAdminPermissionsSchema,
 } from '../validators/schemas';
 
 export class AdminController {
@@ -329,4 +333,179 @@ export class AdminController {
       return errorResponse(res, error.message || 'Failed to update notification', 500);
     }
   }
+
+  // -------------------------------------------------------------
+  // OFFLINE APPOINTMENT BOOKING
+  // -------------------------------------------------------------
+  static async createOfflineAppointment(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated with this session', 400);
+
+      const validated = createOfflineAppointmentSchema.parse({
+        ...req.body,
+        hospitalId,
+      });
+
+      const result = await AppointmentService.createOfflineAppointment({
+        ...validated,
+        requestingUserId: req.user?.id,
+      });
+
+      return successResponse(
+        res,
+        result,
+        `Offline OP booking confirmed. Token #${result.appointment.tokenNumber}`,
+        201
+      );
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to create offline booking', 400, error.errors);
+    }
+  }
+
+  // -------------------------------------------------------------
+  // DOCTOR ASSOCIATION & APPROVAL
+  // -------------------------------------------------------------
+  static async getPendingDoctors(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const pending = await AdminService.getPendingDoctors(hospitalId);
+      return successResponse(res, pending, 'Pending doctor applications retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch pending doctors', 500);
+    }
+  }
+
+  // -------------------------------------------------------------
+  // HOSPITAL PATIENT RECORDS MANAGEMENT
+  // -------------------------------------------------------------
+  static async getPatients(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const { search, page, limit } = req.query;
+      const result = await AdminService.getHospitalPatients(hospitalId, {
+        search: search as string,
+        page: page ? Number(page) : undefined,
+        limit: limit ? Number(limit) : undefined,
+      });
+
+      return successResponse(res, result, 'Hospital patient records retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch patient records', 500);
+    }
+  }
+
+  static async getPatientDetails(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const patientId = req.params.patientId as string;
+      const patient = await AdminService.getPatientDetails(hospitalId, patientId);
+      return successResponse(res, patient, 'Patient medical details retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch patient details', 404);
+    }
+  }
+
+  // -------------------------------------------------------------
+  // SUPPORT STAFF APPROVAL & MANAGEMENT
+  // -------------------------------------------------------------
+  static async getSupportStaff(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const staff = await AdminService.getSupportStaff(hospitalId);
+      return successResponse(res, staff, 'Hospital support staff retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch support staff', 500);
+    }
+  }
+
+  static async approveSupportStaff(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const staffId = req.params.id as string;
+      const updated = await AdminService.updateSupportStaffStatus(hospitalId, staffId, 'APPROVED', req.user?.id);
+      return successResponse(res, updated, 'Support staff member approved successfully');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to approve support staff', 400);
+    }
+  }
+
+  static async rejectSupportStaff(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const staffId = req.params.id as string;
+      const updated = await AdminService.updateSupportStaffStatus(hospitalId, staffId, 'REJECTED', req.user?.id);
+      return successResponse(res, updated, 'Support staff member registration rejected');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to reject support staff', 400);
+    }
+  }
+
+  // -------------------------------------------------------------
+  // HOSPITAL SUB-ADMIN MANAGEMENT
+  // -------------------------------------------------------------
+  static async createSubAdmin(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const validated = createSubAdminSchema.parse(req.body);
+      const subAdmin = await AdminService.createSubAdmin(hospitalId, validated, req.user?.id);
+      return successResponse(res, subAdmin, 'Sub-Administrator created successfully with customized permissions', 201);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to create sub-admin', 400, error.errors);
+    }
+  }
+
+  static async getSubAdmins(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const subAdmins = await AdminService.getSubAdmins(hospitalId);
+      return successResponse(res, subAdmins, 'Hospital sub-administrators retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch sub-admins', 500);
+    }
+  }
+
+  static async updateSubAdminPermissions(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const subAdminId = req.params.id as string;
+      const validated = updateSubAdminPermissionsSchema.parse(req.body);
+      const updated = await AdminService.updateSubAdminPermissions(hospitalId, subAdminId, validated, req.user?.id);
+      return successResponse(res, updated, 'Sub-admin permissions updated successfully');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to update sub-admin permissions', 400, error.errors);
+    }
+  }
+
+  static async deleteSubAdmin(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const subAdminId = req.params.id as string;
+      await AdminService.deleteSubAdmin(hospitalId, subAdminId, req.user?.id);
+      return successResponse(res, null, 'Sub-admin removed successfully');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to remove sub-admin', 400);
+    }
+  }
 }
+

@@ -168,4 +168,82 @@ export class SuperAdminController {
       return errorResponse(res, error.message || 'Failed to fetch audit logs', 500);
     }
   }
+
+  // -------------------------------------------------------------
+  // LAB ACCREDITATIONS & APPROVALS
+  // -------------------------------------------------------------
+  static async getAllLabs(req: Request, res: Response) {
+    try {
+      const labs = await SuperAdminService.getAllLabs();
+      return successResponse(res, labs, 'All diagnostic laboratories retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch laboratories', 500);
+    }
+  }
+
+  static async approveLab(req: Request, res: Response) {
+    try {
+      const id = req.params.id as string;
+      const approved = await SuperAdminService.approveLab(id, req.user?.id);
+      return successResponse(res, approved, 'Laboratory approved and activated for clinical test routing');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to approve laboratory', 400);
+    }
+  }
+
+  static async rejectLab(req: Request, res: Response) {
+    try {
+      const id = req.params.id as string;
+      const rejected = await SuperAdminService.rejectLab(id, req.user?.id);
+      return successResponse(res, rejected, 'Laboratory application rejected');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to reject laboratory', 400);
+    }
+  }
+
+  // -------------------------------------------------------------
+  // OP / BOOKING ANALYTICS
+  // -------------------------------------------------------------
+  static async getOpAnalytics(req: Request, res: Response) {
+    try {
+      const { startDate, endDate, date, hospitalId, doctorId, status, bookingType } = req.query;
+      const analytics = await SuperAdminService.getOpAnalytics({
+        startDate: startDate as string,
+        endDate: endDate as string,
+        date: date as string,
+        hospitalId: hospitalId as string,
+        doctorId: doctorId as string,
+        status: status as string,
+        bookingType: bookingType as string,
+      });
+
+      return successResponse(res, analytics, 'Platform OP booking analytics calculated');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to compute OP analytics', 500);
+    }
+  }
+
+  // -------------------------------------------------------------
+  // EXCEL EXPORT
+  // -------------------------------------------------------------
+  static async exportBookingsExcel(req: Request, res: Response) {
+    try {
+      const { startDate, endDate, date, hospitalId, doctorId, status, bookingType } = req.query;
+      await SuperAdminService.exportBookingsToExcel(
+        {
+          startDate: startDate as string,
+          endDate: endDate as string,
+          date: date as string,
+          hospitalId: hospitalId as string,
+          doctorId: doctorId as string,
+          status: status as string,
+          bookingType: bookingType as string,
+        },
+        res
+      );
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to generate Excel export', 500);
+    }
+  }
 }
+

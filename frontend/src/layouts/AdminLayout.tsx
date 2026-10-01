@@ -23,7 +23,7 @@ export const AdminLayout: React.FC = () => {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  if (!user || (user.role !== 'HOSPITAL_ADMIN' && user.role !== 'SUPER_ADMIN')) {
+  if (!user || (user.role !== 'HOSPITAL_ADMIN' && user.role !== 'HOSPITAL_SUB_ADMIN' && user.role !== 'SUPER_ADMIN')) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="text-center space-y-4 max-w-sm">

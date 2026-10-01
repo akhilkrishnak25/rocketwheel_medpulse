@@ -72,22 +72,29 @@ export class AppointmentService {
       throw new Error('This time slot is temporarily reserved by another patient completing payment. Please try another slot.');
     }
 
-    // Upsert / find patient by mobile & email (No patient login required!)
+    // Upsert / find patient scoped to this hospital (Hospital-isolated patient records)
     let patient = await prisma.patient.findFirst({
       where: {
+        hospitalId,
         OR: [
           { mobileNumber: patientData.mobileNumber },
-          { email: patientData.email },
+          ...(patientData.email ? [{ email: patientData.email }] : []),
         ],
       },
     });
 
     if (!patient) {
+      const hospitalCode = doctor.hospital?.code || 'HOSP';
+      const patientCount = await prisma.patient.count({ where: { hospitalId } });
+      const patientIdNumber = `MRN-${hospitalCode}-${String(patientCount + 1).padStart(5, '0')}`;
+
       patient = await prisma.patient.create({
         data: {
+          hospitalId,
+          patientIdNumber,
           fullName: patientData.fullName,
           mobileNumber: patientData.mobileNumber,
-          email: patientData.email,
+          email: patientData.email || '',
           dateOfBirth: patientData.dateOfBirth,
           gender: patientData.gender,
           address: patientData.address,
@@ -141,6 +148,7 @@ export class AppointmentService {
         timeSlot,
         tokenNumber,
         status: 'PENDING_PAYMENT',
+        bookingType: 'ONLINE',
         consultationFee,
         platformFee,
         totalAmount,
@@ -645,6 +653,162 @@ export class AppointmentService {
       followUpDate: apt.prescription.followUpDate,
       vitals: apt.medicalRecord ? JSON.parse(apt.medicalRecord.vitals || '{}') : null,
       createdAt: apt.prescription.createdAt,
+    };
+  }
+
+  /**
+   * Create Offline / Walk-in appointment directly in CONFIRMED state
+   */
+  static async createOfflineAppointment(dto: {
+    hospitalId: string;
+    doctorId: string;
+    departmentId: string;
+    appointmentDate: string;
+    timeSlot?: string;
+    patient: {
+      fullName: string;
+      mobileNumber: string;
+      email?: string | null;
+      dateOfBirth?: string | null;
+      gender?: string | null;
+      age?: number | null;
+      address?: string | null;
+      bloodGroup?: string | null;
+      emergencyContact?: string | null;
+    };
+    notes?: string | null;
+    consultationFee?: number;
+    requestingUserId?: string;
+  }) {
+    const { hospitalId, doctorId, departmentId, appointmentDate, timeSlot, patient: patientData, notes, consultationFee: customFee, requestingUserId } = dto;
+
+    const doctor = await prisma.doctor.findFirst({
+      where: { id: doctorId, hospitalId, isActive: true },
+      include: { hospital: true, department: true },
+    });
+
+    if (!doctor) {
+      throw new Error('Doctor not found at this hospital or is inactive.');
+    }
+
+    // Scoped patient lookup/create
+    let patient = await prisma.patient.findFirst({
+      where: {
+        hospitalId,
+        OR: [
+          { mobileNumber: patientData.mobileNumber },
+          ...(patientData.email ? [{ email: patientData.email }] : []),
+        ],
+      },
+    });
+
+    if (!patient) {
+      const hospitalCode = doctor.hospital?.code || 'HOSP';
+      const patientCount = await prisma.patient.count({ where: { hospitalId } });
+      const patientIdNumber = `MRN-${hospitalCode}-${String(patientCount + 1).padStart(5, '0')}`;
+
+      patient = await prisma.patient.create({
+        data: {
+          hospitalId,
+          patientIdNumber,
+          fullName: patientData.fullName,
+          mobileNumber: patientData.mobileNumber,
+          email: patientData.email || '',
+          dateOfBirth: patientData.dateOfBirth,
+          gender: patientData.gender,
+          address: patientData.address,
+          bloodGroup: patientData.bloodGroup,
+          emergencyContact: patientData.emergencyContact,
+        },
+      });
+    } else {
+      patient = await prisma.patient.update({
+        where: { id: patient.id },
+        data: {
+          fullName: patientData.fullName,
+          dateOfBirth: patientData.dateOfBirth || patient.dateOfBirth,
+          gender: patientData.gender || patient.gender,
+          address: patientData.address || patient.address,
+          bloodGroup: patientData.bloodGroup || patient.bloodGroup,
+          emergencyContact: patientData.emergencyContact || patient.emergencyContact,
+        },
+      });
+    }
+
+    // Calculate queue token number
+    const dayAppointmentsCount = await prisma.appointment.count({
+      where: {
+        doctorId,
+        appointmentDate,
+        status: { in: ['CONFIRMED', 'WAITING', 'IN_CONSULTATION', 'COMPLETED'] },
+      },
+    });
+    const tokenNumber = dayAppointmentsCount + 1;
+
+    const dateFormatted = appointmentDate.replace(/-/g, '');
+    const randomHex = crypto.randomBytes(2).toString('hex').toUpperCase();
+    const appointmentNumber = `APT-${dateFormatted}-${randomHex}-OFF`;
+
+    const fee = customFee !== undefined ? customFee : doctor.consultationFee;
+
+    const appointment = await prisma.appointment.create({
+      data: {
+        appointmentNumber,
+        hospitalId,
+        doctorId,
+        patientId: patient.id,
+        departmentId,
+        appointmentDate,
+        timeSlot: timeSlot || 'Walk-in / Immediate',
+        tokenNumber,
+        status: 'CONFIRMED',
+        bookingType: 'OFFLINE',
+        consultationFee: fee,
+        platformFee: 0,
+        totalAmount: fee,
+        notes,
+      },
+      include: {
+        hospital: true,
+        doctor: true,
+        patient: true,
+        department: true,
+      },
+    });
+
+    // Generate unique OP number & QR code
+    const dateParts = appointmentDate.split('-');
+    const opNumber = `OP-${dateParts[0]}-${dateParts[1]}${dateParts[2]}-${crypto.randomInt(100000, 999999)}`;
+    const secureToken = crypto.randomBytes(24).toString('hex');
+    const verificationUrl = `${ENV.CLIENT_URL}/verify-op/${secureToken}`;
+
+    const digitalOp = await prisma.digitalOP.create({
+      data: {
+        opNumber,
+        secureToken,
+        appointmentId: appointment.id,
+        qrData: verificationUrl,
+        isVerified: true, // Already at hospital counter
+        verifiedAt: new Date(),
+      },
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'OFFLINE_BOOKING_CREATED',
+      entity: 'Appointment',
+      entityId: appointment.id,
+      details: {
+        appointmentNumber,
+        patientName: patient.fullName,
+        doctorName: doctor.name,
+        tokenNumber,
+      },
+    });
+
+    return {
+      appointment,
+      digitalOp,
     };
   }
 }

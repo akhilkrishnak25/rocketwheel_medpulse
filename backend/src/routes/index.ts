@@ -8,6 +8,9 @@ import adminRoutes from './admin.routes';
 import doctorDashboardRoutes from './doctorDashboard.routes';
 import superAdminRoutes from './superAdmin.routes';
 import otpRoutes from './otp.routes';
+import supportStaffRoutes from './supportStaff.routes';
+import labRoutes from './lab.routes';
+import pharmacyRoutes from './pharmacy.routes';
 
 const router = Router();
 
@@ -20,6 +23,9 @@ router.use('/admin', adminRoutes);
 router.use('/doctor', doctorDashboardRoutes);
 router.use('/super-admin', superAdminRoutes);
 router.use('/otp', otpRoutes);
+router.use('/support-staff', supportStaffRoutes);
+router.use('/lab', labRoutes);
+router.use('/pharmacy', pharmacyRoutes);
 
 // Health check endpoint
 router.get('/health', (req, res) => {

@@ -1,13 +1,26 @@
 import jwt from 'jsonwebtoken';
 import { ENV } from '../config/env';
 
+export type UserRole =
+  | 'SUPER_ADMIN'
+  | 'HOSPITAL_ADMIN'
+  | 'HOSPITAL_SUB_ADMIN'
+  | 'DOCTOR'
+  | 'SUPPORT_STAFF'
+  | 'LAB_TECHNICIAN'
+  | 'PHARMACY_STAFF'
+  | 'PATIENT';
+
 export interface TokenPayload {
   userId: string;
   id?: string;
   email: string;
-  role: 'SUPER_ADMIN' | 'HOSPITAL_ADMIN' | 'DOCTOR';
+  role: UserRole;
   hospitalId?: string;
   doctorId?: string;
+  subAdminPermissions?: string[];
+  labId?: string;
+  pharmacyId?: string;
 }
 
 export const generateTokens = (payload: TokenPayload) => {

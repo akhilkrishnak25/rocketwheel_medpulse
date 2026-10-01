@@ -32,4 +32,54 @@ export const superAdminApi = {
   },
   getAllUsers: () => api.get<any[]>('/super-admin/users'),
   getAuditLogs: (limit?: number) => api.get<any[]>(`/super-admin/audit-logs${limit ? `?limit=${limit}` : ''}`),
+
+  // Lab Accreditations & Approvals
+  getAllLabs: () => api.get<any[]>('/super-admin/labs'),
+  getPendingLabs: () => api.get<any[]>('/super-admin/labs'),
+  approveLab: (id: string) => api.patch<any>(`/super-admin/labs/${id}/approve`, {}),
+  rejectLab: (id: string, reason?: string) => api.patch<any>(`/super-admin/labs/${id}/reject`, { reason }),
+
+  // OP / Booking Analytics
+  getOpAnalytics: (filters: {
+    startDate?: string;
+    endDate?: string;
+    date?: string;
+    hospitalId?: string;
+    doctorId?: string;
+    status?: string;
+    bookingType?: string;
+  } = {}) => {
+    const query = new URLSearchParams();
+    if (filters.startDate) query.append('startDate', filters.startDate);
+    if (filters.endDate) query.append('endDate', filters.endDate);
+    if (filters.date) query.append('date', filters.date);
+    if (filters.hospitalId) query.append('hospitalId', filters.hospitalId);
+    if (filters.doctorId) query.append('doctorId', filters.doctorId);
+    if (filters.status) query.append('status', filters.status);
+    if (filters.bookingType) query.append('bookingType', filters.bookingType);
+    const qs = query.toString();
+    return api.get<any>(`/super-admin/analytics/op${qs ? `?${qs}` : ''}`);
+  },
+
+  getExportExcelUrl: (filters: {
+    startDate?: string;
+    endDate?: string;
+    date?: string;
+    hospitalId?: string;
+    doctorId?: string;
+    status?: string;
+    bookingType?: string;
+  } = {}) => {
+    const query = new URLSearchParams();
+    if (filters.startDate) query.append('startDate', filters.startDate);
+    if (filters.endDate) query.append('endDate', filters.endDate);
+    if (filters.date) query.append('date', filters.date);
+    if (filters.hospitalId) query.append('hospitalId', filters.hospitalId);
+    if (filters.doctorId) query.append('doctorId', filters.doctorId);
+    if (filters.status) query.append('status', filters.status);
+    if (filters.bookingType) query.append('bookingType', filters.bookingType);
+    const qs = query.toString();
+    const baseUrl = (api as any).client?.defaults?.baseURL || '/api';
+    return `${baseUrl}/super-admin/export/excel${qs ? `?${qs}` : ''}`;
+  },
 };

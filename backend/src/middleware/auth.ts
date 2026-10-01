@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyAccessToken, TokenPayload } from '../utils/jwt';
+import { verifyAccessToken, TokenPayload, UserRole } from '../utils/jwt';
 import { errorResponse } from '../utils/response';
 
 declare global {
@@ -26,7 +26,7 @@ export const authenticate = (req: Request, res: Response, next: NextFunction) =>
   }
 };
 
-export const requireRole = (allowedRoles: Array<'SUPER_ADMIN' | 'HOSPITAL_ADMIN' | 'DOCTOR'>) => {
+export const requireRole = (allowedRoles: UserRole[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return errorResponse(res, 'Unauthorized', 401);
@@ -49,7 +49,7 @@ export const hospitalAdminGuard = (req: Request, res: Response, next: NextFuncti
     return next();
   }
 
-  if (req.user.role !== 'HOSPITAL_ADMIN' || !req.user.hospitalId) {
+  if ((req.user.role !== 'HOSPITAL_ADMIN' && req.user.role !== 'HOSPITAL_SUB_ADMIN') || !req.user.hospitalId) {
     return errorResponse(res, 'Forbidden: Hospital Admin access required', 403);
   }
 
@@ -60,4 +60,47 @@ export const hospitalAdminGuard = (req: Request, res: Response, next: NextFuncti
   }
 
   next();
+};
+
+export const hospitalGuard = (req: Request, res: Response, next: NextFunction) => {
+  if (!req.user) {
+    return errorResponse(res, 'Unauthorized', 401);
+  }
+
+  if (req.user.role === 'SUPER_ADMIN') {
+    return next();
+  }
+
+  if (!req.user.hospitalId) {
+    return errorResponse(res, 'Forbidden: Hospital affiliation required', 403);
+  }
+
+  const targetHospitalId = req.params.hospitalId || req.query.hospitalId || req.body.hospitalId;
+  if (targetHospitalId && targetHospitalId !== req.user.hospitalId) {
+    return errorResponse(res, 'Forbidden: Access across hospital boundaries is restricted', 403);
+  }
+
+  next();
+};
+
+export const requirePermission = (permissionKey: string) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return errorResponse(res, 'Unauthorized', 401);
+    }
+
+    if (req.user.role === 'SUPER_ADMIN' || req.user.role === 'HOSPITAL_ADMIN') {
+      return next();
+    }
+
+    if (req.user.role === 'HOSPITAL_SUB_ADMIN') {
+      const permissions = req.user.subAdminPermissions || [];
+      if (permissions.includes(permissionKey) || permissions.includes('all')) {
+        return next();
+      }
+      return errorResponse(res, `Forbidden: Missing required sub-admin permission (${permissionKey})`, 403);
+    }
+
+    return errorResponse(res, 'Forbidden: Insufficient privileges', 403);
+  };
 };

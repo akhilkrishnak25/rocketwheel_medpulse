@@ -29,6 +29,18 @@ export const authApi = {
     api.post<{ message: string }>('/auth/activate', payload),
 
   registerHospital: (payload: any) =>
-    api.post<{ message: string; hospitalId?: string }>('/hospitals/register', payload),
+    api.post<{ message: string; hospitalId?: string }>('/auth/register-hospital', payload),
+
+  registerDoctor: (payload: any) =>
+    api.post<{ message: string; id?: string }>('/auth/register-doctor', payload),
+
+  registerLab: (payload: any) =>
+    api.post<{ message: string; labId?: string }>('/auth/register-lab', payload),
+
+  registerSupportStaff: (payload: any) =>
+    api.post<{ message: string; id?: string }>('/auth/register-support-staff', payload),
+
+  registerPharmacy: (payload: any) =>
+    api.post<{ message: string; pharmacyId?: string }>('/auth/register-pharmacy', payload),
 };
 
