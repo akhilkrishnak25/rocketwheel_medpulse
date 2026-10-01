@@ -41,7 +41,7 @@ services:
   # 2. Frontend Application (React 18 + Vite + Tailwind SPA)
   # ==============================================================
   - type: web
-    name: medipulse-frontend
+    name: rocketwheelmedpuls
     runtime: static
     rootDir: frontend
     buildCommand: npm ci && npm run build
