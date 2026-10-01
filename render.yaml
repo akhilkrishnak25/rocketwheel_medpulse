@@ -27,7 +27,7 @@ services:
       - key: JWT_REFRESH_EXPIRES_IN
         value: 7d
       - key: CLIENT_URL
-        value: https://medipulse-frontend-cflt.onrender.com
+        value: https://rocketwheelmedpuls.onrender.com
       - key: BASE_URL
         value: https://medipulse-backend-veca.onrender.com
       - key: PLATFORM_FEE
