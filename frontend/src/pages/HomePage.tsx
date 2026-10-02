@@ -23,8 +23,10 @@ import {
   CheckCircle2,
   Flame,
   Zap,
+  FlaskConical,
 } from 'lucide-react';
 import { hospitalsApi } from '../api/hospitals.api';
+import { labApi } from '../api/lab.api';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Card, CardContent } from '../components/ui/Card';
@@ -48,6 +50,11 @@ export const HomePage: React.FC = () => {
   const { data: hospitals, isLoading: hospitalsLoading } = useQuery({
     queryKey: ['hospitals', 'featured'],
     queryFn: () => hospitalsApi.list(),
+  });
+
+  const { data: approvedLabs, isLoading: labsLoading } = useQuery({
+    queryKey: ['approved-labs-homepage'],
+    queryFn: () => labApi.getActiveLabs(),
   });
 
   const { data: departments } = useQuery({
@@ -289,6 +296,88 @@ export const HomePage: React.FC = () => {
                     </Link>
                   </div>
                 </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ACCREDITED DIAGNOSTIC LABORATORIES SECTION */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-50 text-purple-700 text-xs font-bold border border-purple-200">
+              <FlaskConical className="w-3.5 h-3.5 text-purple-600" />
+              <span>Accredited Pathology & Diagnostic Centers</span>
+            </div>
+            <h2 className="text-3xl font-black text-slate-900 tracking-tight">
+              Certified Diagnostic Laboratories
+            </h2>
+            <p className="text-slate-600 text-sm max-w-xl">
+              Book clinical blood tests, preventive health profiles, and specialized scans directly with accredited labs.
+            </p>
+          </div>
+
+          <Link to="/lab-tests">
+            <Button variant="outline" className="font-bold text-xs text-purple-700 border-purple-300 hover:bg-purple-50">
+              View All Diagnostic Tests & Pricing <ArrowRight className="w-3.5 h-3.5 ml-1" />
+            </Button>
+          </Link>
+        </div>
+
+        {labsLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {[1, 2, 3].map((n) => (
+              <div key={n} className="h-56 bg-slate-100 animate-pulse rounded-2xl"></div>
+            ))}
+          </div>
+        ) : (approvedLabs || []).length === 0 ? (
+          <div className="py-12 text-center text-slate-400 bg-white rounded-2xl border border-slate-200 text-xs">
+            No diagnostic laboratories currently active.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {(approvedLabs || []).slice(0, 6).map((lab: any) => (
+              <Card
+                key={lab.id}
+                className="rounded-2xl border-slate-200 hover:shadow-md hover:border-purple-300 transition-all flex flex-col justify-between p-6 bg-white space-y-4"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="p-3 bg-purple-50 rounded-xl text-purple-600 shrink-0">
+                      <FlaskConical className="w-6 h-6" />
+                    </div>
+                    <Badge variant="purple" className="text-[10px]">
+                      {lab.type === 'HOSPITAL_LAB' ? 'In-Hospital Lab' : 'Independent Lab'}
+                    </Badge>
+                  </div>
+
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-base">{lab.name}</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {lab.hospital ? `${lab.hospital.name} • ${lab.hospital.city}` : 'Accredited Independent Pathology Center'}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3 text-xs text-slate-600 pt-2 border-t border-slate-100">
+                    <span className="flex items-center gap-1 font-semibold text-purple-700">
+                      <Activity className="w-3.5 h-3.5 text-purple-500" />
+                      {lab.testsCount || 0} Tests in Catalog
+                    </span>
+                    <span>•</span>
+                    <span className="text-slate-400 font-mono text-[11px]">
+                      License: {lab.licenseNumber || 'ACCREDITED'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-100">
+                  <Link to={`/lab-tests?labId=${lab.id}`} className="block">
+                    <Button size="sm" className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs">
+                      Book Diagnostic Test <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                    </Button>
+                  </Link>
+                </div>
               </Card>
             ))}
           </div>

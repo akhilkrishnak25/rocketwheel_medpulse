@@ -117,15 +117,16 @@ export class AppointmentService {
       });
     }
 
-    // Calculate queue token number for this doctor on this day
-    const dayAppointmentsCount = await prisma.appointment.count({
+    // Calculate monotonic queue token number for this doctor on this day
+    const lastApt = await prisma.appointment.findFirst({
       where: {
         doctorId,
         appointmentDate,
-        status: { in: ['CONFIRMED', 'WAITING', 'IN_CONSULTATION', 'COMPLETED'] },
       },
+      orderBy: { tokenNumber: 'desc' },
+      select: { tokenNumber: true },
     });
-    const tokenNumber = dayAppointmentsCount + 1;
+    const tokenNumber = (lastApt?.tokenNumber || 0) + 1;
 
     // Generate readable appointment number
     const dateFormatted = appointmentDate.replace(/-/g, '');
@@ -735,15 +736,16 @@ export class AppointmentService {
       });
     }
 
-    // Calculate queue token number
-    const dayAppointmentsCount = await prisma.appointment.count({
+    // Calculate monotonic queue token number
+    const lastApt = await prisma.appointment.findFirst({
       where: {
         doctorId,
         appointmentDate,
-        status: { in: ['CONFIRMED', 'WAITING', 'IN_CONSULTATION', 'COMPLETED'] },
       },
+      orderBy: { tokenNumber: 'desc' },
+      select: { tokenNumber: true },
     });
-    const tokenNumber = dayAppointmentsCount + 1;
+    const tokenNumber = (lastApt?.tokenNumber || 0) + 1;
 
     const dateFormatted = appointmentDate.replace(/-/g, '');
     const randomHex = crypto.randomBytes(2).toString('hex').toUpperCase();

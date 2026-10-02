@@ -455,6 +455,7 @@ export const createLabRequestSchema = z.object({
     z.object({
       name: z.string().min(1, 'Test name is required'),
       code: z.string().optional().nullable(),
+      price: z.number().optional().nullable(),
       notes: z.string().optional().nullable(),
     })
   ).min(1, 'At least one diagnostic test is required'),

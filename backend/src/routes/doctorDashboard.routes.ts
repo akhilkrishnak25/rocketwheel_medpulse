@@ -17,6 +17,7 @@ router.get('/appointments/:appointmentId/prescription', DoctorDashboardControlle
 // Prescription Templates
 router.get('/templates', DoctorDashboardController.getTemplates);
 router.post('/templates', DoctorDashboardController.createTemplate);
+router.post('/templates/bulk', DoctorDashboardController.bulkCreateTemplates);
 router.patch('/templates/:templateId', DoctorDashboardController.updateTemplate);
 router.delete('/templates/:templateId', DoctorDashboardController.deleteTemplate);
 

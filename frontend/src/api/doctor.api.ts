@@ -60,9 +60,13 @@ export const doctorDashboardApi = {
     api.get<any>(`/doctor/appointments/${appointmentId}/consultation`),
 
   // Disease-Based Prescription Templates
-  getTemplates: () => api.get<any[]>('/doctor/templates'),
+  getTemplates: (search?: string) =>
+    api.get<any[]>(`/doctor/templates${search ? `?search=${encodeURIComponent(search)}` : ''}`),
 
   createTemplate: (data: any) => api.post<any>('/doctor/templates', data),
+
+  bulkCreateTemplates: (templates: any[]) =>
+    api.post<any>('/doctor/templates/bulk', { templates }),
 
   updateTemplate: (templateId: string, data: any) => api.patch<any>(`/doctor/templates/${templateId}`, data),
 

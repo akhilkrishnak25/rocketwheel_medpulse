@@ -250,19 +250,38 @@ export interface LabReport {
   completedAt: string;
 }
 
+export interface LabTest {
+  id: string;
+  labId?: string;
+  hospitalId?: string;
+  name: string;
+  code?: string;
+  category?: string;
+  description?: string;
+  price: number;
+  status: string;
+  tatHours?: number;
+  lab?: Lab;
+  hospital?: Hospital;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface LabTestRequest {
   id: string;
   requestNumber: string;
   patientId: string;
-  hospitalId: string;
-  doctorId: string;
+  hospitalId?: string;
+  doctorId?: string;
   appointmentId?: string;
   labId?: string;
   tests: string;
-  testsList?: Array<{ name: string; code?: string; notes?: string }>;
+  testsList?: Array<{ id?: string; name: string; code?: string; price?: number; tatHours?: number; notes?: string }>;
   clinicalNotes?: string;
   priority: 'NORMAL' | 'URGENT';
-  status: 'REQUESTED' | 'ACCEPTED' | 'PROCESSING' | 'COMPLETED' | 'CANCELLED';
+  status: string;
+  preferredDate?: string;
+  totalAmount?: number;
   report?: LabReport;
   patient?: Patient;
   doctor?: Doctor;

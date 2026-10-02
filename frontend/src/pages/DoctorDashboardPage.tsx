@@ -21,8 +21,15 @@ import {
   Check,
   AlertCircle,
   ShoppingBag,
+  Search,
+  Edit,
+  Upload,
+  Download,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 import { doctorDashboardApi } from '../api/doctor.api';
+import { labApi } from '../api/lab.api';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
@@ -48,14 +55,21 @@ export const DoctorDashboardPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'queue' | 'templates' | 'labs' | 'roster' | 'leaves'>('queue');
   const [sendToPharmacy, setSendToPharmacy] = useState(false);
 
-  // Template States
+  // Template States (CRUD, Search, Bulk Upload)
   const [isSaveTemplateOpen, setIsSaveTemplateOpen] = useState(false);
   const [newTemplateDisease, setNewTemplateDisease] = useState('');
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [editingTemplate, setEditingTemplate] = useState<any | null>(null);
+  const [isBulkTemplateOpen, setIsBulkTemplateOpen] = useState(false);
+  const [bulkCsvText, setBulkCsvText] = useState('');
+  const [bulkPreview, setBulkPreview] = useState<any[]>([]);
 
-  // Lab Request Modal States
+  // Lab Request Modal States (Lab selection & multi-test requisition)
   const [isLabModalOpen, setIsLabModalOpen] = useState(false);
-  const [selectedLabTestName, setSelectedLabTestName] = useState('Complete Blood Count (CBC)');
+  const [selectedLabId, setSelectedLabId] = useState('');
+  const [selectedCatalogTests, setSelectedCatalogTests] = useState<Array<{ name: string; code?: string; price: number; tatHours?: number }>>([]);
   const [customLabTest, setCustomLabTest] = useState('');
+  const [customLabPrice, setCustomLabPrice] = useState<number>(0);
   const [labPriority, setLabPriority] = useState<'NORMAL' | 'URGENT'>('NORMAL');
   const [labNotes, setLabNotes] = useState('');
 
@@ -129,17 +143,80 @@ export const DoctorDashboardPage: React.FC = () => {
 
   // Automatically pre-populate vitals when Support Staff vitals are present
   React.useEffect(() => {
-    if (consultDetails?.vitals) {
-      const v = consultDetails.vitals;
+    const v = consultDetails?.vitals || consultDetails?.currentVitals;
+    if (v) {
       setVitals({
-        bp: v.bloodPressure || (v.bpSystolic && v.bpDiastolic ? `${v.bpSystolic}/${v.bpDiastolic} mmHg` : '120/80 mmHg'),
-        pulse: v.pulseRate ? `${v.pulseRate} bpm` : '76 bpm',
-        temperature: v.temperature ? `${v.temperature} F` : '98.4 F',
-        weight: v.weightKg ? `${v.weightKg} kg` : (v.weight ? `${v.weight} kg` : '65 kg'),
-        spo2: v.spo2 ? `${v.spo2}%` : '99%',
+        bp: v.bloodPressure || (v.bpSystolic && v.bpDiastolic ? `${v.bpSystolic}/${v.bpDiastolic} mmHg` : (v.bpSystolic ? `${v.bpSystolic} mmHg` : '')),
+        pulse: v.pulseRate ? `${v.pulseRate} bpm` : (v.pulse ? `${v.pulse} bpm` : ''),
+        temperature: v.temperature ? `${v.temperature}°F` : '',
+        weight: v.weightKg ? `${v.weightKg} kg` : (v.weight ? `${v.weight} kg` : ''),
+        spo2: v.spo2 ? `${v.spo2}%` : '',
       });
     }
   }, [consultDetails]);
+
+  // Accredited active laboratories query
+  const { data: activeLabs } = useQuery({
+    queryKey: ['active-approved-labs'],
+    queryFn: () => labApi.getActiveLabs(),
+  });
+
+  // Tests catalog for selected lab
+  const { data: labCatalog, isLoading: isCatalogLoading } = useQuery({
+    queryKey: ['lab-catalog', selectedLabId],
+    queryFn: () => labApi.getPublicTests({ labId: selectedLabId }),
+    enabled: !!selectedLabId && isLabModalOpen,
+  });
+
+  // Auto-select lab when labs load
+  React.useEffect(() => {
+    if (activeLabs && activeLabs.length > 0 && !selectedLabId) {
+      const hospLab = activeLabs.find((l: any) => l.hospital?.id === profile?.hospitalId) || activeLabs[0];
+      setSelectedLabId(hospLab.id);
+    }
+  }, [activeLabs, profile, selectedLabId]);
+
+  const parseCsvText = (raw: string) => {
+    const lines = raw.trim().split('\n');
+    if (lines.length <= 1) {
+      setBulkPreview([]);
+      return;
+    }
+    const rows: any[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const regex = /(?:,|\n|^)("(?:(?:"")*[^"]*)*"|[^",\n]*|(?:\n|$))/g;
+      const cells: string[] = [];
+      let match;
+      while ((match = regex.exec(line)) !== null && cells.length < 10) {
+        let val = match[1] || '';
+        if (val.startsWith('"') && val.endsWith('"')) {
+          val = val.slice(1, -1).replace(/""/g, '"');
+        }
+        cells.push(val.trim());
+        if (regex.lastIndex === line.length) break;
+      }
+      const diseaseName = cells[0] || '';
+      const diagnosis = cells[1] || diseaseName;
+      const medsRaw = cells[2] || '';
+      const instructions = cells[3] || '';
+      if (diseaseName) {
+        const meds = medsRaw.split(';').map((m) => {
+          const parts = m.split(':').map((p) => p.trim());
+          return {
+            name: parts[0] || m.trim(),
+            dosage: parts[1] || '1 Tab',
+            frequency: parts[2] || '1-0-1',
+            duration: parts[3] || '5 days',
+            instructions: parts[4] || 'After food',
+          };
+        }).filter((m) => m.name);
+        rows.push({ diseaseName, diagnosis, medicines: meds, instructions });
+      }
+    }
+    setBulkPreview(rows);
+  };
 
   // Template Mutations
   const createTemplateMutation = useMutation({
@@ -152,6 +229,32 @@ export const DoctorDashboardPage: React.FC = () => {
     },
     onError: (err: any) => {
       toast.error('Save Failed', err.message);
+    },
+  });
+
+  const updateTemplateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => doctorDashboardApi.updateTemplate(id, data),
+    onSuccess: () => {
+      toast.success('Template Updated', 'Prescription template updated successfully');
+      setEditingTemplate(null);
+      queryClient.invalidateQueries({ queryKey: ['doctor-templates'] });
+    },
+    onError: (err: any) => {
+      toast.error('Update Failed', err.message);
+    },
+  });
+
+  const bulkCreateTemplatesMutation = useMutation({
+    mutationFn: (templates: any[]) => doctorDashboardApi.bulkCreateTemplates(templates),
+    onSuccess: (data: any) => {
+      toast.success('Templates Imported', data?.message || 'Prescription templates successfully imported');
+      setIsBulkTemplateOpen(false);
+      setBulkCsvText('');
+      setBulkPreview([]);
+      queryClient.invalidateQueries({ queryKey: ['doctor-templates'] });
+    },
+    onError: (err: any) => {
+      toast.error('Bulk Import Failed', err.message);
     },
   });
 
@@ -172,7 +275,9 @@ export const DoctorDashboardPage: React.FC = () => {
     onSuccess: () => {
       toast.success('Lab Test Requested', 'Requisition sent to approved laboratory queue');
       setIsLabModalOpen(false);
+      setSelectedCatalogTests([]);
       setCustomLabTest('');
+      setCustomLabPrice(0);
       setLabNotes('');
       queryClient.invalidateQueries({ queryKey: ['doctor-lab-requests'] });
     },
@@ -728,26 +833,62 @@ export const DoctorDashboardPage: React.FC = () => {
                 Saved reusable prescription templates for rapid, consistent medication prescribing during OPD consultations
               </p>
             </div>
-            <Button
-              size="sm"
-              onClick={() => {
-                setNewTemplateDisease('');
-                setIsSaveTemplateOpen(true);
-              }}
-              className="bg-royal-600 hover:bg-royal-700 font-bold"
-            >
-              <Plus className="w-4 h-4 mr-1.5" /> Create New Template
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsBulkTemplateOpen(true)}
+                className="text-xs font-bold text-slate-700 border-slate-300"
+              >
+                <Upload className="w-4 h-4 mr-1.5 text-royal-600" /> Bulk Import (CSV)
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setNewTemplateDisease('');
+                  setIsSaveTemplateOpen(true);
+                }}
+                className="bg-royal-600 hover:bg-royal-700 font-bold"
+              >
+                <Plus className="w-4 h-4 mr-1.5" /> Create New Template
+              </Button>
+            </div>
+          </div>
+
+          {/* Search bar */}
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search templates by disease name, diagnosis, or medicine..."
+              value={templateSearch}
+              onChange={(e) => setTemplateSearch(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-royal-500"
+            />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {(templates || []).length === 0 ? (
-              <div className="col-span-full py-12 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                <BookOpen className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                No prescription templates created yet. Click 'Create New Template' or save during consultation.
-              </div>
-            ) : (
-              (templates || []).map((tmpl: any) => {
+            {(() => {
+              const filtered = (templates || []).filter((tmpl: any) => {
+                if (!templateSearch.trim()) return true;
+                const q = templateSearch.toLowerCase();
+                const diseaseMatch = tmpl.diseaseName?.toLowerCase().includes(q);
+                const diagMatch = tmpl.diagnosis?.toLowerCase().includes(q);
+                const parsed = typeof tmpl.medicines === 'string' ? JSON.parse(tmpl.medicines) : tmpl.medicines;
+                const medMatch = (parsed || []).some((m: any) => m.name?.toLowerCase().includes(q));
+                return diseaseMatch || diagMatch || medMatch;
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="col-span-full py-12 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                    <BookOpen className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                    {templateSearch ? 'No prescription templates match your search.' : 'No prescription templates created yet. Click \'Create New Template\' or save during consultation.'}
+                  </div>
+                );
+              }
+
+              return filtered.map((tmpl: any) => {
                 const parsedMeds = typeof tmpl.medicines === 'string' ? JSON.parse(tmpl.medicines) : tmpl.medicines;
                 return (
                   <div
@@ -783,20 +924,36 @@ export const DoctorDashboardPage: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="pt-2 border-t border-slate-100 flex justify-end">
+                    <div className="pt-2 border-t border-slate-100 flex justify-end gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-royal-600 hover:bg-royal-50 text-xs"
+                        onClick={() => {
+                          setEditingTemplate({
+                            id: tmpl.id,
+                            diseaseName: tmpl.diseaseName,
+                            diagnosis: tmpl.diagnosis || '',
+                            medicines: parsedMeds || [],
+                            instructions: tmpl.instructions || '',
+                          });
+                        }}
+                      >
+                        <Edit className="w-3.5 h-3.5 mr-1" /> Edit
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"
                         className="text-rose-600 hover:bg-rose-50 text-xs"
                         onClick={() => deleteTemplateMutation.mutate(tmpl.id)}
                       >
-                        <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete Template
+                        <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
                       </Button>
                     </div>
                   </div>
                 );
-              })
-            )}
+              });
+            })()}
           </div>
         </Card>
       )}
@@ -1025,31 +1182,37 @@ export const DoctorDashboardPage: React.FC = () => {
             </div>
 
             {/* Support Staff Recorded Vitals Banner */}
-            {consultDetails?.vitals ? (
-              <div className="p-3 bg-teal-50/80 border border-teal-200 rounded-xl space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-teal-900 flex items-center gap-1.5 text-xs">
-                    <Activity className="w-4 h-4 text-teal-600" />
-                    Clinical Vitals Recorded by Nursing / Support Staff
-                  </span>
-                  <span className="text-[10px] text-teal-700 font-semibold bg-teal-100 px-2 py-0.5 rounded-full">
-                    Pre-Screened
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 pt-1 font-mono text-xs text-slate-800">
-                  <div>BP: <strong className="font-bold text-slate-900">{consultDetails.vitals.bloodPressure || `${consultDetails.vitals.bpSystolic}/${consultDetails.vitals.bpDiastolic}`}</strong></div>
-                  <div>Pulse: <strong className="font-bold text-slate-900">{consultDetails.vitals.pulseRate} bpm</strong></div>
-                  <div>Temp: <strong className="font-bold text-slate-900">{consultDetails.vitals.temperature}°F</strong></div>
-                  <div>SpO2: <strong className="font-bold text-slate-900">{consultDetails.vitals.spo2}%</strong></div>
-                  <div>Weight: <strong className="font-bold text-slate-900">{consultDetails.vitals.weightKg || consultDetails.vitals.weight} kg</strong></div>
-                  <div>Height: <strong className="font-bold text-slate-900">{consultDetails.vitals.heightCm || consultDetails.vitals.height} cm</strong></div>
-                </div>
-                {consultDetails.vitals.notes && (
-                  <div className="text-[11px] text-teal-800 italic pt-0.5">
-                    Nursing Observations: "{consultDetails.vitals.notes}"
+            {(consultDetails?.vitals || consultDetails?.currentVitals) ? (
+              (() => {
+                const rv = consultDetails?.vitals || consultDetails?.currentVitals;
+                return (
+                  <div className="p-3 bg-teal-50/90 border border-teal-200 rounded-xl space-y-1.5 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-teal-900 flex items-center gap-1.5 text-xs">
+                        <Activity className="w-4 h-4 text-teal-600 animate-pulse" />
+                        Clinical Vitals Recorded by Nursing / Support Staff
+                      </span>
+                      <span className="text-[10px] text-teal-800 font-bold bg-teal-100 border border-teal-300 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-teal-600" />
+                        Pre-Screened
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 pt-1 font-mono text-xs text-slate-800">
+                      <div>BP: <strong className="font-bold text-slate-900">{rv.bloodPressure || (rv.bpSystolic ? `${rv.bpSystolic}/${rv.bpDiastolic}` : 'N/A')}</strong></div>
+                      <div>Pulse: <strong className="font-bold text-slate-900">{rv.pulseRate || rv.pulse || 'N/A'} bpm</strong></div>
+                      <div>Temp: <strong className="font-bold text-slate-900">{rv.temperature || 'N/A'}°F</strong></div>
+                      <div>SpO2: <strong className="font-bold text-slate-900">{rv.spo2 || 'N/A'}%</strong></div>
+                      <div>Weight: <strong className="font-bold text-slate-900">{rv.weightKg || rv.weight || 'N/A'} kg</strong></div>
+                      <div>Height: <strong className="font-bold text-slate-900">{rv.heightCm || rv.height || 'N/A'} cm</strong></div>
+                    </div>
+                    {rv.notes && (
+                      <div className="text-[11px] text-teal-900 italic pt-0.5">
+                        Nursing Observations: "{rv.notes}"
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                );
+              })()
             ) : (
               <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-amber-800 text-[11px] flex items-center gap-2">
                 <AlertCircle className="w-3.5 h-3.5 shrink-0" />
@@ -1410,102 +1573,234 @@ export const DoctorDashboardPage: React.FC = () => {
           isOpen={isLabModalOpen}
           onClose={() => setIsLabModalOpen(false)}
           title={`Order Diagnostic Lab Tests - ${activeAppointment.patient.fullName}`}
-          maxWidth="md"
+          maxWidth="lg"
         >
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              const testName = customLabTest.trim() || selectedLabTestName;
-              if (!testName) {
-                toast.error('Test Name Required', 'Please choose or enter a diagnostic test.');
+              const finalTests: any[] = [...selectedCatalogTests];
+              if (customLabTest.trim()) {
+                finalTests.push({
+                  name: customLabTest.trim(),
+                  price: Number(customLabPrice || 0),
+                  notes: 'Custom Doctor Requisition',
+                });
+              }
+
+              if (finalTests.length === 0) {
+                toast.error('Test Selection Required', 'Please choose at least one test from the catalog or specify a custom test.');
                 return;
               }
+
               createLabRequestMutation.mutate({
                 appointmentId: activeAppointment.id,
                 patientId: activeAppointment.patient.id,
-                tests: [{ name: testName, notes: labNotes.trim() || undefined }],
+                labId: selectedLabId || undefined,
+                tests: finalTests,
                 priority: labPriority,
                 clinicalNotes: labNotes.trim() || undefined,
               });
             }}
             className="space-y-4 text-xs"
           >
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                Select Common Diagnostic Test
+            {/* Laboratory Selector */}
+            <div className="p-3 bg-purple-50/70 border border-purple-200 rounded-xl space-y-1.5">
+              <label className="block font-bold text-purple-900 text-xs flex items-center justify-between">
+                <span>Select Approved Diagnostic Laboratory:</span>
+                <span className="text-[10px] text-purple-700 font-semibold bg-purple-100 px-2 py-0.5 rounded-full">
+                  {(activeLabs || []).length} Accredited Labs Available
+                </span>
               </label>
               <select
-                value={selectedLabTestName}
-                onChange={(e) => setSelectedLabTestName(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
+                value={selectedLabId}
+                onChange={(e) => {
+                  setSelectedLabId(e.target.value);
+                  setSelectedCatalogTests([]);
+                }}
+                className="w-full px-3 py-2 rounded-xl border border-purple-200 text-xs bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500 font-medium"
               >
-                <option value="Complete Blood Count (CBC)">Complete Blood Count (CBC)</option>
-                <option value="Lipid Profile (Cholesterol, HDL, LDL, Triglycerides)">Lipid Profile</option>
-                <option value="Liver Function Test (LFT)">Liver Function Test (LFT)</option>
-                <option value="Kidney Function Test (KFT / Serum Creatinine, BUN)">Kidney Function Test (KFT)</option>
-                <option value="Fasting & Postprandial Blood Glucose (FBS/PPBS)">Fasting & Postprandial Blood Glucose</option>
-                <option value="HbA1c (Glycated Hemoglobin)">HbA1c (Glycated Hemoglobin)</option>
-                <option value="Urine Routine & Microscopic Examination">Urine Routine & Microscopic</option>
-                <option value="Thyroid Profile (T3, T4, TSH)">Thyroid Profile (T3, T4, TSH)</option>
-                <option value="Serum Electrolytes (Na+, K+, Cl-)">Serum Electrolytes</option>
-                <option value="Chest X-Ray (PA View)">Chest X-Ray (PA View)</option>
-                <option value="Custom / Other Diagnostic Panel">Other (Specify Below)</option>
+                {(activeLabs || []).map((lab: any) => (
+                  <option key={lab.id} value={lab.id}>
+                    {lab.name} ({lab.type === 'HOSPITAL_LAB' ? `In-Hospital: ${lab.hospital?.name || ''}` : 'Independent Center'}) - {lab.testsCount || 0} tests available
+                  </option>
+                ))}
               </select>
             </div>
 
-            {selectedLabTestName === 'Custom / Other Diagnostic Panel' && (
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Specify Diagnostic Test Name <span className="text-rose-500">*</span>
+            {/* Test Catalog Selection */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="font-bold text-slate-800 text-xs">
+                  Select Tests from Laboratory Catalog (Multiple Allowed):
                 </label>
+                <div className="flex items-center gap-2 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (labCatalog && labCatalog.length > 0) {
+                        setSelectedCatalogTests(
+                          labCatalog.map((t: any) => ({
+                            name: t.name,
+                            code: t.code,
+                            price: t.price,
+                            tatHours: t.tatHours,
+                          }))
+                        );
+                      }
+                    }}
+                    className="text-purple-600 hover:underline font-semibold"
+                  >
+                    Select All
+                  </button>
+                  <span>•</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCatalogTests([])}
+                    className="text-slate-500 hover:underline"
+                  >
+                    Clear All
+                  </button>
+                </div>
+              </div>
+
+              {isCatalogLoading ? (
+                <div className="py-8 text-center text-slate-400 bg-slate-50 rounded-xl">
+                  Loading test catalog...
+                </div>
+              ) : (labCatalog || []).length === 0 ? (
+                <div className="p-4 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                  No tests listed in catalog for this lab. You can add a custom test below.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto p-1 border border-slate-200 rounded-xl">
+                  {(labCatalog || []).map((test: any) => {
+                    const isSelected = selectedCatalogTests.some((t) => t.code === test.code || t.name === test.name);
+                    return (
+                      <div
+                        key={test.id}
+                        onClick={() => {
+                          if (isSelected) {
+                            setSelectedCatalogTests(selectedCatalogTests.filter((t) => t.code !== test.code && t.name !== test.name));
+                          } else {
+                            setSelectedCatalogTests([
+                              ...selectedCatalogTests,
+                              { name: test.name, code: test.code, price: test.price, tatHours: test.tatHours },
+                            ]);
+                          }
+                        }}
+                        className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all flex items-start justify-between gap-2 ${
+                          isSelected
+                            ? 'bg-purple-50/80 border-purple-300 ring-1 ring-purple-400'
+                            : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="space-y-0.5 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            {isSelected ? (
+                              <CheckSquare className="w-4 h-4 text-purple-600 shrink-0" />
+                            ) : (
+                              <Square className="w-4 h-4 text-slate-300 shrink-0" />
+                            )}
+                            <span className="font-bold text-slate-900 text-xs truncate">{test.name}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 pl-5">
+                            {test.category} • Turnaround: {test.tatHours ? `${test.tatHours}h` : 'Same Day'}
+                          </div>
+                        </div>
+                        <span className="font-bold text-purple-700 text-xs shrink-0">
+                          ₹{test.price}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Custom Additional Test Input */}
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+              <label className="block font-bold text-slate-700 text-[11px]">
+                Add Custom Diagnostic Test (Optional):
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <input
                   type="text"
                   value={customLabTest}
                   onChange={(e) => setCustomLabTest(e.target.value)}
-                  placeholder="e.g. Serum Ferritin / 2D Echocardiogram"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
-                  required
+                  placeholder="e.g. 2D Echocardiogram, USG Abdomen"
+                  className="sm:col-span-2 px-3 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
                 />
-              </div>
-            )}
-
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Requisition Priority</label>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-1.5 cursor-pointer">
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-400 text-xs">₹</span>
                   <input
-                    type="radio"
-                    name="priority"
-                    value="NORMAL"
-                    checked={labPriority === 'NORMAL'}
-                    onChange={() => setLabPriority('NORMAL')}
+                    type="number"
+                    value={customLabPrice || ''}
+                    onChange={(e) => setCustomLabPrice(Number(e.target.value) || 0)}
+                    placeholder="Est. Fee (₹)"
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-200 text-xs bg-white"
                   />
-                  <span>Normal Routine</span>
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer font-bold text-rose-600">
-                  <input
-                    type="radio"
-                    name="priority"
-                    value="URGENT"
-                    checked={labPriority === 'URGENT'}
-                    onChange={() => setLabPriority('URGENT')}
-                  />
-                  <span>Urgent / Stat</span>
-                </label>
+                </div>
               </div>
             </div>
 
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                Clinical Indication & Specific Instructions
-              </label>
-              <textarea
-                rows={2}
-                value={labNotes}
-                onChange={(e) => setLabNotes(e.target.value)}
-                placeholder="Suspected anemia, fever of unknown origin, pre-op evaluation..."
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
-              />
+            {/* Requisition Summary Bar */}
+            <div className="p-3 bg-purple-50 rounded-xl border border-purple-200 flex items-center justify-between">
+              <div>
+                <span className="font-bold text-purple-950 block text-xs">
+                  Requisition Summary: {selectedCatalogTests.length + (customLabTest.trim() ? 1 : 0)} Test(s) Selected
+                </span>
+                <span className="text-[10px] text-purple-700">
+                  {selectedCatalogTests.map((t) => t.name).concat(customLabTest.trim() ? [customLabTest.trim()] : []).join(', ') || 'No tests selected'}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] text-slate-500 block">Total Est. Cost</span>
+                <span className="text-base font-black text-purple-900">
+                  ₹{selectedCatalogTests.reduce((acc, t) => acc + (t.price || 0), 0) + (customLabTest.trim() ? Number(customLabPrice || 0) : 0)}
+                </span>
+              </div>
+            </div>
+
+            {/* Priority & Notes */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Requisition Priority</label>
+                <div className="flex gap-4 pt-1">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="priority"
+                      value="NORMAL"
+                      checked={labPriority === 'NORMAL'}
+                      onChange={() => setLabPriority('NORMAL')}
+                    />
+                    <span>Normal Routine</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer font-bold text-rose-600">
+                    <input
+                      type="radio"
+                      name="priority"
+                      value="URGENT"
+                      checked={labPriority === 'URGENT'}
+                      onChange={() => setLabPriority('URGENT')}
+                    />
+                    <span>Urgent / Stat</span>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Clinical Indication / Instructions
+                </label>
+                <input
+                  type="text"
+                  value={labNotes}
+                  onChange={(e) => setLabNotes(e.target.value)}
+                  placeholder="Suspected infection, pre-op evaluation..."
+                  className="w-full px-3 py-1.5 rounded-lg border border-slate-200 text-xs"
+                />
+              </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
@@ -1522,6 +1817,292 @@ export const DoctorDashboardPage: React.FC = () => {
               </Button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* EDIT PRESCRIPTION TEMPLATE MODAL */}
+      {editingTemplate && (
+        <Modal
+          isOpen={!!editingTemplate}
+          onClose={() => setEditingTemplate(null)}
+          title={`Edit Prescription Template - ${editingTemplate.diseaseName}`}
+          maxWidth="lg"
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!editingTemplate.diseaseName?.trim()) {
+                toast.error('Disease Name Required', 'Please enter a disease/condition name.');
+                return;
+              }
+              updateTemplateMutation.mutate({
+                id: editingTemplate.id,
+                data: {
+                  diseaseName: editingTemplate.diseaseName.trim(),
+                  diagnosis: editingTemplate.diagnosis?.trim() || editingTemplate.diseaseName.trim(),
+                  medicines: editingTemplate.medicines || [],
+                  instructions: editingTemplate.instructions?.trim() || undefined,
+                },
+              });
+            }}
+            className="space-y-4 text-xs"
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Disease / Condition Name <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={editingTemplate.diseaseName}
+                  onChange={(e) => setEditingTemplate({ ...editingTemplate, diseaseName: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Diagnosis</label>
+                <input
+                  type="text"
+                  value={editingTemplate.diagnosis || ''}
+                  onChange={(e) => setEditingTemplate({ ...editingTemplate, diagnosis: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                />
+              </div>
+            </div>
+
+            {/* Medicines List */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="font-semibold text-slate-700">Prescription Medications:</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const current = editingTemplate.medicines || [];
+                    setEditingTemplate({
+                      ...editingTemplate,
+                      medicines: [
+                        ...current,
+                        { name: '', dosage: '1 Tab', frequency: '1-0-1', duration: '5 days', instructions: 'After food' },
+                      ],
+                    });
+                  }}
+                  className="text-royal-600 text-xs font-bold hover:underline flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add Medicine
+                </button>
+              </div>
+
+              <div className="space-y-2 max-h-56 overflow-y-auto p-1 border border-slate-200 rounded-xl">
+                {(editingTemplate.medicines || []).map((m: any, idx: number) => (
+                  <div key={idx} className="p-2 bg-slate-50 rounded-lg border border-slate-200 grid grid-cols-1 sm:grid-cols-5 gap-2 items-center">
+                    <input
+                      type="text"
+                      placeholder="Medication Name"
+                      value={m.name}
+                      onChange={(e) => {
+                        const copy = [...editingTemplate.medicines];
+                        copy[idx].name = e.target.value;
+                        setEditingTemplate({ ...editingTemplate, medicines: copy });
+                      }}
+                      className="sm:col-span-2 px-2 py-1 rounded border border-slate-200 text-xs bg-white"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Dosage"
+                      value={m.dosage}
+                      onChange={(e) => {
+                        const copy = [...editingTemplate.medicines];
+                        copy[idx].dosage = e.target.value;
+                        setEditingTemplate({ ...editingTemplate, medicines: copy });
+                      }}
+                      className="px-2 py-1 rounded border border-slate-200 text-xs bg-white"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Frequency"
+                      value={m.frequency}
+                      onChange={(e) => {
+                        const copy = [...editingTemplate.medicines];
+                        copy[idx].frequency = e.target.value;
+                        setEditingTemplate({ ...editingTemplate, medicines: copy });
+                      }}
+                      className="px-2 py-1 rounded border border-slate-200 text-xs bg-white"
+                    />
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        placeholder="Duration"
+                        value={m.duration}
+                        onChange={(e) => {
+                          const copy = [...editingTemplate.medicines];
+                          copy[idx].duration = e.target.value;
+                          setEditingTemplate({ ...editingTemplate, medicines: copy });
+                        }}
+                        className="w-full px-2 py-1 rounded border border-slate-200 text-xs bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const copy = editingTemplate.medicines.filter((_: any, i: number) => i !== idx);
+                          setEditingTemplate({ ...editingTemplate, medicines: copy });
+                        }}
+                        className="text-rose-500 hover:text-rose-700 p-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Clinical Instructions & Advice</label>
+              <textarea
+                rows={2}
+                value={editingTemplate.instructions || ''}
+                onChange={(e) => setEditingTemplate({ ...editingTemplate, instructions: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <Button type="button" variant="ghost" size="sm" onClick={() => setEditingTemplate(null)}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                className="bg-royal-600 hover:bg-royal-700 font-bold"
+                isLoading={updateTemplateMutation.isPending}
+              >
+                Save Changes
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* BULK UPLOAD PRESCRIPTION TEMPLATES MODAL */}
+      {isBulkTemplateOpen && (
+        <Modal
+          isOpen={isBulkTemplateOpen}
+          onClose={() => setIsBulkTemplateOpen(false)}
+          title="Bulk Upload Prescription Templates (CSV / Excel)"
+          maxWidth="lg"
+        >
+          <div className="space-y-4 text-xs">
+            <div className="flex items-center justify-between p-3 bg-royal-50/70 border border-royal-200 rounded-xl">
+              <div>
+                <span className="font-bold text-royal-950 block">Standard Format: CSV or Tab-separated</span>
+                <span className="text-[11px] text-royal-700">
+                  Headers: diseaseName, diagnosis, medicines (Name:Dose:Freq:Days), instructions
+                </span>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const sampleCsv =
+                    'diseaseName,diagnosis,medicines,instructions\n' +
+                    '"Viral Fever","Acute Febrile Illness","Paracetamol 650mg:1 Tab:1-0-1:5 days;Cetirizine 10mg:1 Tab:0-0-1:3 days","Warm fluids and rest"\n' +
+                    '"Acute Gastroenteritis","Acute Diarrhea","Ofloxacin-Ornidazole:1 Tab:1-0-1:5 days;ORS Sachet:1 Sachet:As needed:3 days","Hydration with ORS"\n' +
+                    '"Hypertension","Primary Hypertension","Telmisartan 40mg:1 Tab:1-0-0:30 days;Amlodipine 5mg:1 Tab:0-0-1:30 days","Low salt diet, weekly BP log"';
+                  const blob = new Blob([sampleCsv], { type: 'text/csv;charset=utf-8;' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = 'sample_prescription_templates.csv';
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="text-xs font-bold text-royal-700 border-royal-300 hover:bg-royal-100"
+              >
+                <Download className="w-3.5 h-3.5 mr-1" /> Download Sample CSV
+              </Button>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Upload CSV File or Paste Data:
+              </label>
+              <input
+                type="file"
+                accept=".csv,.txt"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (evt) => {
+                      const text = evt.target?.result as string;
+                      setBulkCsvText(text || '');
+                      parseCsvText(text || '');
+                    };
+                    reader.readAsText(file);
+                  }
+                }}
+                className="mb-2 block w-full text-xs text-slate-500 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-royal-50 file:text-royal-700 hover:file:bg-royal-100"
+              />
+              <textarea
+                rows={5}
+                value={bulkCsvText}
+                onChange={(e) => {
+                  setBulkCsvText(e.target.value);
+                  parseCsvText(e.target.value);
+                }}
+                placeholder="Paste CSV content here (including header row)..."
+                className="w-full font-mono text-[11px] p-2.5 rounded-xl border border-slate-200"
+              />
+            </div>
+
+            {bulkPreview.length > 0 && (
+              <div className="space-y-2">
+                <span className="font-bold text-slate-700 block">
+                  Preview: {bulkPreview.length} Template(s) Ready to Import
+                </span>
+                <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl">
+                  <table className="w-full text-[11px] text-left">
+                    <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="px-3 py-2">Disease</th>
+                        <th className="px-3 py-2">Diagnosis</th>
+                        <th className="px-3 py-2">Medicines Count</th>
+                        <th className="px-3 py-2">Instructions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                      {bulkPreview.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-3 py-1.5 font-bold text-slate-900">{item.diseaseName}</td>
+                          <td className="px-3 py-1.5">{item.diagnosis}</td>
+                          <td className="px-3 py-1.5 font-mono text-royal-600">{item.medicines?.length || 0} meds</td>
+                          <td className="px-3 py-1.5 truncate max-w-xs">{item.instructions || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <Button type="button" variant="ghost" size="sm" onClick={() => setIsBulkTemplateOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={bulkPreview.length === 0}
+                className="bg-royal-600 hover:bg-royal-700 font-bold"
+                onClick={() => bulkCreateTemplatesMutation.mutate(bulkPreview)}
+                isLoading={bulkCreateTemplatesMutation.isPending}
+              >
+                Import {bulkPreview.length} Template(s)
+              </Button>
+            </div>
+          </div>
         </Modal>
       )}
     </div>

@@ -10,6 +10,7 @@ import superAdminRoutes from './superAdmin.routes';
 import otpRoutes from './otp.routes';
 import supportStaffRoutes from './supportStaff.routes';
 import labRoutes from './lab.routes';
+import publicLabRoutes from './publicLab.routes';
 import pharmacyRoutes from './pharmacy.routes';
 
 const router = Router();
@@ -25,6 +26,7 @@ router.use('/super-admin', superAdminRoutes);
 router.use('/otp', otpRoutes);
 router.use('/support-staff', supportStaffRoutes);
 router.use('/lab', labRoutes);
+router.use('/labs', publicLabRoutes);
 router.use('/pharmacy', pharmacyRoutes);
 
 // Health check endpoint

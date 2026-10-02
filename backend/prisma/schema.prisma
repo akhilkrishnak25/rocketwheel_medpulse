@@ -61,6 +61,7 @@ model Hospital {
   pharmacies          Pharmacy[]
   vitals              PatientVital[]
   labRequests         LabTestRequest[]
+  labTests            LabTest[]
   prescriptions       Prescription[]
   notifications       Notification[]
   reviews             Review[]
@@ -410,8 +411,29 @@ model Lab {
   status        String           @default("PENDING") // PENDING, APPROVED, ACTIVE, REJECTED, SUSPENDED
   technicians   LabTechnician[]
   testRequests  LabTestRequest[]
+  tests         LabTest[]
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
+}
+
+model LabTest {
+  id          String    @id @default(uuid())
+  labId       String?
+  lab         Lab?      @relation(fields: [labId], references: [id], onDelete: Cascade)
+  hospitalId  String?
+  hospital    Hospital? @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
+  name        String
+  code        String?
+  category    String?   @default("Pathology")
+  description String?
+  price       Float     @default(0)
+  status      String    @default("ACTIVE") // ACTIVE, INACTIVE
+  tatHours    Int?      @default(24)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([labId, status])
+  @@index([hospitalId, status])
 }
 
 model LabTechnician {
@@ -432,19 +454,21 @@ model LabTestRequest {
   requestNumber String       @unique // e.g. LAB-REQ-10023
   patientId     String
   patient       Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  hospitalId    String
-  hospital      Hospital     @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
-  doctorId      String
-  doctor        Doctor       @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  hospitalId    String?
+  hospital      Hospital?    @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  doctorId      String?
+  doctor        Doctor?      @relation(fields: [doctorId], references: [id], onDelete: Cascade)
   appointmentId String?
   appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   labId         String?
   lab           Lab?         @relation(fields: [labId], references: [id], onDelete: SetNull)
-  tests         String       // JSON array of [{ name, code?, notes? }]
+  tests         String       // JSON array of [{ name, code?, price?, notes? }]
   clinicalNotes String?     
   priority      String       @default("NORMAL") // NORMAL, URGENT
   status        String       @default("REQUESTED") // REQUESTED, ACCEPTED, PROCESSING, COMPLETED, CANCELLED
   report        LabReport?
+  preferredDate String?
+  totalAmount   Float?       @default(0)
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 

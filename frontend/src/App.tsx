@@ -25,6 +25,7 @@ import { SupportStaffDashboardPage } from './pages/SupportStaffDashboardPage';
 import { LabTechnicianDashboardPage } from './pages/LabTechnicianDashboardPage';
 import { PharmacyDashboardPage } from './pages/PharmacyDashboardPage';
 import { StaffRegistrationPage } from './pages/StaffRegistrationPage';
+import { LabTestsPage } from './pages/LabTestsPage';
 import { Button } from './components/ui/Button';
 
 // 404 Not Found Component
@@ -57,6 +58,7 @@ export const App: React.FC = () => {
         />
         <Route path="/verify-op/:token" element={<OpVerificationPage />} />
         <Route path="/check-appointment" element={<AppointmentLookupPage />} />
+        <Route path="/lab-tests" element={<LabTestsPage />} />
         
         {/* Real-time Authentication & Onboarding Routes */}
         <Route path="/staff/login" element={<StaffLoginPage />} />

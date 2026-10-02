@@ -201,10 +201,28 @@ export class DoctorDashboardController {
       const doctorId = req.user?.doctorId;
       if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
 
-      const templates = await DoctorDashboardService.getPrescriptionTemplates(doctorId);
+      const search = req.query.search as string | undefined;
+      const templates = await DoctorDashboardService.getPrescriptionTemplates(doctorId, search);
       return successResponse(res, templates, 'Prescription templates retrieved');
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to fetch templates', 500);
+    }
+  }
+
+  static async bulkCreateTemplates(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const templates = req.body.templates || req.body;
+      if (!Array.isArray(templates) || templates.length === 0) {
+        return errorResponse(res, 'Invalid request. An array of templates is required.', 400);
+      }
+
+      const result = await DoctorDashboardService.bulkCreatePrescriptionTemplates(doctorId, templates, req.user?.id);
+      return successResponse(res, result, `Successfully imported ${result.count} prescription templates`, 201);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to bulk import templates', 400);
     }
   }
 

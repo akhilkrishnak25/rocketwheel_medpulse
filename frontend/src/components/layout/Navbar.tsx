@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { FileText, Lock, Menu, X, ShieldCheck, Search, PhoneCall, Calendar } from 'lucide-react';
+import { FileText, Lock, Menu, X, ShieldCheck, Search, PhoneCall, Calendar, FlaskConical } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { RocketWheelLogo } from '../common/RocketWheelLogo';
 
@@ -52,6 +52,17 @@ export const Navbar: React.FC = () => {
               }`}
             >
               Hospitals Directory
+            </Link>
+            <Link
+              to="/lab-tests"
+              className={`flex items-center gap-1.5 text-sm font-semibold transition-colors ${
+                isActive('/lab-tests')
+                  ? 'text-purple-600 font-bold'
+                  : 'text-slate-600 hover:text-purple-600'
+              }`}
+            >
+              <FlaskConical className="w-4 h-4 text-purple-600" />
+              Lab Tests
             </Link>
             <Link
               to="/#departments"
@@ -119,6 +130,13 @@ export const Navbar: React.FC = () => {
             className="block px-3 py-2 rounded-lg text-base font-semibold text-slate-700 hover:bg-royal-50 hover:text-royal-600"
           >
             Hospitals Directory
+          </Link>
+          <Link
+            to="/lab-tests"
+            onClick={() => setMobileMenuOpen(false)}
+            className="block px-3 py-2 rounded-lg text-base font-semibold text-purple-700 bg-purple-50"
+          >
+            Diagnostic Lab Tests
           </Link>
           <Link
             to="/check-appointment"

@@ -43,13 +43,23 @@ export async function apiClient<T = any>(
         if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].message) {
           errorMessage = parsed
             .map((err: any) => {
-              const field = Array.isArray(err.path) && err.path.length ? `${err.path.join('.')}: ` : '';
+              const field = Array.isArray(err.path) && err.path.length ? `${err.path[err.path.length - 1]}: ` : '';
+              if (err.code === 'invalid_type' && err.received === 'undefined') return `${field}is required`;
+              if (err.code === 'invalid_enum_value') return `Please select a valid option for ${field.replace(':', '')}`;
               return `${field}${err.message}`;
             })
             .join('; ');
         }
       } catch {}
     }
+
+    if (errorMessage.includes('invalid_enum_value') || errorMessage.includes('Invalid enum value')) {
+      errorMessage = 'Please select a valid option from the dropdown menu.';
+    }
+    if (errorMessage.includes('received undefined') || errorMessage.includes('Expected string, received undefined')) {
+      errorMessage = 'Please complete all required fields.';
+    }
+
     throw new Error(errorMessage);
   }
 
