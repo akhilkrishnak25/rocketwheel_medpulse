@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
@@ -50,6 +50,29 @@ export const SupportStaffDashboardPage: React.FC = () => {
     queryFn: () => supportStaffApi.getQueue(),
     refetchInterval: 10000,
   });
+
+  // Immediate popup/toast notifications when new OPD patients arrive in queue (Requirement 13)
+  const prevQueueIdsRef = useRef<Set<string>>(new Set());
+  const isInitialQueueMount = useRef(true);
+
+  useEffect(() => {
+    if (!queue || !Array.isArray(queue)) return;
+    if (isInitialQueueMount.current) {
+      prevQueueIdsRef.current = new Set(queue.map((q: any) => q.id));
+      isInitialQueueMount.current = false;
+      return;
+    }
+
+    for (const apt of queue) {
+      if (!prevQueueIdsRef.current.has(apt.id)) {
+        prevQueueIdsRef.current.add(apt.id);
+        toast.info(
+          'New OPD Patient Arrived',
+          `${apt.patient?.fullName || 'Patient'} (Token #${apt.tokenNumber || '—'}) ready for vitals check`
+        );
+      }
+    }
+  }, [queue, toast]);
 
   // Record vitals mutation
   const recordVitalsMutation = useMutation({

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import prisma from '../config/prisma';
 import { AuditService } from '../utils/audit';
+import { NotificationService } from './notification.service';
 
 export class DoctorDashboardService {
   static async getDoctorAppointments(doctorId: string, date?: string) {
@@ -226,6 +227,15 @@ export class DoctorDashboardService {
       details: { patientName: apt.patient.fullName, tokenNumber: apt.tokenNumber },
     });
 
+    await NotificationService.createNotification({
+      hospitalId: updated.hospitalId,
+      recipientType: 'HOSPITAL_ADMIN',
+      title: 'Consultation In Progress',
+      message: `Consultation started for patient ${apt.patient.fullName} (Token #${apt.tokenNumber}).`,
+      type: 'CONSULTATION_UPDATE',
+      metadata: { appointmentId, status: 'IN_CONSULTATION' },
+    });
+
     return updated;
   }
 
@@ -332,6 +342,15 @@ export class DoctorDashboardService {
         medicineCount: data.medicines?.length || 0,
         sentToPharmacy: data.sendToPharmacy,
       },
+    });
+
+    await NotificationService.createNotification({
+      hospitalId: apt.hospitalId,
+      recipientType: 'HOSPITAL_ADMIN',
+      title: 'Consultation Completed',
+      message: `Consultation completed for patient ${apt.patient.fullName}. Diagnosis: ${data.diagnosis}`,
+      type: 'CONSULTATION_UPDATE',
+      metadata: { appointmentId, status: 'COMPLETED' },
     });
 
     return result;
@@ -635,6 +654,18 @@ export class DoctorDashboardService {
       entityId: request.id,
       details: { requestNumber, testsCount: data.tests.length, totalAmount },
     });
+
+    if (doctor.hospitalId) {
+      await NotificationService.createNotification({
+        hospitalId: doctor.hospitalId,
+        recipientType: 'LAB_TECH',
+        recipientId: targetLabId,
+        title: 'New Lab Request Received',
+        message: `New lab requisition #${requestNumber} created for patient ${request.patient.fullName} (${data.tests.length} tests).`,
+        type: 'LAB_REQUEST_RECEIVED',
+        metadata: { requestId: request.id, requestNumber, labId: targetLabId },
+      });
+    }
 
     return request;
   }

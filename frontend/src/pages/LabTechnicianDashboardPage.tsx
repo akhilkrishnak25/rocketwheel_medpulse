@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   FlaskConical,
@@ -77,6 +77,29 @@ export const LabTechnicianDashboardPage: React.FC = () => {
     refetchInterval: 10000,
     enabled: activeMainTab === 'requests',
   });
+
+  // Immediate popup/toast notifications when new lab requests arrive (Requirement 13)
+  const prevReqIdsRef = useRef<Set<string>>(new Set());
+  const isInitialReqMount = useRef(true);
+
+  useEffect(() => {
+    if (!requests || !Array.isArray(requests)) return;
+    if (isInitialReqMount.current) {
+      prevReqIdsRef.current = new Set(requests.map((r: any) => r.id));
+      isInitialReqMount.current = false;
+      return;
+    }
+
+    for (const req of requests) {
+      if (!prevReqIdsRef.current.has(req.id)) {
+        prevReqIdsRef.current.add(req.id);
+        toast.info(
+          'New Lab Request Received',
+          `Requisition #${req.requestNumber} for ${req.patient?.fullName || 'Patient'}`
+        );
+      }
+    }
+  }, [requests, toast]);
 
   // Fetch lab tests catalog
   const { data: labTests, isLoading: isTestsLoading, refetch: refetchLabTests } = useQuery({

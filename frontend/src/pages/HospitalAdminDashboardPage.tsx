@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Calendar,
@@ -171,6 +171,39 @@ export const HospitalAdminDashboardPage: React.FC = () => {
     queryFn: () => adminApi.getNotifications(),
     refetchInterval: 10000,
   });
+
+  // Immediate popup/toast notifications when new alerts arrive (Requirement 13)
+  const prevNotifIdsRef = useRef<Set<string>>(new Set());
+  const isInitialNotifMount = useRef(true);
+
+  useEffect(() => {
+    if (!notifications || !Array.isArray(notifications)) return;
+    if (isInitialNotifMount.current) {
+      prevNotifIdsRef.current = new Set(notifications.map((n: any) => n.id));
+      isInitialNotifMount.current = false;
+      return;
+    }
+
+    for (const notif of notifications) {
+      if (!prevNotifIdsRef.current.has(notif.id)) {
+        prevNotifIdsRef.current.add(notif.id);
+        const title = notif.title || 'System Notification';
+        const msg = notif.message ? notif.message.split('\n')[0] : '';
+        if (notif.type?.includes('REJECT') || notif.type?.includes('CANCEL')) {
+          toast.error(title, msg);
+        } else if (
+          notif.type?.includes('APPROV') ||
+          notif.type?.includes('CONFIRM') ||
+          notif.type?.includes('COMPLETED') ||
+          notif.type?.includes('BOOKED')
+        ) {
+          toast.success(title, msg);
+        } else {
+          toast.info(title, msg);
+        }
+      }
+    }
+  }, [notifications, toast]);
 
   // Fetch pending doctors
   const { data: pendingDoctors } = useQuery({

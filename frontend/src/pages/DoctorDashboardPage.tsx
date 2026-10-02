@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Stethoscope,
@@ -107,6 +107,40 @@ export const DoctorDashboardPage: React.FC = () => {
     queryFn: () => doctorDashboardApi.getAppointments(),
     refetchInterval: 8000,
   });
+
+  // Immediate popup/toast notifications when new patients arrive in queue or vitals ready (Requirement 13)
+  const prevAppointmentsRef = useRef<Map<string, string>>(new Map());
+  const isInitialAptMount = useRef(true);
+
+  useEffect(() => {
+    if (!appointments || !Array.isArray(appointments)) return;
+    if (isInitialAptMount.current) {
+      prevAppointmentsRef.current = new Map(appointments.map((a: any) => [a.id, a.status]));
+      isInitialAptMount.current = false;
+      return;
+    }
+
+    for (const apt of appointments) {
+      if (!prevAppointmentsRef.current.has(apt.id)) {
+        prevAppointmentsRef.current.set(apt.id, apt.status);
+        toast.info(
+          'New Patient in Queue',
+          `${apt.patient?.fullName || 'Patient'} (Token #${apt.tokenNumber || '—'})`
+        );
+      } else {
+        const prevStatus = prevAppointmentsRef.current.get(apt.id);
+        if (prevStatus !== apt.status) {
+          prevAppointmentsRef.current.set(apt.id, apt.status);
+          if (apt.status === 'WAITING') {
+            toast.success(
+              'Patient Ready for Consultation',
+              `${apt.patient?.fullName || 'Patient'} vitals recorded by nurse`
+            );
+          }
+        }
+      }
+    }
+  }, [appointments, toast]);
 
   // Doctor profile query
   const { data: profile, refetch: refetchProfile } = useQuery({

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import prisma from '../config/prisma';
 import { AuditService } from '../utils/audit';
+import { NotificationService } from './notification.service';
 
 export class LabService {
   /**
@@ -105,6 +106,22 @@ export class LabService {
         patientName: request.patient.fullName,
       },
     });
+
+    if (request.hospitalId) {
+      const isApproved = normalizedStatus === 'ACCEPTED';
+      const isRejected = normalizedStatus === 'CANCELLED';
+      const notifType = isApproved ? 'LAB_REQUEST_APPROVED' : isRejected ? 'LAB_REQUEST_REJECTED' : 'STATUS_CHANGED';
+      const notifTitle = isApproved ? 'Lab Request Approved' : isRejected ? 'Lab Request Rejected' : `Lab Request ${normalizedStatus}`;
+      await NotificationService.createNotification({
+        hospitalId: request.hospitalId,
+        recipientType: 'DOCTOR',
+        recipientId: request.doctorId,
+        title: notifTitle,
+        message: `Requisition #${request.requestNumber} for ${request.patient.fullName} marked as ${normalizedStatus}.`,
+        type: notifType,
+        metadata: { requestId: request.id, requestNumber: request.requestNumber, status: normalizedStatus },
+      });
+    }
 
     return updated;
   }

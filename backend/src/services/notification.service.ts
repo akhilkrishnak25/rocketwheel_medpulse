@@ -62,6 +62,36 @@ export class NotificationService {
     console.log(`Dear ${params.patientName}, your appointment with ${params.doctorName} on ${params.appointmentDate} at ${params.timeSlot} is confirmed. Digital OP: ${params.opNumber}.\n`);
   }
 
+  /**
+   * Generalized method to create system notifications across all roles
+   */
+  static async createNotification(params: {
+    hospitalId: string;
+    recipientType: string;
+    recipientId?: string | null;
+    title: string;
+    message: string;
+    type: string;
+    metadata?: any;
+  }) {
+    try {
+      return await prisma.notification.create({
+        data: {
+          hospitalId: params.hospitalId,
+          recipientType: params.recipientType,
+          recipientId: params.recipientId || null,
+          title: params.title,
+          message: params.message,
+          type: params.type,
+          metadata: params.metadata ? JSON.stringify(params.metadata) : null,
+        },
+      });
+    } catch (err) {
+      console.warn('NotificationService create warning:', err);
+      return null;
+    }
+  }
+
   static async getHospitalNotifications(hospitalId: string) {
     return prisma.notification.findMany({
       where: { hospitalId },

@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import prisma from '../config/prisma';
 import { AuditService } from '../utils/audit';
+import { NotificationService } from './notification.service';
 
 export class AdminService {
   static async getDashboardMetrics(hospitalId: string) {
@@ -170,6 +171,16 @@ export class AdminService {
       details: { fromStatus: apt.status, toStatus: data.status, reason: data.cancellationReason },
     });
 
+    await NotificationService.createNotification({
+      hospitalId,
+      recipientType: 'DOCTOR',
+      recipientId: apt.doctorId,
+      title: `Appointment Status: ${data.status}`,
+      message: `Appointment #${apt.appointmentNumber} for patient ${apt.patient.fullName} updated to ${data.status}.`,
+      type: 'STATUS_CHANGED',
+      metadata: { appointmentId, status: data.status },
+    });
+
     return updated;
   }
 
@@ -324,6 +335,16 @@ export class AdminService {
       details: { doctorName: doc.name, hospitalId },
     });
 
+    await NotificationService.createNotification({
+      hospitalId,
+      recipientType: 'DOCTOR',
+      recipientId: doc.userId,
+      title: 'Registration Approved',
+      message: `Dr. ${doc.name}, your registration has been approved. You can now access the consultation portal.`,
+      type: 'REGISTRATION_APPROVED',
+      metadata: { doctorId },
+    });
+
     return updated;
   }
 
@@ -359,6 +380,16 @@ export class AdminService {
       entity: 'Doctor',
       entityId: doctorId,
       details: { doctorName: doc.name, hospitalId, reason },
+    });
+
+    await NotificationService.createNotification({
+      hospitalId,
+      recipientType: 'DOCTOR',
+      recipientId: doc.userId,
+      title: 'Registration Rejected',
+      message: `Dr. ${doc.name}, your registration application was rejected.${reason ? ' Reason: ' + reason : ''}`,
+      type: 'REGISTRATION_REJECTED',
+      metadata: { doctorId, reason },
     });
 
     return updated;
@@ -931,6 +962,16 @@ export class AdminService {
           status: isApproved ? 'ACTIVE' : 'REJECTED',
           isActive: isApproved,
         },
+      });
+
+      await NotificationService.createNotification({
+        hospitalId,
+        recipientType: 'STAFF',
+        recipientId: staff.userId,
+        title: isApproved ? 'Registration Approved' : 'Registration Rejected',
+        message: `Support staff ${staff.user?.name || 'Staff'} registration has been ${isApproved ? 'approved' : 'rejected'}.`,
+        type: isApproved ? 'REGISTRATION_APPROVED' : 'REGISTRATION_REJECTED',
+        metadata: { staffId, status },
       });
 
       return updated;
