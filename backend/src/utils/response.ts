@@ -26,9 +26,24 @@ export const errorResponse = (
   statusCode: number = 500,
   error?: any
 ) => {
+  let displayMessage = message;
+  if (typeof displayMessage === 'string' && displayMessage.trim().startsWith('[') && displayMessage.trim().endsWith(']')) {
+    try {
+      const parsed = JSON.parse(displayMessage);
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].message) {
+        displayMessage = parsed
+          .map((err: any) => {
+            const field = Array.isArray(err.path) && err.path.length ? `${err.path.join('.')}: ` : '';
+            return `${field}${err.message}`;
+          })
+          .join('; ');
+      }
+    } catch {}
+  }
+
   return res.status(statusCode).json({
     success: false,
-    message,
+    message: displayMessage,
     error,
   });
 };

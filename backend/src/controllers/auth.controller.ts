@@ -477,12 +477,23 @@ export class AuthController {
         slug = `${baseSlug}-${counter++}`;
       }
 
-      const generatedCode =
-        code ||
-        `${name.replace(/[^A-Za-z]/g, '').substring(0, 4).toUpperCase()}-${city
+      let finalCode = code;
+      if (finalCode) {
+        const existingCode = await prisma.hospital.findUnique({ where: { code: finalCode } });
+        if (existingCode) {
+          return errorResponse(res, `A hospital with code '${finalCode}' already exists. Please choose a different code.`, 400);
+        }
+      } else {
+        const baseCode = `${name.replace(/[^A-Za-z]/g, '').substring(0, 4).toUpperCase()}-${city
           .replace(/[^A-Za-z]/g, '')
           .substring(0, 3)
           .toUpperCase()}`;
+        finalCode = baseCode;
+        let codeCounter = 1;
+        while (await prisma.hospital.findUnique({ where: { code: finalCode } })) {
+          finalCode = `${baseCode}-${codeCounter++}`;
+        }
+      }
 
       const facilitiesJson = Array.isArray(facilities)
         ? JSON.stringify(facilities)
@@ -500,7 +511,7 @@ export class AuthController {
           data: {
             name,
             slug,
-            code: generatedCode,
+            code: finalCode,
             status: 'PENDING',
             website: website || null,
             logoUrl: 'https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=150&auto=format&fit=crop&q=80',
@@ -559,7 +570,7 @@ export class AuthController {
             hospitalId: hospital.id,
             name: 'General Medicine',
             slug: 'general-medicine',
-            code: `${generatedCode.split('-')[0]}-GM`,
+            code: `${finalCode.split('-')[0]}-GM`,
             description: 'Comprehensive outpatient and inpatient adult general medical care.',
             icon: 'Stethoscope',
           },
@@ -807,6 +818,7 @@ export class AuthController {
           name: result.doctor.name,
           email: result.user.email,
           status: 'PENDING',
+          message: 'Doctor account registered successfully! Awaiting approval from Hospital Administration.',
         },
         'Doctor account registered successfully! Awaiting approval from Hospital Administration.',
         201
@@ -899,6 +911,7 @@ export class AuthController {
           labId: result.lab.id,
           labName: result.lab.name,
           status: 'PENDING',
+          message: 'Laboratory registered successfully! Registration is pending administrator approval.',
         },
         'Laboratory registered successfully! Registration is pending administrator approval.',
         201
@@ -911,7 +924,7 @@ export class AuthController {
   static async registerSupportStaff(req: Request, res: Response) {
     try {
       const validated = registerSupportStaffSchema.parse(req.body);
-      const { name, email, password, phone, hospitalId, departmentId, roleTitle } = validated;
+      const { name, email, password, phone, hospitalId, departmentId, department, roleTitle } = validated as any;
 
       const existingUser = await prisma.user.findUnique({
         where: { email: email.toLowerCase() },
@@ -924,6 +937,10 @@ export class AuthController {
       if (!hospital) return errorResponse(res, 'Selected hospital not found', 404);
 
       const passwordHash = await bcrypt.hash(password, 10);
+
+      const resolvedRoleTitle = department && !roleTitle.includes(department)
+        ? `${roleTitle} (${department})`
+        : roleTitle;
 
       const result = await prisma.$transaction(async (tx) => {
         const user = await tx.user.create({
@@ -943,7 +960,7 @@ export class AuthController {
             userId: user.id,
             hospitalId,
             departmentId: departmentId || null,
-            roleTitle,
+            roleTitle: resolvedRoleTitle,
             status: 'PENDING',
           },
         });
@@ -970,6 +987,7 @@ export class AuthController {
           name: result.user.name,
           email: result.user.email,
           status: 'PENDING',
+          message: 'Support staff registration submitted successfully! Awaiting Hospital Administrator approval.',
         },
         'Support staff registration submitted successfully! Awaiting Hospital Administrator approval.',
         201
@@ -1049,6 +1067,7 @@ export class AuthController {
           pharmacyId: result.pharmacy.id,
           name: result.pharmacy.name,
           status: 'ACTIVE',
+          message: 'Pharmacy registered successfully! You can now log in.',
         },
         'Pharmacy registered successfully!',
         201

@@ -1318,10 +1318,10 @@ export const DoctorDashboardPage: React.FC = () => {
                   completeMutation.mutate({
                     appointmentId: activeAppointment.id,
                     payload: {
-                      diagnosis,
-                      symptoms,
-                      clinicalNotes,
-                      followUpDate,
+                      diagnosis: diagnosis.trim(),
+                      symptoms: symptoms.trim() || undefined,
+                      clinicalNotes: clinicalNotes.trim() || undefined,
+                      followUpDate: followUpDate.trim() || undefined,
                       vitals,
                       medicines,
                       sendToPharmacy,

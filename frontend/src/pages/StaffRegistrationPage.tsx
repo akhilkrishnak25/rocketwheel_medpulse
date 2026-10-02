@@ -16,7 +16,13 @@ import {
   FileCheck,
   ShieldCheck,
 } from 'lucide-react';
-import { authApi } from '../api/auth.api';
+import {
+  authApi,
+  RegisterDoctorDTO,
+  RegisterLabDTO,
+  RegisterSupportStaffDTO,
+  RegisterPharmacyDTO,
+} from '../api/auth.api';
 import { hospitalsApi } from '../api/hospitals.api';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -47,6 +53,7 @@ export const StaffRegistrationPage: React.FC = () => {
   const [docSpecialization, setDocSpecialization] = useState('');
   const [docExperience, setDocExperience] = useState(5);
   const [docFee, setDocFee] = useState(500);
+  const [docAbout, setDocAbout] = useState('');
 
   // Fetch departments for selected doctor hospital
   const { data: hospitalDetails } = useQuery({
@@ -67,7 +74,7 @@ export const StaffRegistrationPage: React.FC = () => {
   // Lab Form State
   const [labName, setLabName] = useState('');
   const [labLicense, setLabLicense] = useState('');
-  const [labType, setLabType] = useState<'INDEPENDENT' | 'HOSPITAL_ASSOCIATED'>('INDEPENDENT');
+  const [labType, setLabType] = useState<'INDEPENDENT' | 'HOSPITAL'>('INDEPENDENT');
   const [labHospitalId, setLabHospitalId] = useState('');
   const [labEmail, setLabEmail] = useState('');
   const [labPassword, setLabPassword] = useState('');
@@ -90,7 +97,7 @@ export const StaffRegistrationPage: React.FC = () => {
 
   // Doctor Mutation
   const doctorMutation = useMutation({
-    mutationFn: (data: any) => authApi.registerDoctor(data),
+    mutationFn: (data: RegisterDoctorDTO) => authApi.registerDoctor(data),
     onSuccess: (res) => {
       setSuccessMessage(res?.message || 'Doctor application submitted successfully for hospital administrator review.');
     },
@@ -99,7 +106,7 @@ export const StaffRegistrationPage: React.FC = () => {
 
   // Staff Mutation
   const staffMutation = useMutation({
-    mutationFn: (data: any) => authApi.registerSupportStaff(data),
+    mutationFn: (data: RegisterSupportStaffDTO) => authApi.registerSupportStaff(data),
     onSuccess: (res) => {
       setSuccessMessage(res?.message || 'Support staff application submitted for hospital administrator verification.');
     },
@@ -108,7 +115,7 @@ export const StaffRegistrationPage: React.FC = () => {
 
   // Lab Mutation
   const labMutation = useMutation({
-    mutationFn: (data: any) => authApi.registerLab(data),
+    mutationFn: (data: RegisterLabDTO) => authApi.registerLab(data),
     onSuccess: (res) => {
       setSuccessMessage(res?.message || 'Diagnostic laboratory application submitted for platform accreditation review.');
     },
@@ -117,7 +124,7 @@ export const StaffRegistrationPage: React.FC = () => {
 
   // Pharmacy Mutation
   const pharmacyMutation = useMutation({
-    mutationFn: (data: any) => authApi.registerPharmacy(data),
+    mutationFn: (data: RegisterPharmacyDTO) => authApi.registerPharmacy(data),
     onSuccess: (res) => {
       setSuccessMessage(res?.message || 'Pharmacy staff account created and registered successfully.');
     },
@@ -236,6 +243,7 @@ export const StaffRegistrationPage: React.FC = () => {
                 specialization: docSpecialization.trim(),
                 experienceYears: Number(docExperience),
                 consultationFee: Number(docFee),
+                about: docAbout.trim() || `Experienced ${docSpecialization.trim() || 'medical'} specialist with ${docExperience || 5} years of clinical expertise.`,
               });
             }}
             className="space-y-4 text-xs"
@@ -405,6 +413,19 @@ export const StaffRegistrationPage: React.FC = () => {
               </div>
             </div>
 
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Professional Bio / Clinical Overview <span className="text-slate-400 font-normal">(Optional)</span>
+              </label>
+              <textarea
+                value={docAbout}
+                onChange={(e) => setDocAbout(e.target.value)}
+                placeholder="Brief summary of clinical expertise, specialized treatments, or patient care philosophy..."
+                rows={2}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+              />
+            </div>
+
             <Button
               type="submit"
               size="md"
@@ -563,13 +584,19 @@ export const StaffRegistrationPage: React.FC = () => {
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              if (labType === 'HOSPITAL' && !labHospitalId) {
+                toast.error('Hospital Required', 'Please select associated hospital facility.');
+                return;
+              }
               labMutation.mutate({
                 name: labName.trim(),
                 licenseNumber: labLicense.trim(),
                 type: labType,
-                hospitalId: labType === 'HOSPITAL_ASSOCIATED' ? labHospitalId : undefined,
+                hospitalId: labType === 'HOSPITAL' ? labHospitalId : undefined,
                 email: labEmail.trim(),
+                adminPassword: labPassword,
                 password: labPassword,
+                adminName: labContactPerson.trim(),
                 contactPerson: labContactPerson.trim(),
                 phone: labPhone.trim(),
                 address: labAddress.trim(),
@@ -626,11 +653,11 @@ export const StaffRegistrationPage: React.FC = () => {
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
                 >
                   <option value="INDEPENDENT">Independent Laboratory Center</option>
-                  <option value="HOSPITAL_ASSOCIATED">Hospital-Associated Laboratory</option>
+                  <option value="HOSPITAL">Hospital-Associated Laboratory</option>
                 </select>
               </div>
 
-              {labType === 'HOSPITAL_ASSOCIATED' && (
+              {labType === 'HOSPITAL' && (
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
                     Associated Hospital <span className="text-rose-500">*</span>
@@ -785,8 +812,12 @@ export const StaffRegistrationPage: React.FC = () => {
                 licenseNumber: pharmacyLicense.trim(),
                 hospitalId: pharmacyHospitalId,
                 email: pharmacyEmail.trim(),
+                adminPassword: pharmacyPassword,
                 password: pharmacyPassword,
+                staffPassword: pharmacyPassword,
+                adminName: pharmacyContactPerson.trim(),
                 contactPerson: pharmacyContactPerson.trim(),
+                staffName: pharmacyContactPerson.trim(),
                 phone: pharmacyPhone.trim(),
                 address: pharmacyAddress.trim(),
               });

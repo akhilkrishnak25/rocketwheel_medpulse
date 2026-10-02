@@ -36,7 +36,25 @@ export async function apiClient<T = any>(
   }));
 
   if (!response.ok || !json.success) {
-    throw new Error(json.message || `Request failed with status ${response.status}`);
+    let errorMessage = json.message || `Request failed with status ${response.status}`;
+    if (typeof errorMessage === 'string' && errorMessage.trim().startsWith('[') && errorMessage.trim().endsWith(']')) {
+      try {
+        const parsed = JSON.parse(errorMessage);
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].message) {
+          errorMessage = parsed
+            .map((err: any) => {
+              const field = Array.isArray(err.path) && err.path.length ? `${err.path.join('.')}: ` : '';
+              return `${field}${err.message}`;
+            })
+            .join('; ');
+        }
+      } catch {}
+    }
+    throw new Error(errorMessage);
+  }
+
+  if (json.data && typeof json.data === 'object' && json.message && !(json.data as any).message) {
+    (json.data as any).message = json.message;
   }
 
   return json.data;

@@ -7,6 +7,68 @@ export interface LoginResponse {
   refreshToken: string;
 }
 
+export interface RegisterDoctorDTO {
+  name: string;
+  email: string;
+  password: string;
+  phone: string;
+  hospitalId: string;
+  departmentId: string;
+  qualification: string;
+  specialization: string;
+  experienceYears?: number;
+  consultationFee?: number;
+  languages?: string;
+  about?: string;
+  workingDays?: string;
+  workingHoursStart?: string;
+  workingHoursEnd?: string;
+  slotDurationMinutes?: number;
+}
+
+export interface RegisterLabDTO {
+  name: string;
+  type?: 'HOSPITAL' | 'INDEPENDENT';
+  hospitalId?: string;
+  email: string;
+  phone: string;
+  address: string;
+  city: string;
+  licenseNumber: string;
+  adminName?: string;
+  contactPerson?: string;
+  adminPassword?: string;
+  password?: string;
+  state?: string;
+  pincode?: string;
+}
+
+export interface RegisterSupportStaffDTO {
+  name: string;
+  email: string;
+  password: string;
+  phone: string;
+  hospitalId: string;
+  departmentId?: string | null;
+  department?: string | null;
+  roleTitle?: string;
+}
+
+export interface RegisterPharmacyDTO {
+  name: string;
+  hospitalId?: string | null;
+  email: string;
+  phone: string;
+  address?: string | null;
+  licenseNumber: string;
+  staffName?: string;
+  contactPerson?: string;
+  staffPassword?: string;
+  password?: string;
+  adminName?: string;
+  adminPassword?: string;
+}
+
 export const authApi = {
   login: (credentials: { email: string; password: string }) =>
     api.post<LoginResponse>('/auth/login', credentials),
@@ -31,16 +93,16 @@ export const authApi = {
   registerHospital: (payload: any) =>
     api.post<{ message: string; hospitalId?: string }>('/auth/register-hospital', payload),
 
-  registerDoctor: (payload: any) =>
+  registerDoctor: (payload: RegisterDoctorDTO) =>
     api.post<{ message: string; id?: string }>('/auth/register-doctor', payload),
 
-  registerLab: (payload: any) =>
+  registerLab: (payload: RegisterLabDTO) =>
     api.post<{ message: string; labId?: string }>('/auth/register-lab', payload),
 
-  registerSupportStaff: (payload: any) =>
+  registerSupportStaff: (payload: RegisterSupportStaffDTO) =>
     api.post<{ message: string; id?: string }>('/auth/register-support-staff', payload),
 
-  registerPharmacy: (payload: any) =>
+  registerPharmacy: (payload: RegisterPharmacyDTO) =>
     api.post<{ message: string; pharmacyId?: string }>('/auth/register-pharmacy', payload),
 };
 

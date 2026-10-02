@@ -25,23 +25,43 @@ export const activateAccountSchema = z.object({
 
 export const registerHospitalSchema = z.object({
   name: z.string().min(3, 'Hospital name must be at least 3 characters'),
-  code: z.string().min(2, 'Hospital code must be at least 2 characters').toUpperCase().optional(),
-  licenseNumber: z.string().optional().nullable(),
+  code: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((val) => (val && val.trim().length >= 2 ? val.trim().toUpperCase() : undefined)),
+  licenseNumber: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((val) => (val && val.trim().length > 0 ? val.trim() : null)),
   email: z.string().email('Valid hospital email is required'),
   phone: z.string().min(7, 'Hospital phone is required'),
-  emergencyContact: z.string().optional().nullable(),
+  emergencyContact: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((val) => (val && val.trim().length > 0 ? val.trim() : null)),
   address: z.string().min(5, 'Address is required'),
   city: z.string().min(2, 'City is required'),
   state: z.string().min(2, 'State is required'),
   pincode: z.string().regex(/^\d{6}$/, 'Please enter a valid 6-digit Indian PIN code'),
-  website: z.string().optional().nullable(),
+  website: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((val) => (val && val.trim().length > 0 ? val.trim() : null)),
   openingHours: z.string().optional().default('24/7 (Emergency), OPD: 09:00 AM - 07:00 PM'),
   about: z.string().min(10, 'About / overview is required (min 10 characters)'),
   facilities: z.union([z.array(z.string()), z.string()]).optional().default([]),
   adminName: z.string().min(2, 'Administrator full name is required'),
   adminEmail: z.string().email('Valid administrator official email required'),
   adminPhone: z.string().min(7, 'Administrator phone is required'),
-  adminPassword: z.string().min(6, 'Password must be at least 6 characters').optional().nullable(),
+  adminPassword: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((val) => (val && val.trim().length >= 6 ? val : undefined)),
 });
 
 export const bulkImportDoctorRowSchema = z.object({
@@ -61,9 +81,9 @@ export const bulkImportDoctorRowSchema = z.object({
 
 
 export const createAppointmentSchema = z.object({
-  hospitalId: z.string().uuid('Invalid hospital ID'),
-  doctorId: z.string().uuid('Invalid doctor ID'),
-  departmentId: z.string().uuid('Invalid department ID'),
+  hospitalId: z.string().min(1, 'Invalid hospital ID'),
+  doctorId: z.string().min(1, 'Invalid doctor ID'),
+  departmentId: z.string().min(1, 'Invalid department ID'),
   appointmentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be formatted as YYYY-MM-DD'),
   timeSlot: z.string().min(1, 'Time slot is required'),
   // Guest Patient info (no login required!)
@@ -72,7 +92,7 @@ export const createAppointmentSchema = z.object({
     mobileNumber: z.string().regex(/^[6-9]\d{9}$/, 'Please enter a valid 10-digit Indian mobile number'),
     email: z.string().email('Invalid email address'),
     dateOfBirth: z.string().optional().nullable(),
-    gender: z.enum(['Male', 'Female', 'Other']).optional().nullable(),
+    gender: z.string().optional().nullable(),
     address: z.string().optional().nullable(),
     bloodGroup: z.string().optional().nullable(),
     emergencyContact: z.string().optional().nullable(),
@@ -125,15 +145,18 @@ export const createHospitalSchema = z.object({
   pincode: z.string().regex(/^\d{6}$/, 'Please enter a valid 6-digit Indian PIN code'),
   phone: z.string().min(7, 'Phone number is required'),
   emergencyContact: z.string().optional().nullable(),
-  email: z.string().email('Valid hospital contact email required').optional().nullable(),
+  email: z.string().email('Valid hospital contact email required').optional().nullable().or(z.literal('')),
   openingHours: z.string().optional().nullable(),
-  about: z.string().min(10, 'About / overview is required (min 10 characters)'),
-  facilities: z.array(z.string()).optional().default([]),
-  rating: z.number().min(1).max(5).optional().default(4.8),
+  about: z
+    .string()
+    .optional()
+    .transform((val) => (val && val.trim().length >= 10 ? val.trim() : 'Advanced multi-speciality tertiary care medical center.')),
+  facilities: z.union([z.array(z.string()), z.string()]).optional().default([]),
+  rating: z.coerce.number().min(1).max(5).optional().default(4.8),
   isEmergencyAvailable: z.boolean().optional().default(true),
-  minConsultationFee: z.number().min(0).optional().default(500),
-  logoUrl: z.string().url().optional().nullable(),
-  imageUrl: z.string().url().optional().nullable(),
+  minConsultationFee: z.coerce.number().min(0).optional().default(500),
+  logoUrl: z.string().url().optional().nullable().or(z.literal('')),
+  imageUrl: z.string().url().optional().nullable().or(z.literal('')),
   adminUser: z
     .object({
       name: z.string().min(2),
@@ -152,15 +175,15 @@ export const updateHospitalSchema = z.object({
   pincode: z.string().regex(/^\d{6}$/).optional(),
   phone: z.string().min(7).optional(),
   emergencyContact: z.string().optional().nullable(),
-  email: z.string().email().optional().nullable(),
+  email: z.string().email().optional().nullable().or(z.literal('')),
   openingHours: z.string().optional().nullable(),
   about: z.string().optional(),
-  facilities: z.array(z.string()).optional(),
-  rating: z.number().min(1).max(5).optional(),
+  facilities: z.union([z.array(z.string()), z.string()]).optional(),
+  rating: z.coerce.number().min(1).max(5).optional(),
   isEmergencyAvailable: z.boolean().optional(),
-  minConsultationFee: z.number().min(0).optional(),
-  logoUrl: z.string().optional().nullable(),
-  imageUrl: z.string().optional().nullable(),
+  minConsultationFee: z.coerce.number().min(0).optional(),
+  logoUrl: z.string().optional().nullable().or(z.literal('')),
+  imageUrl: z.string().optional().nullable().or(z.literal('')),
 });
 
 export const createHospitalAdminSchema = z.object({
@@ -178,19 +201,22 @@ export const createDepartmentSchema = z.object({
 });
 
 export const createDoctorSchema = z.object({
-  departmentId: z.string().uuid('Valid department ID required'),
+  departmentId: z.string().min(1, 'Valid department ID required'),
   name: z.string().min(2, 'Doctor name is required'),
-  photoUrl: z.string().optional().nullable(),
+  photoUrl: z.string().optional().nullable().or(z.literal('')),
   qualification: z.string().min(2, 'Qualification is required (e.g. MBBS, MD)'),
   specialization: z.string().min(2, 'Specialization is required'),
-  experienceYears: z.number().int().min(0).default(5),
-  consultationFee: z.number().min(0).default(500),
+  experienceYears: z.coerce.number().int().min(0).default(5),
+  consultationFee: z.coerce.number().min(0).default(500),
   languages: z.string().default('English, Hindi'),
-  about: z.string().min(10, 'About / bio must be at least 10 characters'),
+  about: z
+    .string()
+    .optional()
+    .transform((val) => (val && val.trim().length > 0 ? val.trim() : 'Experienced medical specialist providing comprehensive clinical care.')),
   workingDays: z.string().default('Mon,Tue,Wed,Thu,Fri,Sat'),
   workingHoursStart: z.string().regex(/^\d{2}:\d{2}$/).default('09:00'),
   workingHoursEnd: z.string().regex(/^\d{2}:\d{2}$/).default('17:00'),
-  slotDurationMinutes: z.number().int().min(10).max(120).default(30),
+  slotDurationMinutes: z.coerce.number().int().min(10).max(120).default(30),
   breakStart: z.string().optional().nullable().default('13:00'),
   breakEnd: z.string().optional().nullable().default('14:00'),
   userAccount: z
@@ -202,19 +228,19 @@ export const createDoctorSchema = z.object({
 });
 
 export const updateDoctorSchema = z.object({
-  departmentId: z.string().uuid().optional(),
+  departmentId: z.string().min(1).optional(),
   name: z.string().min(2).optional(),
-  photoUrl: z.string().optional().nullable(),
+  photoUrl: z.string().optional().nullable().or(z.literal('')),
   qualification: z.string().optional(),
   specialization: z.string().optional(),
-  experienceYears: z.number().int().min(0).optional(),
-  consultationFee: z.number().min(0).optional(),
+  experienceYears: z.coerce.number().int().min(0).optional(),
+  consultationFee: z.coerce.number().min(0).optional(),
   languages: z.string().optional(),
   about: z.string().optional(),
   workingDays: z.string().optional(),
   workingHoursStart: z.string().regex(/^\d{2}:\d{2}$/).optional(),
   workingHoursEnd: z.string().regex(/^\d{2}:\d{2}$/).optional(),
-  slotDurationMinutes: z.number().int().min(10).max(120).optional(),
+  slotDurationMinutes: z.coerce.number().int().min(10).max(120).optional(),
   breakStart: z.string().optional().nullable(),
   breakEnd: z.string().optional().nullable(),
   isActive: z.boolean().optional(),
@@ -232,7 +258,7 @@ export const doctorScheduleUpdateSchema = z.object({
       dayOfWeek: z.number().int().min(0).max(6),
       startTime: z.string().regex(/^\d{2}:\d{2}$/),
       endTime: z.string().regex(/^\d{2}:\d{2}$/),
-      slotDurationMinutes: z.number().int().min(10).max(120).default(30),
+      slotDurationMinutes: z.coerce.number().int().min(10).max(120).default(30),
       isAvailable: z.boolean().default(true),
     })
   ),
@@ -253,7 +279,11 @@ export const completeConsultationSchema = z.object({
     .optional()
     .default([]),
   instructions: z.string().optional(),
-  followUpDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  followUpDate: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((val) => (val && val.trim().length > 0 ? val.trim() : null)),
   symptoms: z.string().optional(),
   vitals: z
     .object({
@@ -278,28 +308,52 @@ export const registerDoctorSchema = z.object({
   departmentId: z.string().min(1, 'Medical department is required'),
   qualification: z.string().min(2, 'Medical qualifications (e.g. MBBS, MD) required'),
   specialization: z.string().min(2, 'Specialization is required'),
-  experienceYears: z.number().int().min(0).default(5),
-  consultationFee: z.number().min(0).default(500),
+  experienceYears: z.coerce.number().int().min(0).default(5),
+  consultationFee: z.coerce.number().min(0).default(500),
   languages: z.string().optional().default('English, Hindi'),
-  about: z.string().min(10, 'Professional biography is required'),
+  about: z
+    .string()
+    .optional()
+    .transform((val) => (val && val.trim().length > 0 ? val.trim() : 'Experienced medical specialist providing comprehensive clinical care.')),
   workingDays: z.string().optional().default('Mon,Tue,Wed,Thu,Fri,Sat'),
   workingHoursStart: z.string().regex(/^\d{2}:\d{2}$/).optional().default('09:00'),
   workingHoursEnd: z.string().regex(/^\d{2}:\d{2}$/).optional().default('17:00'),
-  slotDurationMinutes: z.number().int().min(10).max(120).optional().default(30),
+  slotDurationMinutes: z.coerce.number().int().min(10).max(120).optional().default(30),
 });
 
-export const registerLabSchema = z.object({
-  name: z.string().min(3, 'Laboratory name required'),
-  type: z.enum(['HOSPITAL', 'INDEPENDENT']).default('INDEPENDENT'),
-  hospitalId: z.string().optional().nullable(),
-  email: z.string().email('Valid laboratory email required'),
-  phone: z.string().min(7, 'Contact phone required'),
-  address: z.string().min(5, 'Laboratory facility address required'),
-  city: z.string().min(2, 'City is required'),
-  licenseNumber: z.string().min(3, 'Accreditation / Clinical license number required'),
-  adminName: z.string().min(2, 'Lab director / technician name required'),
-  adminPassword: z.string().min(6, 'Password must be at least 6 characters'),
-});
+export const registerLabSchema = z
+  .object({
+    name: z.string().min(3, 'Laboratory name required'),
+    type: z.preprocess(
+      (val) => (val === 'HOSPITAL_ASSOCIATED' ? 'HOSPITAL' : val),
+      z.enum(['HOSPITAL', 'INDEPENDENT']).default('INDEPENDENT')
+    ),
+    hospitalId: z.string().optional().nullable(),
+    email: z.string().email('Valid laboratory email required'),
+    phone: z.string().min(7, 'Contact phone required'),
+    address: z.string().min(5, 'Laboratory facility address required'),
+    city: z.string().min(2, 'City is required'),
+    state: z.string().optional().nullable(),
+    pincode: z.string().optional().nullable(),
+    licenseNumber: z.string().min(3, 'Accreditation / Clinical license number required'),
+    adminName: z.string().optional(),
+    contactPerson: z.string().optional(),
+    adminPassword: z.string().optional(),
+    password: z.string().optional(),
+  })
+  .transform((data) => ({
+    ...data,
+    adminName: data.adminName || data.contactPerson || '',
+    adminPassword: data.adminPassword || data.password || '',
+  }))
+  .refine((data) => data.adminName.trim().length >= 2, {
+    message: 'Lab director / contact person name required (min 2 characters)',
+    path: ['adminName'],
+  })
+  .refine((data) => data.adminPassword.length >= 6, {
+    message: 'Portal login password must be at least 6 characters',
+    path: ['adminPassword'],
+  });
 
 export const registerSupportStaffSchema = z.object({
   name: z.string().min(2, 'Full name required'),
@@ -308,25 +362,46 @@ export const registerSupportStaffSchema = z.object({
   phone: z.string().min(7, 'Contact phone required'),
   hospitalId: z.string().min(1, 'Hospital affiliation required'),
   departmentId: z.string().optional().nullable(),
+  department: z.string().optional().nullable(),
   roleTitle: z.string().optional().default('Support Staff / Nurse'),
 });
 
-export const registerPharmacySchema = z.object({
-  name: z.string().min(3, 'Pharmacy name required'),
-  hospitalId: z.string().optional().nullable(),
-  email: z.string().email('Valid pharmacy email required'),
-  phone: z.string().min(7, 'Contact phone required'),
-  address: z.string().optional().nullable(),
-  licenseNumber: z.string().min(3, 'Drug license number required'),
-  staffName: z.string().min(2, 'Pharmacist / manager name required'),
-  staffPassword: z.string().min(6, 'Password must be at least 6 characters'),
-});
+export const registerPharmacySchema = z
+  .object({
+    name: z.string().min(3, 'Pharmacy name required'),
+    hospitalId: z.string().optional().nullable(),
+    email: z.string().email('Valid pharmacy email required'),
+    phone: z.string().min(7, 'Contact phone required'),
+    address: z.string().optional().nullable(),
+    licenseNumber: z.string().min(3, 'Drug license number required'),
+    staffName: z.string().optional(),
+    contactPerson: z.string().optional(),
+    staffPassword: z.string().optional(),
+    password: z.string().optional(),
+  })
+  .transform((data) => ({
+    ...data,
+    staffName: data.staffName || data.contactPerson || '',
+    staffPassword: data.staffPassword || data.password || '',
+  }))
+  .refine((data) => data.staffName.trim().length >= 2, {
+    message: 'Pharmacist / manager name required (min 2 characters)',
+    path: ['staffName'],
+  })
+  .refine((data) => data.staffPassword.length >= 6, {
+    message: 'Login password must be at least 6 characters',
+    path: ['staffPassword'],
+  });
 
 export const createOfflineAppointmentSchema = z.object({
   hospitalId: z.string().min(1, 'Hospital is required'),
   doctorId: z.string().min(1, 'Doctor is required'),
-  departmentId: z.string().min(1, 'Department is required'),
-  appointmentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
+  departmentId: z.string().min(1, 'Department is required').optional().nullable(),
+  appointmentDate: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((val) => (val && val.trim().length > 0 ? val.trim() : new Date().toISOString().split('T')[0])),
   timeSlot: z.string().optional().default('Walk-in / Immediate'),
   patient: z.object({
     fullName: z.string().min(2, 'Patient name is required'),
@@ -334,26 +409,26 @@ export const createOfflineAppointmentSchema = z.object({
     email: z.string().email().optional().or(z.literal('')).nullable(),
     dateOfBirth: z.string().optional().nullable(),
     gender: z.string().optional().nullable(),
-    age: z.number().int().min(0).max(130).optional().nullable(),
+    age: z.coerce.number().int().min(0).max(130).optional().nullable(),
     address: z.string().optional().nullable(),
     bloodGroup: z.string().optional().nullable(),
     emergencyContact: z.string().optional().nullable(),
   }),
   notes: z.string().optional().nullable(),
-  consultationFee: z.number().min(0).optional(),
+  consultationFee: z.coerce.number().min(0).optional(),
 });
 
 export const recordVitalsSchema = z.object({
   appointmentId: z.string().min(1, 'Appointment ID is required'),
   patientId: z.string().min(1, 'Patient ID is required'),
-  bpSystolic: z.number().int().min(50).max(300).optional().nullable(),
-  bpDiastolic: z.number().int().min(30).max(200).optional().nullable(),
+  bpSystolic: z.coerce.number().int().min(30).max(350).optional().nullable(),
+  bpDiastolic: z.coerce.number().int().min(20).max(250).optional().nullable(),
   bloodPressure: z.string().optional().nullable(), // e.g. "120/80"
-  pulseRate: z.number().int().min(30).max(250).optional().nullable(),
-  temperature: z.number().min(85).max(115).optional().nullable(), // Fahrenheit
-  spo2: z.number().int().min(50).max(100).optional().nullable(), // percentage
-  weight: z.number().min(1).max(500).optional().nullable(), // kg
-  height: z.number().min(30).max(300).optional().nullable(), // cm
+  pulseRate: z.coerce.number().int().min(20).max(300).optional().nullable(),
+  temperature: z.coerce.number().min(30).max(120).optional().nullable(), // Celsius or Fahrenheit
+  spo2: z.coerce.number().int().min(30).max(100).optional().nullable(), // percentage
+  weight: z.coerce.number().min(1).max(500).optional().nullable(), // kg
+  height: z.coerce.number().min(20).max(300).optional().nullable(), // cm
   notes: z.string().optional().nullable(),
 });
 
@@ -363,9 +438,9 @@ export const prescriptionTemplateSchema = z.object({
   medicines: z.array(
     z.object({
       name: z.string().min(1, 'Medicine name required'),
-      dosage: z.string().min(1, 'Dosage required (e.g. 500mg)'),
-      frequency: z.string().min(1, 'Frequency required (e.g. 1-0-1 after food)'),
-      duration: z.string().min(1, 'Duration required (e.g. 5 days)'),
+      dosage: z.string().optional().default('1 dose'),
+      frequency: z.string().optional().default('As directed'),
+      duration: z.string().optional().default('5 days'),
       instructions: z.string().optional().nullable(),
     })
   ).min(1, 'At least one medicine is required in the template'),

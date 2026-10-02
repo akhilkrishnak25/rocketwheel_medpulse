@@ -662,7 +662,7 @@ export class AppointmentService {
   static async createOfflineAppointment(dto: {
     hospitalId: string;
     doctorId: string;
-    departmentId: string;
+    departmentId?: string | null;
     appointmentDate: string;
     timeSlot?: string;
     patient: {
@@ -757,7 +757,7 @@ export class AppointmentService {
         hospitalId,
         doctorId,
         patientId: patient.id,
-        departmentId,
+        departmentId: departmentId || doctor.departmentId,
         appointmentDate,
         timeSlot: timeSlot || 'Walk-in / Immediate',
         tokenNumber,

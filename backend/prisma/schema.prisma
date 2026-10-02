@@ -1,6 +1,6 @@
-// Production PostgreSQL Prisma Schema
+// Local SQLite / Development Prisma Schema
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -46,8 +46,8 @@ model Hospital {
   email               String
   emergencyContact    String
   openingHours        String
-  about               String             @db.Text
-  facilities          String             @db.Text
+  about               String            
+  facilities          String            
   rating              Float              @default(4.5)
   isEmergencyAvailable Boolean           @default(true)
   departments         Department[]
@@ -86,7 +86,7 @@ model HospitalSubAdmin {
   hospitalId  String
   hospital    Hospital  @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
   roleTitle   String    @default("Hospital Sub-Administrator")
-  permissions String    @db.Text // JSON array of allowed permissions
+  permissions String    // JSON array of allowed permissions
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 }
@@ -114,7 +114,7 @@ model Department {
   name         String
   slug         String
   code         String
-  description  String?        @db.Text
+  description  String?       
   icon         String?
   doctors      Doctor[]
   appointments Appointment[]
@@ -140,7 +140,7 @@ model Doctor {
   experienceYears       Int                    @default(5)
   consultationFee       Float                  @default(500)
   languages             String
-  about                 String                 @db.Text
+  about                 String                
   workingDays           String
   workingHoursStart     String                 @default("09:00")
   workingHoursEnd       String                 @default("17:00")
@@ -197,7 +197,7 @@ model Patient {
   email            String
   dateOfBirth      String?
   gender           String?
-  address          String?          @db.Text
+  address          String?         
   bloodGroup       String?
   emergencyContact String?
   appointments     Appointment[]
@@ -233,7 +233,7 @@ model Appointment {
   platformFee        Float            @default(20)
   totalAmount        Float
   cancellationReason String?
-  notes              String?          @db.Text
+  notes              String?         
   payment            Payment?
   digitalOp          DigitalOP?
   prescription       Prescription?
@@ -319,7 +319,7 @@ model PatientVital {
   spo2            Int?         // percentage e.g. 98
   weight          Float?       // kg
   height          Float?       // cm
-  notes           String?      @db.Text
+  notes           String?     
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
@@ -333,8 +333,8 @@ model PrescriptionTemplate {
   doctor       Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
   diseaseName  String   // e.g. "Fever / Viral Infection"
   diagnosis    String?
-  medicines    String   @db.Text // JSON array of [{ name, dosage, frequency, duration, instructions }]
-  instructions String?  @db.Text
+  medicines    String   // JSON array of [{ name, dosage, frequency, duration, instructions }]
+  instructions String? 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -353,9 +353,9 @@ model Prescription {
   hospital           Hospital?    @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
   pharmacyId         String?
   pharmacy           Pharmacy?    @relation(fields: [pharmacyId], references: [id], onDelete: SetNull)
-  diagnosis          String       @db.Text
-  medicines          String       @db.Text
-  instructions       String?      @db.Text
+  diagnosis          String      
+  medicines          String      
+  instructions       String?     
   followUpDate       String?
   pharmacyStatus     String       @default("NONE") // NONE, SENT, ACCEPTED, PROCESSING, COMPLETED
   sentToPharmacyAt   DateTime?
@@ -374,7 +374,7 @@ model Pharmacy {
   hospital      Hospital?       @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
   email         String
   phone         String
-  address       String?         @db.Text
+  address       String?        
   licenseNumber String?
   status        String          @default("ACTIVE") // ACTIVE, PENDING, SUSPENDED
   staff         PharmacyStaff[]
@@ -404,7 +404,7 @@ model Lab {
   hospital      Hospital?        @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
   email         String
   phone         String
-  address       String?          @db.Text
+  address       String?         
   city          String?
   licenseNumber String?
   status        String           @default("PENDING") // PENDING, APPROVED, ACTIVE, REJECTED, SUSPENDED
@@ -440,8 +440,8 @@ model LabTestRequest {
   appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   labId         String?
   lab           Lab?         @relation(fields: [labId], references: [id], onDelete: SetNull)
-  tests         String       @db.Text // JSON array of [{ name, code?, notes? }]
-  clinicalNotes String?      @db.Text
+  tests         String       // JSON array of [{ name, code?, notes? }]
+  clinicalNotes String?     
   priority      String       @default("NORMAL") // NORMAL, URGENT
   status        String       @default("REQUESTED") // REQUESTED, ACCEPTED, PROCESSING, COMPLETED, CANCELLED
   report        LabReport?
@@ -458,9 +458,9 @@ model LabReport {
   testRequest    LabTestRequest @relation(fields: [testRequestId], references: [id], onDelete: Cascade)
   technicianId   String?
   technicianName String?
-  results        String         @db.Text // Summary or JSON of findings
+  results        String         // Summary or JSON of findings
   fileUrl        String?
-  remarks        String?        @db.Text
+  remarks        String?       
   completedAt    DateTime       @default(now())
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
@@ -472,9 +472,9 @@ model MedicalRecord {
   appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
   patientId     String
   patient       Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  symptoms      String?     @db.Text
-  vitals        String?     @db.Text
-  clinicalNotes String?     @db.Text
+  symptoms      String?    
+  vitals        String?    
+  clinicalNotes String?    
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 }
@@ -487,7 +487,7 @@ model Review {
   hospital    Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
   patientName String
   rating      Int      @default(5)
-  comment     String?  @db.Text
+  comment     String? 
   isApproved  Boolean  @default(true)
   createdAt   DateTime @default(now())
 }
@@ -499,11 +499,11 @@ model Notification {
   recipientType String
   recipientId   String?
   title         String
-  message       String    @db.Text
+  message       String   
   type          String
   isRead        Boolean   @default(false)
   readAt        DateTime?
-  metadata      String?   @db.Text
+  metadata      String?  
   createdAt     DateTime  @default(now())
 }
 
@@ -514,7 +514,7 @@ model AuditLog {
   action    String
   entity    String
   entityId  String?
-  details   String?  @db.Text
+  details   String? 
   ipAddress String?
   userAgent String?
   createdAt DateTime @default(now())

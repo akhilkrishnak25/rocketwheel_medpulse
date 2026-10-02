@@ -2100,8 +2100,11 @@ Dr. Vikram Verma,vikram.verma@hospital.org,Consultant Physician,MBBS MD,${c2},8,
                   toast.error('Validation Error', 'Doctor, Patient name, and 10-digit mobile number are required.');
                   return;
                 }
+                const selectedDoc = doctors?.find((d) => d.id === offlineDoctorId);
                 createOfflineBookingMutation.mutate({
                   doctorId: offlineDoctorId,
+                  departmentId: selectedDoc?.departmentId,
+                  appointmentDate: new Date().toISOString().split('T')[0],
                   patient: {
                     fullName: offlinePatientName.trim(),
                     mobileNumber: offlineMobile.trim(),
