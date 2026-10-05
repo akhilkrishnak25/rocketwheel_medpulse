@@ -25,12 +25,14 @@ import {
   ToggleRight,
 } from 'lucide-react';
 import { labApi } from '../api/lab.api';
+import { uploadApi } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Modal } from '../components/ui/Modal';
 import { useToast } from '../components/ui/Toast';
+import { InlineSpinner } from '../components/ui/Loading';
 import { LabTestRequest } from '../types';
 import { RocketWheelLogo } from '../components/common/RocketWheelLogo';
 
@@ -49,10 +51,73 @@ export const LabTechnicianDashboardPage: React.FC = () => {
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [viewingReportRequest, setViewingReportRequest] = useState<LabTestRequest | null>(null);
 
-  // Submit Report Form State
-  const [reportResults, setReportResults] = useState('');
+  // Submit Report Form State (PDF Document Upload - Requirement 19)
+  const [reportPdfFile, setReportPdfFile] = useState<File | null>(null);
   const [reportFileUrl, setReportFileUrl] = useState('');
+  const [reportFileName, setReportFileName] = useState('');
+  const [reportFileSize, setReportFileSize] = useState<number | null>(null);
+  const [isUploadingPdf, setIsUploadingPdf] = useState(false);
+  const [uploadProgressText, setUploadProgressText] = useState('');
   const [reportRemarks, setReportRemarks] = useState('');
+
+  const resetReportForm = () => {
+    setIsReportModalOpen(false);
+    setSelectedRequest(null);
+    setReportPdfFile(null);
+    setReportFileUrl('');
+    setReportFileName('');
+    setReportFileSize(null);
+    setIsUploadingPdf(false);
+    setUploadProgressText('');
+    setReportRemarks('');
+  };
+
+  const handleFileSelect = async (file: File) => {
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      toast.error('Invalid File Type', 'Please upload a PDF document (.pdf) only.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('File Exceeds Limit', 'Maximum allowed file size is 10MB.');
+      return;
+    }
+
+    setReportPdfFile(file);
+    setIsUploadingPdf(true);
+    setUploadProgressText('Processing PDF document...');
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64Data = reader.result as string;
+          setUploadProgressText('Uploading to secure medical report storage...');
+          const result = await uploadApi.uploadReportPdf(file.name, base64Data);
+          setReportFileUrl(result.url);
+          setReportFileName(result.fileName || file.name);
+          setReportFileSize(file.size);
+          toast.success('PDF Uploaded', 'Official diagnostic report uploaded successfully.');
+        } catch (err: any) {
+          toast.error('Upload Failed', err.message || 'Could not upload PDF report');
+          setReportPdfFile(null);
+          setReportFileUrl('');
+        } finally {
+          setIsUploadingPdf(false);
+          setUploadProgressText('');
+        }
+      };
+      reader.onerror = () => {
+        toast.error('Upload Failed', 'Error reading selected PDF file');
+        setIsUploadingPdf(false);
+        setUploadProgressText('');
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      toast.error('Upload Failed', err.message || 'Error processing file');
+      setIsUploadingPdf(false);
+      setUploadProgressText('');
+    }
+  };
 
   // Test Catalog States
   const [testCategoryFilter, setTestCategoryFilter] = useState('ALL');
@@ -125,12 +190,8 @@ export const LabTechnicianDashboardPage: React.FC = () => {
   const submitReportMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => labApi.submitReport(id, data),
     onSuccess: () => {
-      toast.success('Lab Report Published', 'Diagnostic results saved and dispatched to patient and doctor');
-      setIsReportModalOpen(false);
-      setSelectedRequest(null);
-      setReportResults('');
-      setReportFileUrl('');
-      setReportRemarks('');
+      toast.success('Lab Report Published', 'Diagnostic report saved and dispatched to patient and doctor');
+      resetReportForm();
       queryClient.invalidateQueries({ queryKey: ['lab-requests'] });
     },
     onError: (err: any) => {
@@ -680,26 +741,26 @@ export const LabTechnicianDashboardPage: React.FC = () => {
         )}
       </main>
 
-      {/* SUBMIT REPORT MODAL */}
+      {/* SUBMIT REPORT MODAL (Requirement 19: PDF Document Upload) */}
       {isReportModalOpen && selectedRequest && (
         <Modal
           isOpen={isReportModalOpen}
-          onClose={() => setIsReportModalOpen(false)}
-          title={`Publish Diagnostic Report - Requisition #${selectedRequest.requestNumber}`}
+          onClose={resetReportForm}
+          title={`Upload & Publish Diagnostic Report - Requisition #${selectedRequest.requestNumber}`}
           maxWidth="lg"
         >
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (!reportResults.trim()) {
-                toast.error('Results Required', 'Please enter diagnostic findings or test summary.');
+              if (!reportFileUrl) {
+                toast.error('Report Document Required', 'Please upload a PDF lab report before publishing.');
                 return;
               }
               submitReportMutation.mutate({
                 id: selectedRequest.id,
                 data: {
-                  results: reportResults.trim(),
-                  fileUrl: reportFileUrl.trim() || undefined,
+                  results: `Official Diagnostic Laboratory Report: ${reportFileName || 'Attached PDF Document'}`,
+                  fileUrl: reportFileUrl,
                   remarks: reportRemarks.trim() || undefined,
                 },
               });
@@ -719,53 +780,142 @@ export const LabTechnicianDashboardPage: React.FC = () => {
               </div>
             </div>
 
+            {/* Local PDF File Upload (Drag & Drop + File Picker) - Requirement 19 */}
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                Diagnostic Findings & Detailed Test Results <span className="text-rose-500">*</span>
+              <label className="block font-semibold text-slate-700 mb-1.5">
+                Official Diagnostic Report Document (PDF) <span className="text-rose-500">*</span>
               </label>
-              <textarea
-                rows={6}
-                value={reportResults}
-                onChange={(e) => setReportResults(e.target.value)}
-                placeholder="Enter complete test values, reference intervals, observed parameters, and pathology notes..."
-                className="w-full p-2.5 rounded-xl border border-slate-200 text-xs font-mono"
-                required
-              />
+
+              {!reportFileUrl ? (
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const files = e.dataTransfer.files;
+                    if (files && files.length > 0) {
+                      handleFileSelect(files[0]);
+                    }
+                  }}
+                  className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all bg-slate-50/70 hover:bg-purple-50/30 ${
+                    isUploadingPdf ? 'border-purple-400 pointer-events-none' : 'border-slate-300 hover:border-purple-400'
+                  }`}
+                >
+                  <input
+                    type="file"
+                    id="lab-report-pdf-input"
+                    accept=".pdf,application/pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = e.target.files;
+                      if (files && files.length > 0) {
+                        handleFileSelect(files[0]);
+                      }
+                    }}
+                    disabled={isUploadingPdf}
+                  />
+
+                  {isUploadingPdf ? (
+                    <div className="flex flex-col items-center justify-center py-2 space-y-2">
+                      <InlineSpinner size="lg" className="text-purple-600" />
+                      <p className="font-bold text-slate-700">{uploadProgressText || 'Uploading PDF report...'}</p>
+                      <p className="text-[11px] text-slate-400">Please wait while your document is securely stored.</p>
+                    </div>
+                  ) : (
+                    <label
+                      htmlFor="lab-report-pdf-input"
+                      className="cursor-pointer flex flex-col items-center justify-center space-y-2"
+                    >
+                      <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 shadow-sm">
+                        <Upload className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <span className="font-bold text-purple-700 hover:underline">Click to browse</span> or drag and drop your PDF report here
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Supports signed diagnostic reports up to 10MB (.pdf)
+                      </p>
+                    </label>
+                  )}
+                </div>
+              ) : (
+                <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-emerald-950 text-xs truncate max-w-xs">
+                          {reportFileName || 'Diagnostic-Report.pdf'}
+                        </span>
+                        <Badge variant="success" className="text-[10px] shrink-0">Ready to Publish</Badge>
+                      </div>
+                      <p className="text-[11px] text-emerald-700 mt-0.5">
+                        {reportFileSize ? `${(reportFileSize / (1024 * 1024)).toFixed(2)} MB • ` : ''}
+                        Uploaded to secure medical storage
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <a
+                      href={reportFileUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="p-1.5 text-emerald-700 hover:bg-emerald-100 rounded-lg transition-colors inline-flex items-center text-xs font-semibold"
+                      title="Preview Document"
+                    >
+                      <ExternalLink className="w-4 h-4 mr-1" /> Preview
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReportPdfFile(null);
+                        setReportFileUrl('');
+                        setReportFileName('');
+                        setReportFileSize(null);
+                      }}
+                      className="p-1.5 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors"
+                      title="Remove and replace file"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                Digital Lab Report Document URL (PDF / Cloud Link)
-              </label>
-              <input
-                type="url"
-                value={reportFileUrl}
-                onChange={(e) => setReportFileUrl(e.target.value)}
-                placeholder="https://storage.medpulse.com/reports/sample-report.pdf"
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
-              />
-            </div>
-
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Clinical Remarks / Recommendation</label>
+              <label className="block font-semibold text-slate-700 mb-1">Clinical Remarks / Recommendation (Optional)</label>
               <input
                 type="text"
                 value={reportRemarks}
                 onChange={(e) => setReportRemarks(e.target.value)}
                 placeholder="e.g. Advised clinical correlation; repeat test in 4 weeks."
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-purple-500 focus:outline-none"
               />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-              <Button type="button" variant="ghost" size="sm" onClick={() => setIsReportModalOpen(false)}>
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={resetReportForm}
+                disabled={isUploadingPdf || submitReportMutation.isPending}
+              >
                 Cancel
               </Button>
               <Button
                 type="submit"
                 size="sm"
                 className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
-                isLoading={submitReportMutation.isPending}
+                isLoading={isUploadingPdf || submitReportMutation.isPending}
+                disabled={!reportFileUrl || isUploadingPdf}
               >
                 Publish & Dispatch Official Report
               </Button>

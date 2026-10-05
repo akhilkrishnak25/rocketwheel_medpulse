@@ -36,6 +36,7 @@ export class PharmacyService {
             patientIdNumber: true,
             gender: true,
             dateOfBirth: true,
+            age: true,
           },
         },
         doctor: {

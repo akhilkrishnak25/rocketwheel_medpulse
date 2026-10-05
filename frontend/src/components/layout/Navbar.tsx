@@ -16,11 +16,13 @@ export const Navbar: React.FC = () => {
       <div className="bg-[#15179f] text-slate-200 text-xs py-1.5 px-4 border-b border-royal-700/50">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="inline-block w-2 h-2 rounded-full bg-[#FF1D6B] animate-ping"></span>
             <span className="hidden sm:inline">24/7 National Emergency OPD Hotline:</span>
-            <span className="font-bold text-white tracking-wide flex items-center gap-1">
-              <PhoneCall className="w-3 h-3 text-[#FBA94C]" /> 1066 / +91 40 2360 7777
-            </span>
+            <a
+              href="tel:+919182238568"
+              className="font-bold text-white tracking-wide flex items-center gap-1 hover:text-[#FBA94C] transition-colors"
+            >
+              <PhoneCall className="w-3 h-3 text-[#FBA94C]" /> +91 91822 38568
+            </a>
           </div>
           <div className="flex items-center gap-3 text-xs">
             <span className="bg-[#FF1D6B] text-white px-2 py-0.5 rounded-full font-bold text-[10px] uppercase tracking-wider">

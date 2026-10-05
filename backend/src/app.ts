@@ -1,3 +1,4 @@
+import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -60,6 +61,9 @@ app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 // Body parsers
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Static uploads serving (PDF reports & profile photos)
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Root landing endpoint (GET /)
 app.get('/', (req, res) => {

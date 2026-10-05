@@ -18,6 +18,7 @@ export interface User {
   email: string;
   role: UserRole;
   status?: UserStatus;
+  avatarUrl?: string | null;
   lastLoginAt?: string;
   hospital?: {
     id: string;
@@ -143,6 +144,7 @@ export interface Patient {
   fullName: string;
   mobileNumber: string;
   email: string;
+  age?: number | null;
   dateOfBirth?: string;
   gender?: string;
   address?: string;

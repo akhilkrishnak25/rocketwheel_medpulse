@@ -32,21 +32,32 @@ import {
   Stethoscope,
   Printer,
   FileHeart,
+  FlaskConical,
+  Globe,
+  Lock,
+  Camera,
+  ToggleLeft,
+  ToggleRight,
+  Eye,
+  EyeOff,
+  ExternalLink,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { adminApi } from '../api/admin.api';
+import { uploadApi } from '../api/client';
 import { appointmentsApi } from '../api/appointments.api';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Modal } from '../components/ui/Modal';
 import { useToast } from '../components/ui/Toast';
+import { InlineSpinner } from '../components/ui/Loading';
 import { Appointment, Doctor } from '../types';
 
 export const HospitalAdminDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
 
   // Granular Sub-Admin RBAC
   const isSubAdmin = user?.role === 'HOSPITAL_SUB_ADMIN';
@@ -57,11 +68,89 @@ export const HospitalAdminDashboardPage: React.FC = () => {
   const canViewPatients = !isSubAdmin || subPermissions.includes('PATIENT_RECORDS');
   const canManageStaff = !isSubAdmin || subPermissions.includes('VITALS_MANAGEMENT');
   const canManageSubAdmins = !isSubAdmin; // Only Hospital Admin can manage Sub-Admins
+  const canManageLabs = !isSubAdmin || subPermissions.includes('LAB_MANAGEMENT');
 
-  const [activeTab, setActiveTab] = useState<'appointments' | 'doctors' | 'patients' | 'staff' | 'subadmins' | 'notifications'>('appointments');
+  const [activeTab, setActiveTab] = useState<'appointments' | 'doctors' | 'patients' | 'staff' | 'subadmins' | 'notifications' | 'labs'>('appointments');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>('');
+
+  // Hospital Admin Avatar Upload State (Requirement 20)
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+
+  // Hospital Labs Management State (Requirement 6)
+  const [editingLab, setEditingLab] = useState<any | null>(null);
+  const [labSearch, setLabSearch] = useState('');
+
+  // Sync URL hash with activeTab (Requirement 17)
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '').toLowerCase();
+      if (['appointments', 'doctors', 'patients', 'staff', 'subadmins', 'notifications', 'labs'].includes(hash)) {
+        setActiveTab(hash as any);
+      }
+    };
+
+    handleHashChange();
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  const handleTabChange = (tab: 'appointments' | 'doctors' | 'patients' | 'staff' | 'subadmins' | 'notifications' | 'labs') => {
+    setActiveTab(tab);
+    window.location.hash = `#${tab}`;
+  };
+
+  // Admin Profile Photo Upload & Remove (Requirement 20)
+  const handleProfilePhotoUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error('Invalid Format', 'Please upload an image file (JPG, PNG, WebP).');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('File Exceeds Limit', 'Maximum allowed image size is 5MB.');
+      return;
+    }
+
+    setIsUploadingPhoto(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64Data = reader.result as string;
+          const result = await uploadApi.uploadProfilePhoto(base64Data);
+          updateUser({ avatarUrl: result.url });
+          toast.success('Profile Photo Updated', 'Hospital admin avatar updated successfully.');
+        } catch (err: any) {
+          toast.error('Upload Failed', err.message || 'Could not upload photo');
+        } finally {
+          setIsUploadingPhoto(false);
+        }
+      };
+      reader.onerror = () => {
+        toast.error('Upload Failed', 'Error reading image file');
+        setIsUploadingPhoto(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      toast.error('Upload Failed', err.message);
+      setIsUploadingPhoto(false);
+    }
+  };
+
+  const handleProfilePhotoRemove = async () => {
+    if (!window.confirm('Remove hospital admin profile photo?')) return;
+    setIsUploadingPhoto(true);
+    try {
+      await uploadApi.removeProfilePhoto();
+      updateUser({ avatarUrl: null });
+      toast.success('Photo Removed', 'Hospital admin avatar reset to default.');
+    } catch (err: any) {
+      toast.error('Removal Failed', err.message || 'Could not remove photo');
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
 
   // Offline OP Booking States
   const [isOfflineBookingOpen, setIsOfflineBookingOpen] = useState(false);
@@ -239,6 +328,41 @@ export const HospitalAdminDashboardPage: React.FC = () => {
     queryKey: ['admin-sub-admins'],
     queryFn: () => adminApi.getSubAdmins(),
     enabled: activeTab === 'subadmins' && canManageSubAdmins,
+  });
+
+  // Fetch hospital diagnostic laboratories (Requirement 6)
+  const { data: hospitalLabs, isLoading: labsLoading, refetch: refetchLabs } = useQuery({
+    queryKey: ['admin-labs'],
+    queryFn: () => adminApi.getLabs(),
+    enabled: activeTab === 'labs' && canManageLabs,
+  });
+
+  const updateLabVisibilityMutation = useMutation({
+    mutationFn: ({ labId, visibility }: { labId: string; visibility: 'PUBLIC' | 'PRIVATE' }) =>
+      adminApi.updateLabVisibility(labId, visibility),
+    onSuccess: (_, vars) => {
+      toast.success(
+        'Laboratory Visibility Updated',
+        `Lab visibility is now ${vars.visibility} (${vars.visibility === 'PUBLIC' ? 'Publicly listed for patient direct booking' : 'Private to hospital clinical referrals'})`
+      );
+      queryClient.invalidateQueries({ queryKey: ['admin-labs'] });
+    },
+    onError: (err: any) => {
+      toast.error('Failed to Update Visibility', err.message);
+    },
+  });
+
+  const updateLabMutation = useMutation({
+    mutationFn: ({ labId, data }: { labId: string; data: any }) =>
+      adminApi.updateLab(labId, data),
+    onSuccess: () => {
+      toast.success('Laboratory Updated', 'Hospital lab profile updated successfully');
+      setEditingLab(null);
+      queryClient.invalidateQueries({ queryKey: ['admin-labs'] });
+    },
+    onError: (err: any) => {
+      toast.error('Update Failed', err.message);
+    },
   });
 
   // Offline OP Booking Mutation
@@ -490,15 +614,72 @@ export const HospitalAdminDashboardPage: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      {/* HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-            Hospital Admin Operations Dashboard
-          </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Real-time outpatient bookings, queue progression, doctor rosters, and revenue
-          </p>
+      {/* HEADER WITH ADMIN AVATAR (Requirement 20) */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <div className="flex items-center gap-4">
+          <div className="relative group shrink-0">
+            <div className="w-16 h-16 rounded-2xl overflow-hidden bg-royal-50 border-2 border-royal-200 flex items-center justify-center text-royal-700 shadow-inner">
+              {user?.avatarUrl ? (
+                <img
+                  src={user.avatarUrl}
+                  alt="Hospital Admin"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <ShieldCheck className="w-8 h-8 text-royal-600" />
+              )}
+              {isUploadingPhoto && (
+                <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center">
+                  <InlineSpinner size="sm" className="text-royal-600" />
+                </div>
+              )}
+            </div>
+
+            <label
+              htmlFor="admin-avatar-file-input"
+              className="absolute -bottom-1.5 -right-1.5 p-1.5 bg-royal-600 hover:bg-royal-700 text-white rounded-lg shadow-md cursor-pointer transition-all hover:scale-105"
+              title="Upload Hospital Admin Profile Photo"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <input
+                type="file"
+                id="admin-avatar-file-input"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const files = e.target.files;
+                  if (files && files.length > 0) {
+                    handleProfilePhotoUpload(files[0]);
+                  }
+                }}
+                disabled={isUploadingPhoto}
+              />
+            </label>
+          </div>
+
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl font-black text-slate-900 tracking-tight">
+                {user?.hospital?.name || 'Hospital Admin Operations Portal'}
+              </h1>
+              <Badge variant="purple" className="text-[10px]">
+                {isSubAdmin ? (user?.hospitalSubAdmin?.roleTitle || 'Hospital Sub-Admin') : 'Hospital Admin'}
+              </Badge>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Admin: <span className="font-semibold text-slate-700">{user?.name}</span> ({user?.email}) • Code: <span className="font-mono font-bold text-royal-700">{user?.hospital?.code || 'RW-HOSP'}</span>
+            </p>
+            {user?.avatarUrl && (
+              <button
+                type="button"
+                onClick={handleProfilePhotoRemove}
+                disabled={isUploadingPhoto}
+                className="text-[11px] text-rose-600 hover:text-rose-800 font-semibold underline mt-0.5 inline-block"
+              >
+                Remove photo
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -519,11 +700,11 @@ export const HospitalAdminDashboardPage: React.FC = () => {
             </Button>
           )}
 
-          {/* Section Tabs */}
+          {/* Section Tabs (Requirement 17: Hash Synced Navigation) */}
           <div className="flex bg-slate-200/80 p-1 rounded-xl text-xs font-bold overflow-x-auto no-scrollbar whitespace-nowrap">
             {canManageAppointments && (
               <button
-                onClick={() => setActiveTab('appointments')}
+                onClick={() => handleTabChange('appointments')}
                 className={`px-3.5 py-2 rounded-lg transition-colors shrink-0 ${
                   activeTab === 'appointments' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
@@ -534,7 +715,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
 
             {canManageDoctors && (
               <button
-                onClick={() => setActiveTab('doctors')}
+                onClick={() => handleTabChange('doctors')}
                 className={`px-3.5 py-2 rounded-lg transition-colors shrink-0 flex items-center gap-1.5 ${
                   activeTab === 'doctors' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
@@ -550,7 +731,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
 
             {canViewPatients && (
               <button
-                onClick={() => setActiveTab('patients')}
+                onClick={() => handleTabChange('patients')}
                 className={`px-3.5 py-2 rounded-lg transition-colors shrink-0 flex items-center gap-1.5 ${
                   activeTab === 'patients' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
@@ -562,7 +743,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
 
             {canManageStaff && (
               <button
-                onClick={() => setActiveTab('staff')}
+                onClick={() => handleTabChange('staff')}
                 className={`px-3.5 py-2 rounded-lg transition-colors shrink-0 flex items-center gap-1.5 ${
                   activeTab === 'staff' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
@@ -572,9 +753,21 @@ export const HospitalAdminDashboardPage: React.FC = () => {
               </button>
             )}
 
+            {canManageLabs && (
+              <button
+                onClick={() => handleTabChange('labs')}
+                className={`px-3.5 py-2 rounded-lg transition-colors shrink-0 flex items-center gap-1.5 ${
+                  activeTab === 'labs' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <FlaskConical className="w-3.5 h-3.5 text-purple-600" />
+                Hospital Labs ({(hospitalLabs || []).length})
+              </button>
+            )}
+
             {canManageSubAdmins && (
               <button
-                onClick={() => setActiveTab('subadmins')}
+                onClick={() => handleTabChange('subadmins')}
                 className={`px-3.5 py-2 rounded-lg transition-colors shrink-0 flex items-center gap-1.5 ${
                   activeTab === 'subadmins' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
@@ -585,7 +778,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
             )}
 
             <button
-              onClick={() => setActiveTab('notifications')}
+              onClick={() => handleTabChange('notifications')}
               className={`px-3.5 py-2 rounded-lg transition-colors shrink-0 flex items-center gap-1.5 ${
                 activeTab === 'notifications' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
               }`}
@@ -597,42 +790,113 @@ export const HospitalAdminDashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* KPI METRIC CARDS */}
+      {/* KPI METRIC CARDS (Requirement 17: Interactive Filters) */}
       <div className="flex overflow-x-auto no-scrollbar snap-x snap-mandatory sm:grid sm:grid-cols-4 lg:grid-cols-7 gap-3 pb-2 sm:pb-0 -mx-1 px-1 sm:mx-0 sm:px-0">
-        <div className="min-w-[130px] sm:min-w-0 snap-start bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1 shrink-0 sm:shrink">
-          <span className="text-[10px] uppercase font-bold text-slate-400">Today's Total</span>
+        <button
+          type="button"
+          onClick={() => {
+            handleTabChange('appointments');
+            setStatusFilter('ALL');
+          }}
+          className={`min-w-[130px] sm:min-w-0 snap-start bg-white p-4 rounded-2xl border text-left shadow-sm space-y-1 shrink-0 sm:shrink transition-all hover:border-royal-400 hover:shadow-md cursor-pointer ${
+            activeTab === 'appointments' && statusFilter === 'ALL'
+              ? 'border-royal-500 ring-2 ring-royal-200'
+              : 'border-slate-200'
+          }`}
+          title="Click to view all appointments"
+        >
+          <span className="text-[10px] uppercase font-bold text-slate-400 block">Today's Total</span>
           <div className="text-2xl font-black text-slate-900">{metrics?.todayAppointments || 0}</div>
-        </div>
+        </button>
 
-        <div className="min-w-[130px] sm:min-w-0 snap-start bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1 shrink-0 sm:shrink">
-          <span className="text-[10px] uppercase font-bold text-slate-400">Upcoming</span>
+        <button
+          type="button"
+          onClick={() => {
+            handleTabChange('appointments');
+            setStatusFilter('CONFIRMED');
+          }}
+          className={`min-w-[130px] sm:min-w-0 snap-start bg-white p-4 rounded-2xl border text-left shadow-sm space-y-1 shrink-0 sm:shrink transition-all hover:border-royal-400 hover:shadow-md cursor-pointer ${
+            activeTab === 'appointments' && statusFilter === 'CONFIRMED'
+              ? 'border-royal-500 ring-2 ring-royal-200'
+              : 'border-slate-200'
+          }`}
+          title="Click to filter Confirmed / Upcoming"
+        >
+          <span className="text-[10px] uppercase font-bold text-slate-400 block">Upcoming</span>
           <div className="text-2xl font-black text-royal-600">{metrics?.upcomingAppointments || 0}</div>
-        </div>
+        </button>
 
-        <div className="min-w-[130px] sm:min-w-0 snap-start bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1 shrink-0 sm:shrink">
-          <span className="text-[10px] uppercase font-bold text-slate-400">Completed</span>
+        <button
+          type="button"
+          onClick={() => {
+            handleTabChange('appointments');
+            setStatusFilter('WAITING');
+          }}
+          className={`min-w-[130px] sm:min-w-0 snap-start bg-white p-4 rounded-2xl border text-left shadow-sm space-y-1 shrink-0 sm:shrink transition-all hover:border-amber-400 hover:shadow-md cursor-pointer ${
+            activeTab === 'appointments' && statusFilter === 'WAITING'
+              ? 'border-amber-500 ring-2 ring-amber-200'
+              : 'border-slate-200'
+          }`}
+          title="Click to filter Waiting in OPD"
+        >
+          <span className="text-[10px] uppercase font-bold text-slate-400 block">Waiting in OPD</span>
+          <div className="text-2xl font-black text-amber-600">
+            {(appointments || []).filter((a) => a.status === 'WAITING').length}
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            handleTabChange('appointments');
+            setStatusFilter('COMPLETED');
+          }}
+          className={`min-w-[130px] sm:min-w-0 snap-start bg-white p-4 rounded-2xl border text-left shadow-sm space-y-1 shrink-0 sm:shrink transition-all hover:border-emerald-400 hover:shadow-md cursor-pointer ${
+            activeTab === 'appointments' && statusFilter === 'COMPLETED'
+              ? 'border-emerald-500 ring-2 ring-emerald-200'
+              : 'border-slate-200'
+          }`}
+          title="Click to filter Completed appointments"
+        >
+          <span className="text-[10px] uppercase font-bold text-slate-400 block">Completed</span>
           <div className="text-2xl font-black text-emerald-600">{metrics?.completedAppointments || 0}</div>
-        </div>
+        </button>
 
-        <div className="min-w-[130px] sm:min-w-0 snap-start bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1 shrink-0 sm:shrink">
-          <span className="text-[10px] uppercase font-bold text-slate-400">Cancelled</span>
+        <button
+          type="button"
+          onClick={() => {
+            handleTabChange('appointments');
+            setStatusFilter('CANCELLED');
+          }}
+          className={`min-w-[130px] sm:min-w-0 snap-start bg-white p-4 rounded-2xl border text-left shadow-sm space-y-1 shrink-0 sm:shrink transition-all hover:border-rose-400 hover:shadow-md cursor-pointer ${
+            activeTab === 'appointments' && statusFilter === 'CANCELLED'
+              ? 'border-rose-500 ring-2 ring-rose-200'
+              : 'border-slate-200'
+          }`}
+          title="Click to filter Cancelled appointments"
+        >
+          <span className="text-[10px] uppercase font-bold text-slate-400 block">Cancelled</span>
           <div className="text-2xl font-black text-rose-600">{metrics?.cancelledAppointments || 0}</div>
-        </div>
+        </button>
 
         <div className="min-w-[130px] sm:min-w-0 snap-start bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1 shrink-0 sm:shrink">
-          <span className="text-[10px] uppercase font-bold text-slate-400">No Shows</span>
-          <div className="text-2xl font-black text-slate-600">{metrics?.noShowAppointments || 0}</div>
-        </div>
-
-        <div className="min-w-[130px] sm:min-w-0 snap-start bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1 shrink-0 sm:shrink">
-          <span className="text-[10px] uppercase font-bold text-slate-400">Today's Revenue</span>
+          <span className="text-[10px] uppercase font-bold text-slate-400 block">Today's Revenue</span>
           <div className="text-2xl font-black text-royal-700">₹{metrics?.todayRevenue || 0}</div>
         </div>
 
-        <div className="min-w-[130px] sm:min-w-0 snap-start bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1 shrink-0 sm:shrink">
-          <span className="text-[10px] uppercase font-bold text-slate-400">Patients</span>
+        <button
+          type="button"
+          onClick={() => handleTabChange('patients')}
+          className={`min-w-[130px] sm:min-w-0 snap-start bg-white p-4 rounded-2xl border text-left shadow-sm space-y-1 shrink-0 sm:shrink transition-all hover:border-royal-400 hover:shadow-md cursor-pointer ${
+            activeTab === 'patients'
+              ? 'border-royal-500 ring-2 ring-royal-200'
+              : 'border-slate-200'
+          }`}
+          title="Click to view Patient Records"
+        >
+          <span className="text-[10px] uppercase font-bold text-slate-400 block">Patients</span>
           <div className="text-2xl font-black text-slate-900">{metrics?.patientCount || 0}</div>
-        </div>
+        </button>
       </div>
 
       {/* TAB 1: APPOINTMENTS MANAGEMENT */}
@@ -1478,6 +1742,321 @@ export const HospitalAdminDashboardPage: React.FC = () => {
             </table>
           </div>
         </Card>
+      )}
+
+      {/* TAB 7: HOSPITAL DIAGNOSTIC LABORATORIES (Requirement 6) */}
+      {activeTab === 'labs' && canManageLabs && (
+        <Card className="rounded-2xl border-slate-200 shadow-sm space-y-4">
+          <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <FlaskConical className="w-5 h-5 text-purple-600" />
+                Hospital Associated Diagnostic Laboratories
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Manage in-house and partner pathology laboratories, configure public vs private hospital-only booking visibility, and review test catalogs
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search labs by name, city, phone..."
+                  value={labSearch}
+                  onChange={(e) => setLabSearch(e.target.value)}
+                  className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-purple-500 w-52 sm:w-64"
+                />
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetchLabs()}
+                className="text-xs shrink-0"
+              >
+                <RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh
+              </Button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
+                <tr>
+                  <th className="px-5 py-3">Laboratory Details</th>
+                  <th className="px-5 py-3">Contact & Address</th>
+                  <th className="px-5 py-3">Affiliation / Status</th>
+                  <th className="px-5 py-3">Visibility Mode</th>
+                  <th className="px-5 py-3">Tests & Volume</th>
+                  <th className="px-5 py-3 text-right">Visibility & Controls</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-slate-700">
+                {labsLoading ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-10 text-slate-400">
+                      Loading hospital diagnostic laboratories...
+                    </td>
+                  </tr>
+                ) : (hospitalLabs || []).filter((l: any) => {
+                    if (!labSearch.trim()) return true;
+                    const q = labSearch.toLowerCase();
+                    return (
+                      l.name?.toLowerCase().includes(q) ||
+                      l.city?.toLowerCase().includes(q) ||
+                      l.phone?.includes(q) ||
+                      l.email?.toLowerCase().includes(q)
+                    );
+                  }).length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-12 text-slate-400">
+                      <FlaskConical className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      No diagnostic laboratories found matching your criteria.
+                    </td>
+                  </tr>
+                ) : (
+                  (hospitalLabs || [])
+                    .filter((l: any) => {
+                      if (!labSearch.trim()) return true;
+                      const q = labSearch.toLowerCase();
+                      return (
+                        l.name?.toLowerCase().includes(q) ||
+                        l.city?.toLowerCase().includes(q) ||
+                        l.phone?.includes(q) ||
+                        l.email?.toLowerCase().includes(q)
+                      );
+                    })
+                    .map((lab: any) => {
+                      const isPublic = (lab.visibility || 'PUBLIC') === 'PUBLIC';
+                      return (
+                        <tr key={lab.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="px-5 py-4">
+                            <div className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                              {lab.name}
+                              {isPublic ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                  <Globe className="w-3 h-3 text-emerald-600" /> Public Lab
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                                  <Lock className="w-3 h-3 text-amber-600" /> In-Hospital Only
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              ID: <span className="font-mono">{lab.id.slice(0, 8)}</span>
+                            </div>
+                          </td>
+
+                          <td className="px-5 py-4">
+                            <div className="font-semibold text-slate-800">{lab.phone}</div>
+                            <div className="text-slate-500 font-mono text-[11px]">{lab.email}</div>
+                            <div className="text-slate-400 text-[11px] truncate max-w-xs">
+                              {lab.address ? `${lab.address}, ${lab.city}` : lab.city || 'Hospital Campus'}
+                            </div>
+                          </td>
+
+                          <td className="px-5 py-4">
+                            <Badge
+                              variant={lab.status === 'APPROVED' || lab.status === 'ACTIVE' ? 'success' : 'warning'}
+                              className="text-[10px]"
+                            >
+                              {lab.status || 'ACTIVE'}
+                            </Badge>
+                          </td>
+
+                          <td className="px-5 py-4">
+                            {isPublic ? (
+                              <div className="space-y-0.5">
+                                <span className="font-bold text-emerald-700 flex items-center gap-1">
+                                  <Globe className="w-3.5 h-3.5 text-emerald-600" /> Public Catalog
+                                </span>
+                                <p className="text-[10px] text-slate-500 leading-tight">
+                                  Listed on patient portal for direct test bookings
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="space-y-0.5">
+                                <span className="font-bold text-amber-700 flex items-center gap-1">
+                                  <Lock className="w-3.5 h-3.5 text-amber-600" /> Private Lab
+                                </span>
+                                <p className="text-[10px] text-slate-500 leading-tight">
+                                  Restricted to in-hospital doctor clinical requisitions
+                                </p>
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="px-5 py-4">
+                            <div className="font-bold text-purple-900">
+                              {lab._count?.tests || (lab.tests || []).length} Tests Listed
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              {lab._count?.requests || 0} Requisitions Processed
+                            </div>
+                          </td>
+
+                          <td className="px-5 py-4 text-right">
+                            <div className="inline-flex items-center gap-2">
+                              {/* Visibility Toggle Button (Requirement 6) */}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  updateLabVisibilityMutation.mutate({
+                                    labId: lab.id,
+                                    visibility: isPublic ? 'PRIVATE' : 'PUBLIC',
+                                  })
+                                }
+                                isLoading={updateLabVisibilityMutation.isPending}
+                                className={`text-xs font-bold ${
+                                  isPublic
+                                    ? 'border-amber-300 text-amber-700 hover:bg-amber-50'
+                                    : 'border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                                }`}
+                                title={
+                                  isPublic
+                                    ? 'Make this lab private so only hospital doctors can order tests'
+                                    : 'Make this lab public so patients can book tests directly'
+                                }
+                              >
+                                {isPublic ? (
+                                  <>
+                                    <Lock className="w-3.5 h-3.5 mr-1 text-amber-600" /> Make Private
+                                  </>
+                                ) : (
+                                  <>
+                                    <Globe className="w-3.5 h-3.5 mr-1 text-emerald-600" /> Make Public
+                                  </>
+                                )}
+                              </Button>
+
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-xs text-purple-700 border-purple-200 hover:bg-purple-50"
+                                onClick={() => setEditingLab(lab)}
+                              >
+                                <Edit2 className="w-3.5 h-3.5 mr-1" /> Edit Profile
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* EDIT HOSPITAL LAB MODAL */}
+      {editingLab && (
+        <Modal
+          isOpen={!!editingLab}
+          onClose={() => setEditingLab(null)}
+          title={`Edit Laboratory Profile - ${editingLab.name}`}
+          maxWidth="md"
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const form = e.target as HTMLFormElement;
+              const name = (form.elements.namedItem('labName') as HTMLInputElement).value;
+              const phone = (form.elements.namedItem('labPhone') as HTMLInputElement).value;
+              const email = (form.elements.namedItem('labEmail') as HTMLInputElement).value;
+              const address = (form.elements.namedItem('labAddress') as HTMLInputElement).value;
+              const city = (form.elements.namedItem('labCity') as HTMLInputElement).value;
+
+              updateLabMutation.mutate({
+                labId: editingLab.id,
+                data: {
+                  name: name.trim(),
+                  phone: phone.trim(),
+                  email: email.trim(),
+                  address: address.trim(),
+                  city: city.trim(),
+                },
+              });
+            }}
+            className="space-y-4 text-xs"
+          >
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Laboratory Name <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                name="labName"
+                defaultValue={editingLab.name}
+                required
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Phone Number</label>
+                <input
+                  type="text"
+                  name="labPhone"
+                  defaultValue={editingLab.phone}
+                  required
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Email Address</label>
+                <input
+                  type="email"
+                  name="labEmail"
+                  defaultValue={editingLab.email}
+                  required
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">City / Location</label>
+                <input
+                  type="text"
+                  name="labCity"
+                  defaultValue={editingLab.city || ''}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Address / Block</label>
+                <input
+                  type="text"
+                  name="labAddress"
+                  defaultValue={editingLab.address || ''}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <Button type="button" variant="ghost" size="sm" onClick={() => setEditingLab(null)}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                className="bg-purple-600 hover:bg-purple-700 text-white font-bold"
+                isLoading={updateLabMutation.isPending}
+              >
+                Save Laboratory Profile
+              </Button>
+            </div>
+          </form>
+        </Modal>
       )}
 
       {/* EDIT DOCTOR MODAL */}

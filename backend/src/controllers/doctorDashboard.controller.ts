@@ -193,6 +193,22 @@ export class DoctorDashboardController {
     }
   }
 
+  static async downloadConsultationPdf(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const appointmentId = req.params.appointmentId as string;
+      const pdfBuffer = await DoctorDashboardService.generateConsultationPdf(doctorId, appointmentId);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename=consultation-${appointmentId}.pdf`);
+      return res.send(pdfBuffer);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to generate consultation PDF', 500);
+    }
+  }
+
   // -------------------------------------------------------------
   // PRESCRIPTION TEMPLATES
   // -------------------------------------------------------------

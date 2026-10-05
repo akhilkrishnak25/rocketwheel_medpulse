@@ -11,6 +11,7 @@ export interface CreateAppointmentDTO {
     fullName: string;
     mobileNumber: string;
     email: string;
+    age?: number | null;
     dateOfBirth?: string | null;
     gender?: string | null;
     address?: string | null;

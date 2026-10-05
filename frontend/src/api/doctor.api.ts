@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, API_BASE_URL } from './client';
 import { Appointment } from '../types';
 
 export const doctorDashboardApi = {
@@ -76,4 +76,22 @@ export const doctorDashboardApi = {
   createLabRequest: (data: any) => api.post<any>('/doctor/lab-requests', data),
 
   getLabRequests: () => api.get<any[]>('/doctor/lab-requests'),
+
+  // Clinical Consultation Summary PDF
+  downloadConsultationPdf: async (appointmentId: string): Promise<Blob> => {
+    const token =
+      localStorage.getItem('rocketwheel_access_token') ||
+      localStorage.getItem('medipulse_access_token');
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch(`${API_BASE_URL}/doctor/appointments/${appointmentId}/pdf`, {
+      method: 'GET',
+      headers,
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to download clinical consultation PDF (${res.status})`);
+    }
+    return res.blob();
+  },
 };

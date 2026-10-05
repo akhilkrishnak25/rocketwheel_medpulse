@@ -1,4 +1,4 @@
-const API_BASE_URL = ((import.meta as any).env?.VITE_API_URL as string) || '/api';
+export const API_BASE_URL = ((import.meta as any).env?.VITE_API_URL as string) || '/api';
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -89,4 +89,24 @@ export const api = {
     }),
   delete: <T>(endpoint: string) =>
     apiClient<T>(endpoint, { method: 'DELETE' }),
+};
+
+export const uploadApi = {
+  uploadReportPdf: async (fileName: string, fileData: string) => {
+    return apiClient<{ url: string; fileName: string; size: number }>('/upload/report', {
+      method: 'POST',
+      body: JSON.stringify({ fileName, fileData }),
+    });
+  },
+  uploadProfilePhoto: async (fileData: string) => {
+    return apiClient<{ url: string }>('/upload/profile-photo', {
+      method: 'POST',
+      body: JSON.stringify({ fileData }),
+    });
+  },
+  removeProfilePhoto: async () => {
+    return apiClient<{ url: null }>('/upload/profile-photo', {
+      method: 'DELETE',
+    });
+  },
 };

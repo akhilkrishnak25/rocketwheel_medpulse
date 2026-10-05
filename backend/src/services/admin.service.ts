@@ -1091,5 +1091,92 @@ export class AdminService {
 
     return { success: true };
   }
+
+  // -------------------------------------------------------------
+  // HOSPITAL ASSOCIATED LABS & VISIBILITY MANAGEMENT
+  // -------------------------------------------------------------
+  static async getHospitalLabs(hospitalId: string) {
+    const labs = await prisma.lab.findMany({
+      where: { hospitalId },
+      include: {
+        _count: {
+          select: { tests: true, testRequests: true },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    return labs.map((l) => ({
+      ...l,
+      testsCount: l._count.tests,
+      requestsCount: l._count.testRequests,
+    }));
+  }
+
+  static async updateLabVisibility(
+    hospitalId: string,
+    labId: string,
+    visibility: 'PUBLIC' | 'PRIVATE',
+    requestingUserId?: string
+  ) {
+    const lab = await prisma.lab.findFirst({
+      where: { id: labId, hospitalId },
+    });
+    if (!lab) {
+      throw new Error('Laboratory not found or does not belong to your hospital');
+    }
+
+    const updated = await prisma.lab.update({
+      where: { id: labId },
+      data: { visibility },
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'UPDATE_LAB_VISIBILITY',
+      entity: 'Lab',
+      entityId: labId,
+      details: { previous: lab.visibility, updated: visibility, labName: lab.name },
+    });
+
+    return updated;
+  }
+
+  static async updateLab(
+    hospitalId: string,
+    labId: string,
+    data: {
+      name?: string;
+      phone?: string;
+      address?: string;
+      city?: string;
+      licenseNumber?: string;
+      visibility?: 'PUBLIC' | 'PRIVATE';
+      status?: string;
+    },
+    requestingUserId?: string
+  ) {
+    const lab = await prisma.lab.findFirst({
+      where: { id: labId, hospitalId },
+    });
+    if (!lab) {
+      throw new Error('Laboratory not found or does not belong to your hospital');
+    }
+
+    const updated = await prisma.lab.update({
+      where: { id: labId },
+      data,
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'UPDATE_HOSPITAL_LAB',
+      entity: 'Lab',
+      entityId: labId,
+      details: data,
+    });
+
+    return updated;
+  }
 }
 

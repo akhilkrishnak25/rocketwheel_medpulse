@@ -27,14 +27,18 @@ import {
   Download,
   CheckSquare,
   Square,
+  Camera,
 } from 'lucide-react';
 import { doctorDashboardApi } from '../api/doctor.api';
 import { labApi } from '../api/lab.api';
+import { uploadApi } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Modal } from '../components/ui/Modal';
 import { useToast } from '../components/ui/Toast';
+import { InlineSpinner } from '../components/ui/Loading';
 import { Appointment } from '../types';
 
 interface MedicineItem {
@@ -48,12 +52,19 @@ interface MedicineItem {
 export const DoctorDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const { user, updateUser } = useAuth();
 
   const [activeAppointment, setActiveAppointment] = useState<Appointment | null>(null);
   const [isConsultModalOpen, setIsConsultModalOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState<'queue' | 'templates' | 'labs' | 'roster' | 'leaves'>('queue');
   const [sendToPharmacy, setSendToPharmacy] = useState(false);
+
+  // Profile Photo Upload State (Requirement 20)
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+
+  // PDF Document Generation State (Requirement 13)
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   // Template States (CRUD, Search, Bulk Upload)
   const [isSaveTemplateOpen, setIsSaveTemplateOpen] = useState(false);
@@ -73,21 +84,22 @@ export const DoctorDashboardPage: React.FC = () => {
   const [labPriority, setLabPriority] = useState<'NORMAL' | 'URGENT'>('NORMAL');
   const [labNotes, setLabNotes] = useState('');
 
-  // Consultation Clinical Data Form State
+  // Consultation Clinical Data Form State (Requirement 10 & 12: No fake vitals, Chief complaints)
   const [diagnosis, setDiagnosis] = useState('');
+  const [chiefComplaints, setChiefComplaints] = useState('');
   const [symptoms, setSymptoms] = useState('');
   const [clinicalNotes, setClinicalNotes] = useState('');
   const [followUpDate, setFollowUpDate] = useState('');
   const [vitals, setVitals] = useState({
-    bp: '120/80 mmHg',
-    pulse: '76 bpm',
-    temperature: '98.4 F',
-    weight: '65 kg',
-    spo2: '99%',
+    bp: '',
+    pulse: '',
+    temperature: '',
+    weight: '',
+    spo2: '',
   });
   const [medicines, setMedicines] = useState<MedicineItem[]>([
     {
-      name: 'Tab Paracetamol 650mg',
+      name: '',
       dosage: '1 tablet',
       frequency: 'TDS (Thrice daily)',
       duration: '5 days',
@@ -175,16 +187,59 @@ export const DoctorDashboardPage: React.FC = () => {
     enabled: activeTab === 'labs',
   });
 
-  // Automatically pre-populate vitals when Support Staff vitals are present
-  React.useEffect(() => {
-    const v = consultDetails?.vitals || consultDetails?.currentVitals;
+  // Reset clinical state when active appointment changes (Requirement 10)
+  useEffect(() => {
+    if (!activeAppointment) {
+      resetConsultationForm();
+      return;
+    }
+    setDiagnosis('');
+    setChiefComplaints('');
+    setSymptoms('');
+    setClinicalNotes('');
+    setFollowUpDate('');
+    setVitals({ bp: '', pulse: '', temperature: '', weight: '', spo2: '' });
+    setMedicines([
+      {
+        name: '',
+        dosage: '1 tablet',
+        frequency: 'TDS (Thrice daily)',
+        duration: '5 days',
+        instructions: 'After food',
+      },
+    ]);
+  }, [activeAppointment?.id]);
+
+  // Automatically pre-populate vitals and chief complaints when consultDetails are loaded
+  useEffect(() => {
+    if (!consultDetails) return;
+
+    if (consultDetails.chiefComplaints) {
+      setChiefComplaints(consultDetails.chiefComplaints);
+    }
+
+    const v = consultDetails.vitals || consultDetails.currentVitals;
     if (v) {
+      const bpStr =
+        v.bloodPressure ||
+        (v.bloodPressureSys && v.bloodPressureDia
+          ? `${v.bloodPressureSys}/${v.bloodPressureDia} mmHg`
+          : v.bpSystolic && v.bpDiastolic
+          ? `${v.bpSystolic}/${v.bpDiastolic} mmHg`
+          : v.bloodPressureSys
+          ? `${v.bloodPressureSys} mmHg`
+          : '');
+      const pulseStr = v.pulseRate ? `${v.pulseRate} bpm` : v.pulse ? `${v.pulse} bpm` : '';
+      const tempStr = v.temperature ? `${v.temperature}°F` : '';
+      const weightStr = v.weightKg ? `${v.weightKg} kg` : v.weight ? `${v.weight} kg` : '';
+      const spo2Str = v.spO2 ? `${v.spO2}%` : v.spo2 ? `${v.spo2}%` : '';
+
       setVitals({
-        bp: v.bloodPressure || (v.bpSystolic && v.bpDiastolic ? `${v.bpSystolic}/${v.bpDiastolic} mmHg` : (v.bpSystolic ? `${v.bpSystolic} mmHg` : '')),
-        pulse: v.pulseRate ? `${v.pulseRate} bpm` : (v.pulse ? `${v.pulse} bpm` : ''),
-        temperature: v.temperature ? `${v.temperature}°F` : '',
-        weight: v.weightKg ? `${v.weightKg} kg` : (v.weight ? `${v.weight} kg` : ''),
-        spo2: v.spo2 ? `${v.spo2}%` : '',
+        bp: bpStr,
+        pulse: pulseStr,
+        temperature: tempStr,
+        weight: weightStr,
+        spo2: spo2Str,
       });
     }
   }, [consultDetails]);
@@ -387,18 +442,101 @@ export const DoctorDashboardPage: React.FC = () => {
 
   const resetConsultationForm = () => {
     setDiagnosis('');
+    setChiefComplaints('');
     setSymptoms('');
     setClinicalNotes('');
     setFollowUpDate('');
+    setVitals({
+      bp: '',
+      pulse: '',
+      temperature: '',
+      weight: '',
+      spo2: '',
+    });
     setMedicines([
       {
         name: '',
-        dosage: '1 tab',
-        frequency: 'BD (Twice daily)',
+        dosage: '1 tablet',
+        frequency: 'TDS (Thrice daily)',
         duration: '5 days',
         instructions: 'After food',
       },
     ]);
+  };
+
+  // Download Clinical Consultation Summary PDF (Requirement 13)
+  const handleDownloadConsultationPdf = async (appointmentId: string, patientName?: string) => {
+    try {
+      setIsDownloadingPdf(true);
+      toast.info('Generating PDF', 'Compiling official clinical consultation document...');
+      const blob = await doctorDashboardApi.downloadConsultationPdf(appointmentId);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Consultation-${(patientName || 'Patient').replace(/\s+/g, '_')}-${appointmentId.slice(0, 8)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      toast.success('Downloaded', 'Clinical consultation document downloaded successfully.');
+    } catch (err: any) {
+      toast.error('Download Failed', err.message || 'Could not download consultation document');
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
+
+  // Profile Photo Upload & Remove (Requirement 20)
+  const handleProfilePhotoUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error('Invalid Format', 'Please upload an image file (JPG, PNG, WebP).');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('File Exceeds Limit', 'Maximum allowed image size is 5MB.');
+      return;
+    }
+
+    setIsUploadingPhoto(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64Data = reader.result as string;
+          const result = await uploadApi.uploadProfilePhoto(base64Data);
+          updateUser({ avatarUrl: result.url });
+          refetchProfile();
+          toast.success('Profile Photo Updated', 'Your doctor avatar has been updated successfully.');
+        } catch (err: any) {
+          toast.error('Upload Failed', err.message || 'Could not upload photo');
+        } finally {
+          setIsUploadingPhoto(false);
+        }
+      };
+      reader.onerror = () => {
+        toast.error('Upload Failed', 'Error reading image file');
+        setIsUploadingPhoto(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      toast.error('Upload Failed', err.message);
+      setIsUploadingPhoto(false);
+    }
+  };
+
+  const handleProfilePhotoRemove = async () => {
+    if (!window.confirm('Remove doctor profile photo?')) return;
+    setIsUploadingPhoto(true);
+    try {
+      await uploadApi.removeProfilePhoto();
+      updateUser({ avatarUrl: null });
+      refetchProfile();
+      toast.success('Photo Removed', 'Profile avatar reset to default.');
+    } catch (err: any) {
+      toast.error('Removal Failed', err.message || 'Could not remove photo');
+    } finally {
+      setIsUploadingPhoto(false);
+    }
   };
 
   const addMedicine = () => {
@@ -643,9 +781,20 @@ export const DoctorDashboardPage: React.FC = () => {
                       )}
 
                       {apt.status === 'COMPLETED' && (
-                        <span className="text-emerald-700 font-semibold text-xs flex items-center justify-end gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Rx Issued
-                        </span>
+                        <div className="flex items-center justify-end gap-2">
+                          <span className="text-emerald-700 font-semibold text-xs flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Rx Issued
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleDownloadConsultationPdf(apt.id, apt.patient.fullName)}
+                            className="text-xs border-slate-200 text-slate-700 hover:bg-slate-50 font-bold"
+                            title="Download Clinical Consultation PDF"
+                          >
+                            <Download className="w-3.5 h-3.5 mr-1" /> PDF
+                          </Button>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -660,129 +809,239 @@ export const DoctorDashboardPage: React.FC = () => {
 
       {/* TAB 2: ROSTER & SCHEDULE */}
       {activeTab === 'roster' && (
-        <Card className="rounded-2xl border-slate-200 shadow-sm p-6 space-y-6">
-          <div className="border-b border-slate-100 pb-4">
-            <h2 className="text-base font-bold text-slate-900">OPD Consultation Hours & Settings</h2>
-            <p className="text-xs text-slate-500">
-              Configure your daily clinic timing, working days, and consultation fee
-            </p>
-          </div>
+        <div className="space-y-6">
+          {/* Profile Photo & Identity Card (Requirement 20) */}
+          <Card className="rounded-2xl border-slate-200 shadow-sm p-6">
+            <div className="flex flex-col sm:flex-row items-center gap-6">
+              <div className="relative group">
+                <div className="w-24 h-24 rounded-2xl overflow-hidden bg-royal-50 border-2 border-royal-200 flex items-center justify-center text-royal-700 shadow-inner">
+                  {user?.avatarUrl || profile?.user?.avatarUrl || profile?.avatarUrl ? (
+                    <img
+                      src={user?.avatarUrl || profile?.user?.avatarUrl || profile?.avatarUrl}
+                      alt="Doctor Profile"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <User className="w-12 h-12 text-royal-400" />
+                  )}
+                  {isUploadingPhoto && (
+                    <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center">
+                      <InlineSpinner size="md" className="text-royal-600" />
+                    </div>
+                  )}
+                </div>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const form = e.target as HTMLFormElement;
-              const fee = (form.elements.namedItem('fee') as HTMLInputElement).value;
-              const days = (form.elements.namedItem('days') as HTMLInputElement).value;
-              const start = (form.elements.namedItem('start') as HTMLInputElement).value;
-              const end = (form.elements.namedItem('end') as HTMLInputElement).value;
-              const about = (form.elements.namedItem('about') as HTMLTextAreaElement).value;
-              const languages = (form.elements.namedItem('languages') as HTMLInputElement).value;
-
-              updateRosterMutation.mutate({
-                consultationFee: Number(fee),
-                workingDays: days,
-                workingHoursStart: start,
-                workingHoursEnd: end,
-                about,
-                languages,
-              });
-            }}
-            className="space-y-4 text-xs max-w-2xl"
-          >
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Consultation Fee (₹)
+                <label
+                  htmlFor="doctor-avatar-file-input"
+                  className="absolute -bottom-2 -right-2 p-2 bg-royal-600 hover:bg-royal-700 text-white rounded-xl shadow-md cursor-pointer transition-all hover:scale-105"
+                  title="Upload Doctor Photo"
+                >
+                  <Camera className="w-4 h-4" />
+                  <input
+                    type="file"
+                    id="doctor-avatar-file-input"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = e.target.files;
+                      if (files && files.length > 0) {
+                        handleProfilePhotoUpload(files[0]);
+                      }
+                    }}
+                    disabled={isUploadingPhoto}
+                  />
                 </label>
-                <input
-                  type="number"
-                  name="fee"
-                  defaultValue={profile?.consultationFee || 500}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-bold"
-                  required
-                />
               </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Working Days (Comma-separated)
-                </label>
-                <input
-                  type="text"
-                  name="days"
-                  defaultValue={profile?.workingDays || 'Mon,Tue,Wed,Thu,Fri,Sat'}
-                  placeholder="Mon,Tue,Wed,Thu,Fri,Sat"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-semibold"
-                  required
-                />
+              <div className="space-y-1 text-center sm:text-left flex-1">
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                  <h3 className="text-lg font-bold text-slate-900">
+                    Dr. {profile?.name || user?.name || 'Doctor'}
+                  </h3>
+                  <Badge variant="purple" className="text-xs">
+                    {profile?.specialization || 'Consultant Specialist'}
+                  </Badge>
+                </div>
+                <p className="text-xs text-slate-500">
+                  {profile?.hospital?.name || user?.hospital?.name || 'Rocket Wheel MedPulse Healthcare'} • Reg No: {profile?.registrationNumber || 'DOC-REG-NMC'}
+                </p>
+                <div className="pt-2 flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                  <label
+                    htmlFor="doctor-avatar-file-input"
+                    className="text-xs font-semibold text-royal-700 hover:text-royal-800 cursor-pointer underline"
+                  >
+                    Change photo
+                  </label>
+                  {(user?.avatarUrl || profile?.user?.avatarUrl || profile?.avatarUrl) && (
+                    <>
+                      <span className="text-slate-300">•</span>
+                      <button
+                        type="button"
+                        onClick={handleProfilePhotoRemove}
+                        disabled={isUploadingPhoto}
+                        className="text-xs font-semibold text-rose-600 hover:text-rose-800"
+                      >
+                        Remove photo
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
+          </Card>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* OPD Consultation Hours & Settings Card */}
+          <Card className="rounded-2xl border-slate-200 shadow-sm p-6 space-y-6">
+            <div className="border-b border-slate-100 pb-4">
+              <h2 className="text-base font-bold text-slate-900">OPD Consultation Hours & Slot Duration</h2>
+              <p className="text-xs text-slate-500">
+                Configure your consultation slot duration, daily clinic timing, working days, and consultation fee
+              </p>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const form = e.target as HTMLFormElement;
+                const fee = (form.elements.namedItem('fee') as HTMLInputElement).value;
+                const days = (form.elements.namedItem('days') as HTMLInputElement).value;
+                const start = (form.elements.namedItem('start') as HTMLInputElement).value;
+                const end = (form.elements.namedItem('end') as HTMLInputElement).value;
+                const slotDuration = (form.elements.namedItem('slotDuration') as HTMLSelectElement).value;
+                const about = (form.elements.namedItem('about') as HTMLTextAreaElement).value;
+                const languages = (form.elements.namedItem('languages') as HTMLInputElement).value;
+
+                updateRosterMutation.mutate({
+                  consultationFee: Number(fee),
+                  workingDays: days,
+                  workingHoursStart: start,
+                  workingHoursEnd: end,
+                  slotDurationMinutes: Number(slotDuration),
+                  about,
+                  languages,
+                });
+              }}
+              className="space-y-4 text-xs max-w-2xl"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Consultation Fee (₹) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    name="fee"
+                    defaultValue={profile?.consultationFee || 500}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-bold"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Working Days (Comma-separated) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="days"
+                    defaultValue={profile?.workingDays || 'Mon,Tue,Wed,Thu,Fri,Sat'}
+                    placeholder="Mon,Tue,Wed,Thu,Fri,Sat"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-semibold"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Slot Duration Selector (Requirement 7) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    OPD Slot Duration per Patient <span className="text-royal-600 font-bold">*</span>
+                  </label>
+                  <select
+                    name="slotDuration"
+                    defaultValue={profile?.slotDurationMinutes || 15}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-semibold bg-white text-slate-800"
+                  >
+                    <option value={5}>5 minutes (Fast triage / follow-up)</option>
+                    <option value={10}>10 minutes</option>
+                    <option value={15}>15 minutes (Standard OPD)</option>
+                    <option value={20}>20 minutes</option>
+                    <option value={30}>30 minutes (Comprehensive consult)</option>
+                    <option value={45}>45 minutes</option>
+                    <option value={60}>60 minutes (Specialized consultation)</option>
+                  </select>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Patient appointment slots will be generated at this interval
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Languages Spoken
+                  </label>
+                  <input
+                    type="text"
+                    name="languages"
+                    defaultValue={profile?.languages || 'English, Hindi'}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Consultation Start Time (HH:MM)
+                  </label>
+                  <input
+                    type="text"
+                    name="start"
+                    defaultValue={profile?.workingHoursStart || '09:00'}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Consultation End Time (HH:MM)
+                  </label>
+                  <input
+                    type="text"
+                    name="end"
+                    defaultValue={profile?.workingHoursEnd || '17:00'}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
+                    required
+                  />
+                </div>
+              </div>
+
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
-                  Consultation Start Time (HH:MM)
+                  Professional Bio / Clinical Focus
                 </label>
-                <input
-                  type="text"
-                  name="start"
-                  defaultValue={profile?.workingHoursStart || '09:00'}
+                <textarea
+                  name="about"
+                  rows={3}
+                  defaultValue={profile?.about || ''}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
-                  required
                 />
               </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Consultation End Time (HH:MM)
-                </label>
-                <input
-                  type="text"
-                  name="end"
-                  defaultValue={profile?.workingHoursEnd || '17:00'}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
-                  required
-                />
+              <div className="pt-2">
+                <Button
+                  type="submit"
+                  size="md"
+                  className="bg-royal-600 hover:bg-royal-700 text-white font-bold"
+                  disabled={updateRosterMutation.isPending}
+                >
+                  {updateRosterMutation.isPending ? 'Updating...' : 'Save Consultation Settings'}
+                </Button>
               </div>
-            </div>
-
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                Languages Spoken
-              </label>
-              <input
-                type="text"
-                name="languages"
-                defaultValue={profile?.languages || 'English, Hindi'}
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">
-                Professional Bio / Clinical Focus
-              </label>
-              <textarea
-                name="about"
-                rows={3}
-                defaultValue={profile?.about || ''}
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
-              />
-            </div>
-
-            <div className="pt-2">
-              <Button
-                type="submit"
-                size="md"
-                className="bg-royal-600 hover:bg-royal-700 font-bold"
-                disabled={updateRosterMutation.isPending}
-              >
-                {updateRosterMutation.isPending ? 'Updating...' : 'Save Consultation Settings'}
-              </Button>
-            </div>
-          </form>
-        </Card>
+            </form>
+          </Card>
+        </div>
       )}
 
       {/* TAB 3: LEAVES & ABSENCES */}
@@ -1215,10 +1474,12 @@ export const DoctorDashboardPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Support Staff Recorded Vitals Banner */}
+            {/* Support Staff Recorded Vitals Banner (Requirement 10) */}
             {(consultDetails?.vitals || consultDetails?.currentVitals) ? (
               (() => {
                 const rv = consultDetails?.vitals || consultDetails?.currentVitals;
+                const nurseName = rv.recordedByStaff?.name || rv.recordedBy?.name;
+                const recordedTime = rv.createdAt ? new Date(rv.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
                 return (
                   <div className="p-3 bg-teal-50/90 border border-teal-200 rounded-xl space-y-1.5 shadow-sm">
                     <div className="flex items-center justify-between">
@@ -1228,14 +1489,14 @@ export const DoctorDashboardPage: React.FC = () => {
                       </span>
                       <span className="text-[10px] text-teal-800 font-bold bg-teal-100 border border-teal-300 px-2.5 py-0.5 rounded-full flex items-center gap-1">
                         <CheckCircle2 className="w-3 h-3 text-teal-600" />
-                        Pre-Screened
+                        Pre-Screened {nurseName ? `by ${nurseName}` : ''} {recordedTime ? `at ${recordedTime}` : ''}
                       </span>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 pt-1 font-mono text-xs text-slate-800">
-                      <div>BP: <strong className="font-bold text-slate-900">{rv.bloodPressure || (rv.bpSystolic ? `${rv.bpSystolic}/${rv.bpDiastolic}` : 'N/A')}</strong></div>
+                      <div>BP: <strong className="font-bold text-slate-900">{rv.bloodPressure || (rv.bloodPressureSys ? `${rv.bloodPressureSys}/${rv.bloodPressureDia}` : (rv.bpSystolic ? `${rv.bpSystolic}/${rv.bpDiastolic}` : 'N/A'))}</strong></div>
                       <div>Pulse: <strong className="font-bold text-slate-900">{rv.pulseRate || rv.pulse || 'N/A'} bpm</strong></div>
                       <div>Temp: <strong className="font-bold text-slate-900">{rv.temperature || 'N/A'}°F</strong></div>
-                      <div>SpO2: <strong className="font-bold text-slate-900">{rv.spo2 || 'N/A'}%</strong></div>
+                      <div>SpO2: <strong className="font-bold text-slate-900">{rv.spO2 || rv.spo2 || 'N/A'}%</strong></div>
                       <div>Weight: <strong className="font-bold text-slate-900">{rv.weightKg || rv.weight || 'N/A'} kg</strong></div>
                       <div>Height: <strong className="font-bold text-slate-900">{rv.heightCm || rv.height || 'N/A'} cm</strong></div>
                     </div>
@@ -1250,11 +1511,11 @@ export const DoctorDashboardPage: React.FC = () => {
             ) : (
               <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-amber-800 text-[11px] flex items-center gap-2">
                 <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                <span>No support staff screening vitals recorded yet. You may enter vitals manually below.</span>
+                <span>No vitals recorded yet. You may enter vitals manually below.</span>
               </div>
             )}
 
-            {/* Editable Vitals Bar */}
+            {/* Editable Vitals Bar (Requirement 10: Placeholders instead of fake defaults) */}
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
               <span className="font-bold text-slate-700 block mb-2">Consultation Vitals (Doctor Verified):</span>
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
@@ -1264,6 +1525,7 @@ export const DoctorDashboardPage: React.FC = () => {
                     type="text"
                     value={vitals.bp}
                     onChange={(e) => setVitals({ ...vitals, bp: e.target.value })}
+                    placeholder="e.g. 120/80 mmHg"
                     className="w-full text-xs font-semibold p-1.5 rounded-lg border border-slate-200 bg-white"
                   />
                 </div>
@@ -1273,6 +1535,7 @@ export const DoctorDashboardPage: React.FC = () => {
                     type="text"
                     value={vitals.pulse}
                     onChange={(e) => setVitals({ ...vitals, pulse: e.target.value })}
+                    placeholder="e.g. 76 bpm"
                     className="w-full text-xs font-semibold p-1.5 rounded-lg border border-slate-200 bg-white"
                   />
                 </div>
@@ -1282,6 +1545,7 @@ export const DoctorDashboardPage: React.FC = () => {
                     type="text"
                     value={vitals.temperature}
                     onChange={(e) => setVitals({ ...vitals, temperature: e.target.value })}
+                    placeholder="e.g. 98.4 F"
                     className="w-full text-xs font-semibold p-1.5 rounded-lg border border-slate-200 bg-white"
                   />
                 </div>
@@ -1291,6 +1555,7 @@ export const DoctorDashboardPage: React.FC = () => {
                     type="text"
                     value={vitals.weight}
                     onChange={(e) => setVitals({ ...vitals, weight: e.target.value })}
+                    placeholder="e.g. 65 kg"
                     className="w-full text-xs font-semibold p-1.5 rounded-lg border border-slate-200 bg-white"
                   />
                 </div>
@@ -1300,11 +1565,82 @@ export const DoctorDashboardPage: React.FC = () => {
                     type="text"
                     value={vitals.spo2}
                     onChange={(e) => setVitals({ ...vitals, spo2: e.target.value })}
+                    placeholder="e.g. 99%"
                     className="w-full text-xs font-semibold p-1.5 rounded-lg border border-slate-200 bg-white"
                   />
                 </div>
               </div>
             </div>
+
+            {/* Chief Complaints (Requirement 12) */}
+            <div>
+              <label className="block font-bold text-slate-800 mb-1">
+                Chief Complaints <span className="text-slate-400 font-normal">(Primary symptoms, duration, presenting illness)</span>
+              </label>
+              <textarea
+                rows={2}
+                value={chiefComplaints}
+                onChange={(e) => setChiefComplaints(e.target.value)}
+                placeholder="e.g. High fever with chills for 3 days, severe sore throat, dry cough..."
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white focus:ring-2 focus:ring-royal-500 focus:outline-none font-medium"
+              />
+            </div>
+
+            {/* Requested Diagnostic Laboratory Tests (Requirement 14) */}
+            {consultDetails?.appointment?.labRequests && consultDetails.appointment.labRequests.length > 0 && (
+              <div className="p-3 bg-purple-50/70 border border-purple-200 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-purple-950 flex items-center gap-1.5 text-xs">
+                    <FlaskConical className="w-4 h-4 text-purple-600" />
+                    Requested Diagnostic Laboratory Tests
+                  </span>
+                  <Badge variant="purple" className="text-[10px]">
+                    {consultDetails.appointment.labRequests.length} Request{consultDetails.appointment.labRequests.length > 1 ? 's' : ''}
+                  </Badge>
+                </div>
+
+                <div className="space-y-1.5">
+                  {consultDetails.appointment.labRequests.map((req: any) => {
+                    const isCompleted = req.status === 'COMPLETED';
+                    const testNames =
+                      (req.testsList || []).map((t: any) => t.name).join(', ') ||
+                      (req.tests ? (typeof req.tests === 'string' ? JSON.parse(req.tests).map((t: any) => t.name).join(', ') : req.tests) : 'Diagnostic Tests');
+
+                    return (
+                      <div
+                        key={req.id}
+                        className="p-2 bg-white rounded-lg border border-purple-100 flex items-center justify-between text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          {isCompleted ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" /> ✓ Completed
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                              <Clock className="w-3 h-3 text-amber-600" /> ○ Pending
+                            </span>
+                          )}
+                          <span className="font-semibold text-slate-800">{testNames}</span>
+                          <span className="text-[10px] text-slate-400">({req.lab?.name || 'Hospital Lab'})</span>
+                        </div>
+
+                        {req.report?.fileUrl && (
+                          <a
+                            href={req.report.fileUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-purple-600 hover:text-purple-800 font-bold underline inline-flex items-center gap-1 text-[11px]"
+                          >
+                            <FileText className="w-3.5 h-3.5" /> View Report
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Disease Template Selector Bar */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 bg-royal-50/70 rounded-xl border border-royal-200/80">
@@ -1497,68 +1833,86 @@ export const DoctorDashboardPage: React.FC = () => {
               )}
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-              <Button variant="ghost" size="sm" onClick={() => setIsConsultModalOpen(false)}>
-                Cancel
-              </Button>
+            {/* Actions (Requirement 13 & 12) */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-100">
               <Button
-                size="md"
-                className="bg-royal-600 hover:bg-royal-700 font-bold"
-                isLoading={completeMutation.isPending}
-                onClick={() => {
-                  if (!diagnosis.trim()) {
-                    toast.error('Diagnosis Required', 'Please enter a diagnosis');
-                    return;
-                  }
-
-                  completeMutation.mutate({
-                    appointmentId: activeAppointment.id,
-                    payload: {
-                      diagnosis: diagnosis.trim(),
-                      symptoms: symptoms.trim() || undefined,
-                      clinicalNotes: clinicalNotes.trim() || undefined,
-                      followUpDate: followUpDate.trim() || undefined,
-                      vitals,
-                      medicines,
-                      sendToPharmacy,
-                    },
-                  });
-                }}
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => handleDownloadConsultationPdf(activeAppointment.id, activeAppointment.patient.fullName)}
+                isLoading={isDownloadingPdf}
+                className="border-royal-300 text-royal-700 hover:bg-royal-50 font-bold"
               >
-                Complete & Issue Prescription
+                <Download className="w-3.5 h-3.5 mr-1.5" /> Download Clinical Consultation
               </Button>
+
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setIsConsultModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  size="md"
+                  className="bg-royal-600 hover:bg-royal-700 font-bold text-white"
+                  isLoading={completeMutation.isPending}
+                  onClick={() => {
+                    if (!diagnosis.trim()) {
+                      toast.error('Diagnosis Required', 'Please enter a diagnosis');
+                      return;
+                    }
+
+                    completeMutation.mutate({
+                      appointmentId: activeAppointment.id,
+                      payload: {
+                        diagnosis: diagnosis.trim(),
+                        chiefComplaints: chiefComplaints.trim() || undefined,
+                        symptoms: chiefComplaints.trim() || symptoms.trim() || undefined,
+                        clinicalNotes: clinicalNotes.trim() || undefined,
+                        followUpDate: followUpDate.trim() || undefined,
+                        vitals,
+                        medicines,
+                        sendToPharmacy,
+                      },
+                    });
+                  }}
+                >
+                  Complete & Issue Prescription
+                </Button>
+              </div>
             </div>
           </div>
         </Modal>
       )}
 
-      {/* SAVE AS PRESCRIPTION TEMPLATE MODAL */}
+      {/* SAVE AS PRESCRIPTION TEMPLATE MODAL (Requirement 15: Simplified modal) */}
       {isSaveTemplateOpen && (
         <Modal
           isOpen={isSaveTemplateOpen}
-          onClose={() => setIsSaveTemplateOpen(false)}
-          title="Save Prescription Template"
+          onClose={() => {
+            setIsSaveTemplateOpen(false);
+            setNewTemplateDisease('');
+          }}
+          title="New Disease Prescription Template"
           maxWidth="sm"
         >
           <form
             onSubmit={(e) => {
               e.preventDefault();
               if (!newTemplateDisease.trim()) {
-                toast.error('Disease Name Required', 'Please enter the disease or condition name for this template.');
+                toast.error('Disease Name Required', 'Please enter a disease or condition name for this template.');
                 return;
               }
+              const currentMeds = medicines.filter((m) => m.name && m.name.trim());
               createTemplateMutation.mutate({
                 diseaseName: newTemplateDisease.trim(),
                 diagnosis: diagnosis.trim() || newTemplateDisease.trim(),
-                medicines: medicines.filter((m) => m.name.trim()),
+                medicines: currentMeds,
                 instructions: clinicalNotes.trim() || undefined,
               });
             }}
             className="space-y-4 text-xs"
           >
             <p className="text-slate-500">
-              Save current medications as a reusable disease template in your personal template library.
+              Create a reusable disease template for your clinical practice. Medicines and clinical notes can be configured now or managed anytime later.
             </p>
 
             <div>
@@ -1569,29 +1923,42 @@ export const DoctorDashboardPage: React.FC = () => {
                 type="text"
                 value={newTemplateDisease}
                 onChange={(e) => setNewTemplateDisease(e.target.value)}
-                placeholder="e.g. Acute Gastroenteritis, Viral Fever, Type 2 DM"
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:ring-royal-500"
+                placeholder="e.g. Acute Gastroenteritis, Viral Fever, Type 2 DM, Hypertension"
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-xs focus:ring-2 focus:ring-royal-500 focus:outline-none font-medium"
                 required
+                autoFocus
               />
             </div>
 
-            <div className="p-3 bg-slate-50 rounded-xl space-y-1">
-              <span className="font-bold text-slate-700 block text-[11px]">Medicines in this template:</span>
-              {medicines.filter((m) => m.name.trim()).map((m, i) => (
-                <div key={i} className="text-slate-600 text-[11px]">
-                  • {m.name} ({m.dosage}, {m.frequency}, {m.duration})
-                </div>
-              ))}
-            </div>
+            {medicines.some((m) => m.name && m.name.trim()) && (
+              <div className="p-3 bg-slate-50 rounded-xl space-y-1 border border-slate-200">
+                <span className="font-bold text-slate-700 block text-[11px]">
+                  Attaching current workspace medicines ({medicines.filter((m) => m.name.trim()).length}):
+                </span>
+                {medicines.filter((m) => m.name && m.name.trim()).map((m, i) => (
+                  <div key={i} className="text-slate-600 text-[11px]">
+                    • {m.name} ({m.dosage || '1 tab'}, {m.frequency || 'OD'}, {m.duration || '5 days'})
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-              <Button type="button" variant="ghost" size="sm" onClick={() => setIsSaveTemplateOpen(false)}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setIsSaveTemplateOpen(false);
+                  setNewTemplateDisease('');
+                }}
+              >
                 Cancel
               </Button>
               <Button
                 type="submit"
                 size="sm"
-                className="bg-royal-600 hover:bg-royal-700 font-bold"
+                className="bg-royal-600 hover:bg-royal-700 text-white font-bold"
                 isLoading={createTemplateMutation.isPending}
               >
                 Save Template

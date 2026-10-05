@@ -60,4 +60,9 @@ router.delete('/sub-admins/:id', AdminController.deleteSubAdmin);
 router.get('/notifications', AdminController.getNotifications);
 router.patch('/notifications/:id/read', AdminController.markNotificationRead);
 
+// Hospital Diagnostic Laboratories & Visibility
+router.get('/labs', AdminController.getLabs);
+router.patch('/labs/:labId/visibility', AdminController.updateLabVisibility);
+router.patch('/labs/:labId', AdminController.updateLab);
+
 export default router;

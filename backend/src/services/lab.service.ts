@@ -359,12 +359,15 @@ export class LabService {
   /**
    * Get all accredited/approved active laboratories with test counts
    */
-  static async getActiveLabs(hospitalId?: string) {
+  static async getActiveLabs(hospitalId?: string, isPublicOnly: boolean = false) {
     const where: any = {
       status: { in: ['APPROVED', 'ACTIVE'] },
     };
     if (hospitalId) {
       where.hospitalId = hospitalId;
+    }
+    if (isPublicOnly) {
+      where.visibility = 'PUBLIC';
     }
 
     const labs = await prisma.lab.findMany({
@@ -384,6 +387,7 @@ export class LabService {
       type: l.type,
       licenseNumber: l.licenseNumber,
       status: l.status,
+      visibility: l.visibility,
       hospital: l.hospital,
       testsCount: l._count.tests,
       requestsCount: l._count.testRequests,
@@ -398,6 +402,7 @@ export class LabService {
       status: 'ACTIVE',
       lab: {
         status: { in: ['APPROVED', 'ACTIVE'] },
+        visibility: 'PUBLIC',
       },
     };
 
@@ -424,6 +429,7 @@ export class LabService {
             id: true,
             name: true,
             type: true,
+            visibility: true,
             hospital: { select: { id: true, name: true, city: true } },
           },
         },
@@ -461,6 +467,9 @@ export class LabService {
     });
     if (!lab) {
       throw new Error('Selected laboratory is currently not accepting bookings.');
+    }
+    if (lab.visibility === 'PRIVATE') {
+      throw new Error('This hospital diagnostic laboratory is private and does not accept direct public bookings. Tests must be ordered by a hospital clinician.');
     }
 
     // Retrieve selected tests to get live pricing

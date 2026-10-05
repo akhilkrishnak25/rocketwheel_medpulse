@@ -15,6 +15,7 @@ model User {
   role             String            // SUPER_ADMIN, HOSPITAL_ADMIN, HOSPITAL_SUB_ADMIN, DOCTOR, SUPPORT_STAFF, LAB_TECHNICIAN, PHARMACY_STAFF, PATIENT
   name             String
   phone            String?
+  avatarUrl        String?
   isActive         Boolean           @default(true)
   status           String            @default("ACTIVE") // ACTIVE, PENDING, REJECTED, SUSPENDED, INVITED
   lastLoginAt      DateTime?
@@ -197,6 +198,7 @@ model Patient {
   mobileNumber     String
   email            String
   dateOfBirth      String?
+  age              Int?
   gender           String?
   address          String?         
   bloodGroup       String?
@@ -409,6 +411,7 @@ model Lab {
   city          String?
   licenseNumber String?
   status        String           @default("PENDING") // PENDING, APPROVED, ACTIVE, REJECTED, SUSPENDED
+  visibility    String           @default("PUBLIC") // PUBLIC or PRIVATE (Hospital Admin controllable)
   technicians   LabTechnician[]
   testRequests  LabTestRequest[]
   tests         LabTest[]

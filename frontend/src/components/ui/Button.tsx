@@ -13,6 +13,7 @@ export const Button: React.FC<ButtonProps> = ({
   className,
   variant = 'primary',
   size = 'md',
+  type = 'button',
   isLoading = false,
   disabled,
   ...props
@@ -49,6 +50,7 @@ export const Button: React.FC<ButtonProps> = ({
 
   return (
     <button
+      type={type}
       className={twMerge(clsx(baseStyles, variants[variant], sizes[size], className))}
       disabled={disabled || isLoading}
       style={{

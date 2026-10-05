@@ -10,6 +10,7 @@ router.use(authenticate, requireRole(['DOCTOR']));
 // Queue & Appointments
 router.get('/appointments', DoctorDashboardController.getAppointments);
 router.get('/appointments/:appointmentId/consultation', DoctorDashboardController.getConsultationDetails);
+router.get('/appointments/:appointmentId/pdf', DoctorDashboardController.downloadConsultationPdf);
 router.post('/appointments/:appointmentId/start', DoctorDashboardController.startConsultation);
 router.post('/appointments/:appointmentId/complete', DoctorDashboardController.completeConsultation);
 router.get('/appointments/:appointmentId/prescription', DoctorDashboardController.getPrescription);

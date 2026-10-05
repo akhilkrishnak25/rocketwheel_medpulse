@@ -14,6 +14,8 @@ import {
   createOfflineAppointmentSchema,
   createSubAdminSchema,
   updateSubAdminPermissionsSchema,
+  updateLabVisibilitySchema,
+  updateLabSchema,
 } from '../validators/schemas';
 
 export class AdminController {
@@ -505,6 +507,53 @@ export class AdminController {
       return successResponse(res, null, 'Sub-admin removed successfully');
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to remove sub-admin', 400);
+    }
+  }
+
+  // -------------------------------------------------------------
+  // HOSPITAL ASSOCIATED LABS & VISIBILITY MANAGEMENT
+  // -------------------------------------------------------------
+  static async getLabs(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const labs = await AdminService.getHospitalLabs(hospitalId);
+      return successResponse(res, labs, 'Hospital diagnostic laboratories retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch hospital labs', 500);
+    }
+  }
+
+  static async updateLabVisibility(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const labId = req.params.labId as string;
+      const validated = updateLabVisibilitySchema.parse(req.body);
+      const updated = await AdminService.updateLabVisibility(hospitalId, labId, validated.visibility, req.user?.id);
+      return successResponse(
+        res,
+        updated,
+        `Laboratory visibility set to ${updated.visibility === 'PUBLIC' ? 'Public (listed in search & direct bookings)' : 'Private (internal clinic use only)'}`
+      );
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to update lab visibility', 400, error.errors);
+    }
+  }
+
+  static async updateLab(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const labId = req.params.labId as string;
+      const validated = updateLabSchema.parse(req.body);
+      const updated = await AdminService.updateLab(hospitalId, labId, validated, req.user?.id);
+      return successResponse(res, updated, 'Hospital laboratory details updated successfully');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to update laboratory', 400, error.errors);
     }
   }
 }

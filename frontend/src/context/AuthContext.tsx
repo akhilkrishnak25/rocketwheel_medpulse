@@ -8,6 +8,8 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<User>;
   logout: () => void;
+  updateUser: (updatedUser: Partial<User>) => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -58,6 +60,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     window.location.href = '/staff/login';
   };
 
+  const updateUser = (updated: Partial<User>) => {
+    setUser((prev) => (prev ? { ...prev, ...updated } : null));
+  };
+
+  const refreshUser = async () => {
+    try {
+      const userData = await authApi.me();
+      setUser(userData);
+    } catch (e) {
+      // ignore
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -66,6 +81,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoading,
         login,
         logout,
+        updateUser,
+        refreshUser,
       }}
     >
       {children}

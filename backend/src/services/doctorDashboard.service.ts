@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import prisma from '../config/prisma';
 import { AuditService } from '../utils/audit';
 import { NotificationService } from './notification.service';
+import { generateClinicalConsultationPdf } from '../utils/pdf';
 
 export class DoctorDashboardService {
   static async getDoctorAppointments(doctorId: string, date?: string) {
@@ -248,6 +249,7 @@ export class DoctorDashboardService {
       instructions?: string;
       followUpDate?: string | null;
       symptoms?: string;
+      chiefComplaints?: string;
       vitals?: { bp?: string; pulse?: string; temperature?: string; weight?: string; spo2?: string };
       clinicalNotes?: string;
       sendToPharmacy?: boolean;
@@ -263,6 +265,8 @@ export class DoctorDashboardService {
     if (!apt) {
       throw new Error('Appointment not assigned to this doctor');
     }
+
+    const chiefComplaintsText = data.chiefComplaints || data.symptoms || null;
 
     const result = await prisma.$transaction(async (tx) => {
       // 1. Update appointment status to COMPLETED
@@ -316,14 +320,14 @@ export class DoctorDashboardService {
       const medicalRecord = await tx.medicalRecord.upsert({
         where: { appointmentId },
         update: {
-          symptoms: data.symptoms,
+          symptoms: chiefComplaintsText,
           vitals: JSON.stringify(data.vitals || {}),
           clinicalNotes: data.clinicalNotes,
         },
         create: {
           appointmentId,
           patientId: apt.patientId,
-          symptoms: data.symptoms,
+          symptoms: chiefComplaintsText,
           vitals: JSON.stringify(data.vitals || {}),
           clinicalNotes: data.clinicalNotes,
         },
@@ -409,13 +413,14 @@ export class DoctorDashboardService {
       orderBy: { diseaseName: 'asc' },
     });
 
-    const latestVital = apt.vitals[0] || apt.patient.vitals[0] || null;
+    const latestVital = apt.vitals[0] || null;
 
     return {
       appointment: apt,
       patient: apt.patient,
       vitals: latestVital,
       currentVitals: latestVital,
+      chiefComplaints: apt.medicalRecord?.symptoms || null,
       patientHistory: {
         previousAppointments: apt.patient.appointments,
         previousPrescriptions: apt.patient.prescriptions,
@@ -710,5 +715,111 @@ export class DoctorDashboardService {
           }
         : null,
     };
+  }
+
+  static async generateConsultationPdf(doctorId: string, appointmentId: string) {
+    const apt = await prisma.appointment.findFirst({
+      where: { id: appointmentId, doctorId },
+      include: {
+        hospital: true,
+        doctor: { include: { department: true } },
+        patient: true,
+        prescription: true,
+        medicalRecord: true,
+        vitals: { orderBy: { createdAt: 'desc' }, take: 1 },
+        labRequests: { include: { report: true } },
+      },
+    });
+
+    if (!apt) throw new Error('Consultation appointment not found');
+
+    let parsedMedicines: any[] = [];
+    if (apt.prescription?.medicines) {
+      try {
+        parsedMedicines = JSON.parse(apt.prescription.medicines);
+      } catch {
+        parsedMedicines = [];
+      }
+    }
+
+    let parsedVitals: any = null;
+    if (apt.vitals?.[0]) {
+      const v = apt.vitals[0];
+      parsedVitals = {
+        bp: v.bloodPressure || (v.bpSystolic && v.bpDiastolic ? `${v.bpSystolic}/${v.bpDiastolic}` : null),
+        pulse: v.pulseRate,
+        temperature: v.temperature,
+        spo2: v.spo2,
+        weight: v.weight,
+        height: v.height,
+      };
+    } else if (apt.medicalRecord?.vitals) {
+      try {
+        const v = JSON.parse(apt.medicalRecord.vitals);
+        parsedVitals = {
+          bp: v.bp,
+          pulse: v.pulse,
+          temperature: v.temperature,
+          spo2: v.spo2,
+          weight: v.weight,
+          height: v.height,
+        };
+      } catch {}
+    }
+
+    const labTestsList: Array<{ name: string; status: string }> = [];
+    if (apt.labRequests && apt.labRequests.length > 0) {
+      for (const req of apt.labRequests) {
+        let tList: any[] = [];
+        try {
+          tList = JSON.parse(req.tests || '[]');
+        } catch {
+          tList = [{ name: req.tests }];
+        }
+        for (const t of tList) {
+          labTestsList.push({
+            name: t.name || 'Diagnostic Test',
+            status: req.status === 'COMPLETED' ? 'COMPLETED' : 'PENDING',
+          });
+        }
+      }
+    }
+
+    const pdfBuffer = await generateClinicalConsultationPdf({
+      appointmentNumber: apt.appointmentNumber,
+      consultationDate: apt.appointmentDate,
+      tokenNumber: apt.tokenNumber,
+      hospital: {
+        name: apt.hospital.name,
+        address: apt.hospital.address,
+        city: apt.hospital.city,
+        phone: apt.hospital.phone,
+        email: apt.hospital.email || undefined,
+      },
+      doctor: {
+        name: apt.doctor.name,
+        qualification: apt.doctor.qualification,
+        specialization: apt.doctor.specialization,
+        department: apt.doctor.department?.name,
+      },
+      patient: {
+        fullName: apt.patient.fullName,
+        patientIdNumber: apt.patient.patientIdNumber,
+        mobileNumber: apt.patient.mobileNumber,
+        age: apt.patient.age,
+        gender: apt.patient.gender,
+        bloodGroup: apt.patient.bloodGroup,
+      },
+      chiefComplaints: apt.medicalRecord?.symptoms || null,
+      vitals: parsedVitals,
+      diagnosis: apt.prescription?.diagnosis || 'Clinical evaluation completed',
+      medicines: parsedMedicines,
+      labRequests: labTestsList,
+      clinicalNotes: apt.medicalRecord?.clinicalNotes || apt.notes || null,
+      instructions: apt.prescription?.instructions || null,
+      followUpDate: apt.prescription?.followUpDate || null,
+    });
+
+    return pdfBuffer;
   }
 }

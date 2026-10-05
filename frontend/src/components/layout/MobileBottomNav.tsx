@@ -135,6 +135,22 @@ export const MobileBottomNav: React.FC = () => {
 
             <div className="space-y-3">
               <a
+                href="tel:+919182238568"
+                className="flex items-center justify-between p-3.5 rounded-2xl bg-royal-50 border border-royal-200 text-royal-700 hover:bg-royal-100 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-royal-600 text-white flex items-center justify-center font-black text-xs">
+                    24/7
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-900">Rocket Wheel OPD Support Hotline</div>
+                    <div className="text-[11px] text-royal-600 font-semibold">+91 91822 38568 (Direct Line)</div>
+                  </div>
+                </div>
+                <PhoneCall className="w-4 h-4 text-royal-600" />
+              </a>
+
+              <a
                 href="tel:108"
                 className="flex items-center justify-between p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 transition-colors"
               >

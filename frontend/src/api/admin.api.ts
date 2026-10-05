@@ -119,4 +119,11 @@ export const adminApi = {
     api.patch<any>(`/admin/sub-admins/${id}/permissions`, data),
 
   deleteSubAdmin: (id: string) => api.delete<any>(`/admin/sub-admins/${id}`),
+
+  // Hospital Diagnostic Laboratories Management (Requirement 6)
+  getLabs: () => api.get<any[]>('/admin/labs'),
+  updateLabVisibility: (labId: string, visibility: 'PUBLIC' | 'PRIVATE') =>
+    api.patch<any>(`/admin/labs/${labId}/visibility`, { visibility }),
+  updateLab: (labId: string, data: any) =>
+    api.patch<any>(`/admin/labs/${labId}`, data),
 };

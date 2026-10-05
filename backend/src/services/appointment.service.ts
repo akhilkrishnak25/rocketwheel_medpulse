@@ -16,6 +16,7 @@ export interface CreateAppointmentDTO {
     fullName: string;
     mobileNumber: string;
     email: string;
+    age?: number | null;
     dateOfBirth?: string | null;
     gender?: string | null;
     address?: string | null;
@@ -72,6 +73,16 @@ export class AppointmentService {
       throw new Error('This time slot is temporarily reserved by another patient completing payment. Please try another slot.');
     }
 
+    // Compute age if DOB given and age missing
+    let patientAge = patientData.age;
+    if ((patientAge === undefined || patientAge === null) && patientData.dateOfBirth) {
+      const birth = new Date(patientData.dateOfBirth);
+      if (!isNaN(birth.getTime())) {
+        const ageDiff = Date.now() - birth.getTime();
+        patientAge = Math.max(0, Math.floor(ageDiff / (1000 * 60 * 60 * 24 * 365.25)));
+      }
+    }
+
     // Upsert / find patient scoped to this hospital (Hospital-isolated patient records)
     let patient = await prisma.patient.findFirst({
       where: {
@@ -96,6 +107,7 @@ export class AppointmentService {
           mobileNumber: patientData.mobileNumber,
           email: patientData.email || '',
           dateOfBirth: patientData.dateOfBirth,
+          age: patientAge,
           gender: patientData.gender,
           address: patientData.address,
           bloodGroup: patientData.bloodGroup,
@@ -109,6 +121,7 @@ export class AppointmentService {
         data: {
           fullName: patientData.fullName,
           dateOfBirth: patientData.dateOfBirth || patient.dateOfBirth,
+          age: patientAge !== undefined && patientAge !== null ? patientAge : patient.age,
           gender: patientData.gender || patient.gender,
           address: patientData.address || patient.address,
           bloodGroup: patientData.bloodGroup || patient.bloodGroup,
@@ -708,6 +721,15 @@ export class AppointmentService {
       const patientCount = await prisma.patient.count({ where: { hospitalId } });
       const patientIdNumber = `MRN-${hospitalCode}-${String(patientCount + 1).padStart(5, '0')}`;
 
+      let patientAge = patientData.age;
+      if ((patientAge === undefined || patientAge === null) && patientData.dateOfBirth) {
+        const birth = new Date(patientData.dateOfBirth);
+        if (!isNaN(birth.getTime())) {
+          const ageDiff = Date.now() - birth.getTime();
+          patientAge = Math.max(0, Math.floor(ageDiff / (1000 * 60 * 60 * 24 * 365.25)));
+        }
+      }
+
       patient = await prisma.patient.create({
         data: {
           hospitalId,
@@ -716,6 +738,7 @@ export class AppointmentService {
           mobileNumber: patientData.mobileNumber,
           email: patientData.email || '',
           dateOfBirth: patientData.dateOfBirth,
+          age: patientAge,
           gender: patientData.gender,
           address: patientData.address,
           bloodGroup: patientData.bloodGroup,
@@ -723,11 +746,21 @@ export class AppointmentService {
         },
       });
     } else {
+      let patientAge = patientData.age;
+      if ((patientAge === undefined || patientAge === null) && patientData.dateOfBirth) {
+        const birth = new Date(patientData.dateOfBirth);
+        if (!isNaN(birth.getTime())) {
+          const ageDiff = Date.now() - birth.getTime();
+          patientAge = Math.max(0, Math.floor(ageDiff / (1000 * 60 * 60 * 24 * 365.25)));
+        }
+      }
+
       patient = await prisma.patient.update({
         where: { id: patient.id },
         data: {
           fullName: patientData.fullName,
           dateOfBirth: patientData.dateOfBirth || patient.dateOfBirth,
+          age: patientAge !== undefined && patientAge !== null ? patientAge : patient.age,
           gender: patientData.gender || patient.gender,
           address: patientData.address || patient.address,
           bloodGroup: patientData.bloodGroup || patient.bloodGroup,

@@ -66,35 +66,65 @@ export const Footer: React.FC = () => {
             </ul>
           </div>
 
-          {/* Staff & Governance */}
+          {/* Staff & Governance & Contact */}
           <div>
             <h4 className="text-xs font-bold uppercase tracking-wider text-[#FBA94C] mb-4">
-              Staff Portal
+              Direct Contact & Support
             </h4>
-            <ul className="space-y-2.5 text-sm">
+            <ul className="space-y-3 text-sm">
               <li>
-                <Link to="/staff/login" className="text-white hover:text-[#FBA94C] font-semibold flex items-center gap-1">
-                  Hospital Admin Login →
+                <a
+                  href="tel:+919182238568"
+                  className="flex items-center gap-2 text-white hover:text-[#FBA94C] transition-colors"
+                >
+                  <Phone className="w-4 h-4 text-[#FBA94C] shrink-0" />
+                  <span className="font-bold">+91 91822 38568</span>
+                </a>
+              </li>
+              <li>
+                <a
+                  href="mailto:rocketwheelorg@gmail.com"
+                  className="flex items-center gap-2 text-slate-300 hover:text-white transition-colors"
+                >
+                  <Mail className="w-4 h-4 text-[#FF1D6B] shrink-0" />
+                  <span className="text-xs font-medium break-all">rocketwheelorg@gmail.com</span>
+                </a>
+              </li>
+              <li className="pt-2 border-t border-royal-700/50">
+                <Link to="/staff/login" className="text-white hover:text-[#FBA94C] font-semibold flex items-center gap-1 text-xs">
+                  Staff & Doctor Portal →
                 </Link>
               </li>
               <li>
-                <Link to="/staff/login" className="text-white hover:text-[#FBA94C] font-semibold flex items-center gap-1">
-                  Doctor OPD Suite →
+                <Link to="/staff/login" className="text-slate-300 hover:text-white text-xs">
+                  Hospital Admin Login
                 </Link>
-              </li>
-              <li>
-                <Link to="/staff/login" className="hover:text-white transition-colors">
-                  Super Admin Console
-                </Link>
-              </li>
-              <li className="pt-2 text-xs text-blue-200">
-                Support: care@rocketwheel.org
               </li>
             </ul>
           </div>
         </div>
 
-        <div className="mt-12 pt-8 border-t border-royal-800 flex flex-col sm:flex-row items-center justify-between text-xs text-blue-200 gap-4">
+        {/* Compact Mobile Contact Bar */}
+        <div className="md:hidden mt-8 pt-6 border-t border-royal-800/80 flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <a
+              href="tel:+919182238568"
+              className="flex-1 py-2.5 px-3 rounded-xl bg-royal-700/60 border border-royal-600/50 flex items-center justify-center gap-2 text-xs font-bold text-white active:bg-royal-700"
+            >
+              <Phone className="w-4 h-4 text-[#FBA94C]" />
+              Call Support
+            </a>
+            <a
+              href="mailto:rocketwheelorg@gmail.com"
+              className="flex-1 py-2.5 px-3 rounded-xl bg-royal-700/60 border border-royal-600/50 flex items-center justify-center gap-2 text-xs font-bold text-white active:bg-royal-700"
+            >
+              <Mail className="w-4 h-4 text-[#FF1D6B]" />
+              Email Us
+            </a>
+          </div>
+        </div>
+
+        <div className="mt-8 pt-6 border-t border-royal-800 flex flex-col sm:flex-row items-center justify-between text-xs text-blue-200 gap-4">
           <p>© {new Date().getFullYear()} Rocket Wheel Healthcare Systems. All rights reserved.</p>
           <p className="flex items-center gap-1 text-slate-300 font-medium">
             <Award className="w-3.5 h-3.5 text-[#FBA94C]" />

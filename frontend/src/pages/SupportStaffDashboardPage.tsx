@@ -35,13 +35,14 @@ export const SupportStaffDashboardPage: React.FC = () => {
   const [isVitalsModalOpen, setIsVitalsModalOpen] = useState(false);
 
   // Vitals Form State
-  const [bpSystolic, setBpSystolic] = useState<number | ''>(120);
-  const [bpDiastolic, setBpDiastolic] = useState<number | ''>(80);
-  const [pulseRate, setPulseRate] = useState<number | ''>(76);
-  const [temperature, setTemperature] = useState<number | ''>(98.6);
-  const [spo2, setSpo2] = useState<number | ''>(99);
-  const [weightKg, setWeightKg] = useState<number | ''>(65);
-  const [heightCm, setHeightCm] = useState<number | ''>(170);
+  // Vitals Form State (Start empty - never hardcode fake/random vitals)
+  const [bpSystolic, setBpSystolic] = useState<number | ''>('');
+  const [bpDiastolic, setBpDiastolic] = useState<number | ''>('');
+  const [pulseRate, setPulseRate] = useState<number | ''>('');
+  const [temperature, setTemperature] = useState<number | ''>('');
+  const [spo2, setSpo2] = useState<number | ''>('');
+  const [weightKg, setWeightKg] = useState<number | ''>('');
+  const [heightCm, setHeightCm] = useState<number | ''>('');
   const [nursingNotes, setNursingNotes] = useState('');
 
   // Queue query
@@ -78,7 +79,7 @@ export const SupportStaffDashboardPage: React.FC = () => {
   const recordVitalsMutation = useMutation({
     mutationFn: (data: any) => supportStaffApi.recordVitals(data),
     onSuccess: () => {
-      toast.success('Vitals Recorded', 'Patient vitals logged and patient status advanced to Waiting for Doctor');
+      toast.success('Vitals Saved', 'Patient clinical vitals logged and patient status advanced to Waiting for Doctor');
       setIsVitalsModalOpen(false);
       setSelectedAppointment(null);
       resetVitalsForm();
@@ -90,19 +91,31 @@ export const SupportStaffDashboardPage: React.FC = () => {
   });
 
   const resetVitalsForm = () => {
-    setBpSystolic(120);
-    setBpDiastolic(80);
-    setPulseRate(76);
-    setTemperature(98.6);
-    setSpo2(99);
-    setWeightKg(65);
-    setHeightCm(170);
+    setBpSystolic('');
+    setBpDiastolic('');
+    setPulseRate('');
+    setTemperature('');
+    setSpo2('');
+    setWeightKg('');
+    setHeightCm('');
     setNursingNotes('');
   };
 
-  const handleOpenVitalsModal = (apt: Appointment) => {
+  const handleOpenVitalsModal = (apt: any) => {
     setSelectedAppointment(apt);
-    resetVitalsForm();
+    const existing = apt.vitals?.[0] || apt.vital;
+    if (existing) {
+      setBpSystolic(existing.bpSystolic !== null && existing.bpSystolic !== undefined ? existing.bpSystolic : '');
+      setBpDiastolic(existing.bpDiastolic !== null && existing.bpDiastolic !== undefined ? existing.bpDiastolic : '');
+      setPulseRate(existing.pulseRate !== null && existing.pulseRate !== undefined ? existing.pulseRate : '');
+      setTemperature(existing.temperature !== null && existing.temperature !== undefined ? existing.temperature : '');
+      setSpo2(existing.spo2 !== null && existing.spo2 !== undefined ? existing.spo2 : '');
+      setWeightKg(existing.weight !== null && existing.weight !== undefined ? existing.weight : '');
+      setHeightCm(existing.height !== null && existing.height !== undefined ? existing.height : '');
+      setNursingNotes(existing.notes || '');
+    } else {
+      resetVitalsForm();
+    }
     setIsVitalsModalOpen(true);
   };
 
@@ -112,14 +125,16 @@ export const SupportStaffDashboardPage: React.FC = () => {
       ? (Number(weightKg) / Math.pow(Number(heightCm) / 100, 2)).toFixed(1)
       : null;
 
-  const filteredQueue = (queue || []).filter((apt) => {
+  const filteredQueue = (queue || []).filter((apt: any) => {
     if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
+    const q = searchQuery.toLowerCase().trim();
     return (
       apt.patient?.fullName?.toLowerCase().includes(q) ||
-      apt.patient?.mobileNumber?.includes(q) ||
-      apt.tokenNumber?.toString().includes(q) ||
-      apt.patient?.patientIdNumber?.toLowerCase().includes(q)
+      apt.patient?.mobileNumber?.toLowerCase().includes(q) ||
+      apt.tokenNumber?.toString().toLowerCase().includes(q) ||
+      apt.patient?.patientIdNumber?.toLowerCase().includes(q) ||
+      apt.doctor?.name?.toLowerCase().includes(q) ||
+      apt.doctor?.specialization?.toLowerCase().includes(q)
     );
   });
 
@@ -237,7 +252,26 @@ export const SupportStaffDashboardPage: React.FC = () => {
                   </tr>
                 ) : (
                   filteredQueue.map((apt: any) => {
-                    const hasVitals = !!apt.vital;
+                    const vital = apt.vitals?.[0] || apt.vital;
+                    const hasVitals = !!vital;
+                    const getVitalStatus = (v: any) => {
+                      if (!v) return { label: 'Pending', variant: 'warning' as const };
+                      const hasBp = !!(v.bloodPressure || (v.bpSystolic && v.bpDiastolic));
+                      const hasPulse = !!v.pulseRate;
+                      const hasTemp = !!v.temperature;
+                      const hasSpo2 = !!v.spo2;
+                      const hasWeight = !!v.weight;
+
+                      const count = [hasBp, hasPulse, hasTemp, hasSpo2, hasWeight].filter(Boolean).length;
+                      if (count >= 4) {
+                        return { label: 'Completed', variant: 'success' as const };
+                      } else if (count > 0) {
+                        return { label: 'Partially Completed', variant: 'info' as const };
+                      }
+                      return { label: 'Pending', variant: 'warning' as const };
+                    };
+                    const statusInfo = getVitalStatus(vital);
+
                     return (
                       <tr key={apt.id} className="hover:bg-slate-50">
                         <td className="px-5 py-3.5 text-center font-black text-slate-900 text-sm">
@@ -265,15 +299,9 @@ export const SupportStaffDashboardPage: React.FC = () => {
                           </Badge>
                         </td>
                         <td className="px-5 py-3.5">
-                          {hasVitals ? (
-                            <Badge variant="success" className="text-[10px]">
-                              SCREENED & READY
-                            </Badge>
-                          ) : (
-                            <Badge variant="warning" className="text-[10px] animate-pulse">
-                              AWAITING VITALS
-                            </Badge>
-                          )}
+                          <Badge variant={statusInfo.variant} className="text-[10px]">
+                            {statusInfo.label}
+                          </Badge>
                         </td>
                         <td className="px-5 py-3.5 text-right">
                           <Button
@@ -282,7 +310,7 @@ export const SupportStaffDashboardPage: React.FC = () => {
                             onClick={() => handleOpenVitalsModal(apt)}
                           >
                             <Activity className="w-3.5 h-3.5 mr-1" />
-                            {hasVitals ? 'Update Vitals' : 'Record Vitals'}
+                            {hasVitals ? 'Edit Vitals' : 'Record Vitals'}
                           </Button>
                         </td>
                       </tr>

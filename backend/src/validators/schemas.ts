@@ -91,6 +91,7 @@ export const createAppointmentSchema = z.object({
     fullName: z.string().min(2, 'Full Name is required (minimum 2 characters)'),
     mobileNumber: z.string().regex(/^[6-9]\d{9}$/, 'Please enter a valid 10-digit Indian mobile number'),
     email: z.string().email('Invalid email address'),
+    age: z.coerce.number().int().min(1, 'Age must be between 1 and 125').max(125, 'Age must be between 1 and 125'),
     dateOfBirth: z.string().optional().nullable(),
     gender: z.string().optional().nullable(),
     address: z.string().optional().nullable(),
@@ -216,7 +217,7 @@ export const createDoctorSchema = z.object({
   workingDays: z.string().default('Mon,Tue,Wed,Thu,Fri,Sat'),
   workingHoursStart: z.string().regex(/^\d{2}:\d{2}$/).default('09:00'),
   workingHoursEnd: z.string().regex(/^\d{2}:\d{2}$/).default('17:00'),
-  slotDurationMinutes: z.coerce.number().int().min(10).max(120).default(30),
+  slotDurationMinutes: z.coerce.number().int().min(5).max(120).default(30),
   breakStart: z.string().optional().nullable().default('13:00'),
   breakEnd: z.string().optional().nullable().default('14:00'),
   userAccount: z
@@ -240,7 +241,7 @@ export const updateDoctorSchema = z.object({
   workingDays: z.string().optional(),
   workingHoursStart: z.string().regex(/^\d{2}:\d{2}$/).optional(),
   workingHoursEnd: z.string().regex(/^\d{2}:\d{2}$/).optional(),
-  slotDurationMinutes: z.coerce.number().int().min(10).max(120).optional(),
+  slotDurationMinutes: z.coerce.number().int().min(5).max(120).optional(),
   breakStart: z.string().optional().nullable(),
   breakEnd: z.string().optional().nullable(),
   isActive: z.boolean().optional(),
@@ -258,7 +259,7 @@ export const doctorScheduleUpdateSchema = z.object({
       dayOfWeek: z.number().int().min(0).max(6),
       startTime: z.string().regex(/^\d{2}:\d{2}$/),
       endTime: z.string().regex(/^\d{2}:\d{2}$/),
-      slotDurationMinutes: z.coerce.number().int().min(10).max(120).default(30),
+      slotDurationMinutes: z.coerce.number().int().min(5).max(120).default(30),
       isAvailable: z.boolean().default(true),
     })
   ),
@@ -285,6 +286,7 @@ export const completeConsultationSchema = z.object({
     .nullable()
     .transform((val) => (val && val.trim().length > 0 ? val.trim() : null)),
   symptoms: z.string().optional(),
+  chiefComplaints: z.string().optional(),
   vitals: z
     .object({
       bp: z.string().optional(),
@@ -318,7 +320,7 @@ export const registerDoctorSchema = z.object({
   workingDays: z.string().optional().default('Mon,Tue,Wed,Thu,Fri,Sat'),
   workingHoursStart: z.string().regex(/^\d{2}:\d{2}$/).optional().default('09:00'),
   workingHoursEnd: z.string().regex(/^\d{2}:\d{2}$/).optional().default('17:00'),
-  slotDurationMinutes: z.coerce.number().int().min(10).max(120).optional().default(30),
+  slotDurationMinutes: z.coerce.number().int().min(5).max(120).optional().default(30),
 });
 
 export const registerLabSchema = z
@@ -435,15 +437,18 @@ export const recordVitalsSchema = z.object({
 export const prescriptionTemplateSchema = z.object({
   diseaseName: z.string().min(2, 'Disease / Condition name required (e.g. Fever, Hypertension)'),
   diagnosis: z.string().optional().nullable(),
-  medicines: z.array(
-    z.object({
-      name: z.string().min(1, 'Medicine name required'),
-      dosage: z.string().optional().default('1 dose'),
-      frequency: z.string().optional().default('As directed'),
-      duration: z.string().optional().default('5 days'),
-      instructions: z.string().optional().nullable(),
-    })
-  ).min(1, 'At least one medicine is required in the template'),
+  medicines: z
+    .array(
+      z.object({
+        name: z.string().min(1, 'Medicine name required'),
+        dosage: z.string().optional().default('1 dose'),
+        frequency: z.string().optional().default('As directed'),
+        duration: z.string().optional().default('5 days'),
+        instructions: z.string().optional().nullable(),
+      })
+    )
+    .optional()
+    .default([]),
   instructions: z.string().optional().nullable(),
 });
 
@@ -464,9 +469,23 @@ export const createLabRequestSchema = z.object({
 });
 
 export const submitLabReportSchema = z.object({
-  results: z.string().min(2, 'Test results summary or findings required'),
+  results: z.string().optional().default('Diagnostic report uploaded'),
   fileUrl: z.string().optional().nullable(),
   remarks: z.string().optional().nullable(),
+});
+
+export const updateLabVisibilitySchema = z.object({
+  visibility: z.enum(['PUBLIC', 'PRIVATE']),
+});
+
+export const updateLabSchema = z.object({
+  name: z.string().min(2).optional(),
+  phone: z.string().optional(),
+  address: z.string().optional(),
+  city: z.string().optional(),
+  licenseNumber: z.string().optional(),
+  visibility: z.enum(['PUBLIC', 'PRIVATE']).optional(),
+  status: z.enum(['PENDING', 'APPROVED', 'ACTIVE', 'REJECTED', 'SUSPENDED']).optional(),
 });
 
 export const createSubAdminSchema = z.object({

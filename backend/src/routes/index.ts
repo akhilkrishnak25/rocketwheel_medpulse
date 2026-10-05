@@ -12,6 +12,7 @@ import supportStaffRoutes from './supportStaff.routes';
 import labRoutes from './lab.routes';
 import publicLabRoutes from './publicLab.routes';
 import pharmacyRoutes from './pharmacy.routes';
+import uploadRoutes from './upload.routes';
 
 const router = Router();
 
@@ -28,6 +29,7 @@ router.use('/support-staff', supportStaffRoutes);
 router.use('/lab', labRoutes);
 router.use('/labs', publicLabRoutes);
 router.use('/pharmacy', pharmacyRoutes);
+router.use('/upload', uploadRoutes);
 
 // Health check endpoint
 router.get('/health', (req, res) => {

@@ -27,6 +27,7 @@ import { PharmacyDashboardPage } from './pages/PharmacyDashboardPage';
 import { StaffRegistrationPage } from './pages/StaffRegistrationPage';
 import { LabTestsPage } from './pages/LabTestsPage';
 import { Button } from './components/ui/Button';
+import { ScrollToTop } from './components/common/ScrollToTop';
 
 // 404 Not Found Component
 const NotFoundPage = () => (
@@ -44,9 +45,11 @@ const NotFoundPage = () => (
 
 export const App: React.FC = () => {
   return (
-    <Routes>
-      {/* Public Patient & Staff Journey (NO LOGIN REQUIRED FOR PATIENT BOOKING) */}
-      <Route element={<PublicLayout />}>
+    <>
+      <ScrollToTop />
+      <Routes>
+        {/* Public Patient & Staff Journey (NO LOGIN REQUIRED FOR PATIENT BOOKING) */}
+        <Route element={<PublicLayout />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/hospitals" element={<HospitalsPage />} />
         <Route path="/hospitals/:hospitalId" element={<HospitalDetailPage />} />
@@ -96,6 +99,7 @@ export const App: React.FC = () => {
         <Route index element={<SuperAdminDashboardPage />} />
       </Route>
     </Routes>
+    </>
   );
 };
 

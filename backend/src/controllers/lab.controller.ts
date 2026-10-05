@@ -169,8 +169,9 @@ export class LabController {
   // -------------------------------------------------------------
   static async getActiveLabs(req: Request, res: Response) {
     try {
-      const { hospitalId } = req.query;
-      const labs = await LabService.getActiveLabs(hospitalId as string);
+      const { hospitalId, publicOnly } = req.query;
+      const isPublic = publicOnly === 'true' || !req.user || req.user.role === 'PATIENT';
+      const labs = await LabService.getActiveLabs(hospitalId as string, isPublic);
       return successResponse(res, labs, 'Active laboratories retrieved');
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to fetch laboratories', 500);

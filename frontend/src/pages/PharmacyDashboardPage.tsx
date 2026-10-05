@@ -51,14 +51,22 @@ export const PharmacyDashboardPage: React.FC = () => {
     },
   });
 
-  const filteredPrescriptions = (prescriptions || []).filter((rx) => {
+  const filteredPrescriptions = (prescriptions || []).filter((rx: any) => {
+    if (statusFilter !== 'ALL' && rx.pharmacyStatus !== statusFilter) {
+      return false;
+    }
     if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
+    const q = searchQuery.toLowerCase().trim();
+    const patient = rx.patient || rx.appointment?.patient;
+    const doctor = rx.doctor || rx.appointment?.doctor;
     return (
-      rx.appointment?.patient?.fullName?.toLowerCase().includes(q) ||
-      rx.appointment?.patient?.patientIdNumber?.toLowerCase().includes(q) ||
-      rx.appointment?.doctor?.name?.toLowerCase().includes(q) ||
-      rx.diagnosis?.toLowerCase().includes(q)
+      patient?.fullName?.toLowerCase().includes(q) ||
+      patient?.patientIdNumber?.toLowerCase().includes(q) ||
+      patient?.mobileNumber?.toLowerCase().includes(q) ||
+      doctor?.name?.toLowerCase().includes(q) ||
+      doctor?.specialization?.toLowerCase().includes(q) ||
+      rx.diagnosis?.toLowerCase().includes(q) ||
+      rx.id?.toLowerCase().includes(q)
     );
   });
 
@@ -157,9 +165,17 @@ export const PharmacyDashboardPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {filteredPrescriptions.map((rx: any) => {
               const meds = typeof rx.medicines === 'string' ? JSON.parse(rx.medicines) : rx.medicines;
-              const patient = rx.appointment?.patient;
-              const doctor = rx.appointment?.doctor;
+              const patient = rx.patient || rx.appointment?.patient;
+              const doctor = rx.doctor || rx.appointment?.doctor;
               const status = rx.pharmacyStatus || 'SENT';
+              const rxCode = `RX-${rx.id.substring(0, 8).toUpperCase()}`;
+
+              const patientAge =
+                patient?.age !== null && patient?.age !== undefined
+                  ? `${patient.age} Yrs`
+                  : patient?.dateOfBirth
+                  ? `${Math.floor((Date.now() - new Date(patient.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))} Yrs`
+                  : 'Age N/A';
 
               return (
                 <div
@@ -170,9 +186,14 @@ export const PharmacyDashboardPage: React.FC = () => {
                     {/* Header */}
                     <div className="flex items-start justify-between">
                       <div>
-                        <h3 className="font-black text-slate-900 text-base">{patient?.fullName || 'Walk-in Patient'}</h3>
-                        <div className="text-[11px] text-slate-500 font-mono">
-                          MRN: <strong className="text-royal-700">{patient?.patientIdNumber || 'PENDING'}</strong> • +91 {patient?.mobileNumber}
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-black text-slate-900 text-base">{patient?.fullName || 'Walk-in Patient'}</h3>
+                          <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono text-[10px] font-bold border border-slate-200">
+                            {rxCode}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                          MRN: <strong className="text-royal-700">{patient?.patientIdNumber || 'PENDING'}</strong> • Age: <strong className="text-slate-800">{patientAge}</strong> • Gender: <strong className="text-slate-800">{patient?.gender || 'N/A'}</strong> • +91 {patient?.mobileNumber}
                         </div>
                       </div>
 
@@ -193,14 +214,17 @@ export const PharmacyDashboardPage: React.FC = () => {
                     </div>
 
                     {/* Prescriber & Diagnosis */}
-                    <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs flex justify-between">
+                    <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs flex justify-between items-center">
                       <div>
-                        <span className="text-slate-400 block text-[10px]">Prescribing Doctor</span>
-                        <span className="font-bold text-slate-800">Dr. {doctor?.name}</span>
+                        <span className="text-slate-400 block text-[10px]">Prescribing Physician</span>
+                        <span className="font-bold text-slate-800 text-xs block">Dr. {doctor?.name || 'Assigned Doctor'}</span>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {doctor?.specialization || 'Clinical OPD'} {doctor?.id ? `• Doc ID: ${doctor.id.substring(0, 8).toUpperCase()}` : ''}
+                        </span>
                       </div>
                       <div className="text-right">
-                        <span className="text-slate-400 block text-[10px]">Diagnosis</span>
-                        <span className="font-bold text-royal-700">{rx.diagnosis}</span>
+                        <span className="text-slate-400 block text-[10px]">Provisional Diagnosis</span>
+                        <span className="font-bold text-royal-700 text-xs">{rx.diagnosis}</span>
                       </div>
                     </div>
 
