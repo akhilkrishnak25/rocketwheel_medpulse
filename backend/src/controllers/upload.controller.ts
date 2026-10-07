@@ -4,8 +4,9 @@ import path from 'path';
 import crypto from 'crypto';
 import prisma from '../config/prisma';
 import { successResponse, errorResponse } from '../utils/response';
+import { generateLabReportPdf } from '../utils/pdf';
 
-const UPLOAD_ROOT = path.join(__dirname, '../../uploads');
+const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 const REPORTS_DIR = path.join(UPLOAD_ROOT, 'reports');
 const AVATARS_DIR = path.join(UPLOAD_ROOT, 'avatars');
 
@@ -50,9 +51,34 @@ export class UploadController {
 
       const randomName = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${extension}`;
       const filePath = path.join(REPORTS_DIR, randomName);
-      fs.writeFileSync(filePath, buffer);
+      try {
+        fs.writeFileSync(filePath, buffer);
+      } catch (writeErr) {
+        console.warn('Failed to write report to local disk (may be ephemeral):', writeErr);
+      }
 
       const url = `/uploads/reports/${randomName}`;
+
+      // Persist to PostgreSQL database to survive Render ephemeral disk restarts
+      try {
+        await prisma.storedFile.upsert({
+          where: { path: url },
+          create: {
+            path: url,
+            filename: randomName,
+            mimeType: 'application/pdf',
+            fileData: base64Content,
+            size: buffer.length,
+          },
+          update: {
+            fileData: base64Content,
+            size: buffer.length,
+          },
+        });
+      } catch (dbErr) {
+        console.warn('Could not persist report to StoredFile database:', dbErr);
+      }
+
       return successResponse(
         res,
         {
@@ -82,6 +108,7 @@ export class UploadController {
 
       let base64Content = fileData;
       let extension = '.jpg';
+      let mimeType = 'image/jpeg';
 
       if (typeof fileData === 'string' && fileData.startsWith('data:')) {
         const matches = fileData.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
@@ -94,6 +121,7 @@ export class UploadController {
           return errorResponse(res, 'Only JPG, PNG, and WEBP images are supported', 400);
         }
         extension = `.${ext}`;
+        mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
         base64Content = matches[2];
       }
 
@@ -104,9 +132,33 @@ export class UploadController {
 
       const randomName = `avatar-${userId}-${Date.now()}${extension}`;
       const filePath = path.join(AVATARS_DIR, randomName);
-      fs.writeFileSync(filePath, buffer);
+      try {
+        fs.writeFileSync(filePath, buffer);
+      } catch (writeErr) {
+        console.warn('Failed to write avatar to local disk (may be ephemeral):', writeErr);
+      }
 
       const url = `/uploads/avatars/${randomName}`;
+
+      // Persist to PostgreSQL database to survive Render ephemeral disk restarts
+      try {
+        await prisma.storedFile.upsert({
+          where: { path: url },
+          create: {
+            path: url,
+            filename: randomName,
+            mimeType,
+            fileData: base64Content,
+            size: buffer.length,
+          },
+          update: {
+            fileData: base64Content,
+            size: buffer.length,
+          },
+        });
+      } catch (dbErr) {
+        console.warn('Could not persist avatar to StoredFile database:', dbErr);
+      }
 
       await prisma.user.update({
         where: { id: userId },
@@ -148,6 +200,143 @@ export class UploadController {
       return successResponse(res, { url: null }, 'Profile photo removed successfully');
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to remove profile photo', 500);
+    }
+  }
+
+  /**
+   * Resilient upload serving middleware
+   * 1. Checks local disk
+   * 2. Checks PostgreSQL StoredFile database (auto-restores to disk)
+   * 3. For reports, auto-resurrects on-the-fly from LabReport database records
+   * 4. For avatars, provides default SVG if missing
+   */
+  static async serveUploadedFile(req: Request, res: Response) {
+    try {
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+
+      let reqPath = req.path || '';
+      // Strip leading slash
+      if (reqPath.startsWith('/')) reqPath = reqPath.slice(1);
+
+      const parts = reqPath.split('/');
+      let folder = parts[0] || '';
+      let filename = parts.slice(1).join('/') || '';
+
+      // If called from route /uploads/:folder/:filename
+      if (req.params.folder) {
+        folder = Array.isArray(req.params.folder) ? req.params.folder[0] : req.params.folder;
+      }
+      if (req.params.filename) {
+        filename = Array.isArray(req.params.filename) ? req.params.filename.join('/') : req.params.filename;
+      }
+
+      if (!folder || !filename) {
+        return res.status(404).json({ success: false, message: 'File path not specified' });
+      }
+
+      const filePath = path.join(UPLOAD_ROOT, folder, filename);
+
+      // 1. Check if file is physically present on disk
+      if (fs.existsSync(filePath)) {
+        return res.sendFile(filePath);
+      }
+
+      // 2. Check StoredFile in database (survives container restarts)
+      const lookupUrl = `/uploads/${folder}/${filename}`;
+      const stored = await prisma.storedFile.findFirst({
+        where: {
+          OR: [{ path: lookupUrl }, { filename: filename }],
+        },
+      });
+
+      if (stored && stored.fileData) {
+        const fileBuffer = Buffer.from(stored.fileData, 'base64');
+        try {
+          // Re-hydrate to local disk for fast subsequent reads
+          const targetDir = path.join(UPLOAD_ROOT, folder);
+          if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+          fs.writeFileSync(filePath, fileBuffer);
+        } catch (e) {}
+
+        res.setHeader('Content-Type', stored.mimeType || (folder === 'reports' ? 'application/pdf' : 'image/jpeg'));
+        res.setHeader('Content-Length', fileBuffer.length);
+        return res.send(fileBuffer);
+      }
+
+      // 3. If it's a diagnostic report PDF, look up LabReport in database and resurrect it!
+      if (folder === 'reports') {
+        const labReport = await prisma.labReport.findFirst({
+          where: {
+            OR: [
+              { fileUrl: { contains: filename } },
+              { testRequest: { requestNumber: { contains: filename.replace(/\.pdf$/i, '') } } },
+            ],
+          },
+          include: {
+            testRequest: {
+              include: {
+                patient: true,
+                hospital: true,
+                doctor: { include: { department: true } },
+                lab: true,
+              },
+            },
+          },
+        });
+
+        if (labReport) {
+          const generatedPdf = await generateLabReportPdf(labReport);
+          try {
+            // Save to disk and StoredFile
+            const targetDir = path.join(UPLOAD_ROOT, 'reports');
+            if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+            fs.writeFileSync(filePath, generatedPdf);
+
+            await prisma.storedFile.upsert({
+              where: { path: lookupUrl },
+              create: {
+                path: lookupUrl,
+                filename: filename,
+                mimeType: 'application/pdf',
+                fileData: generatedPdf.toString('base64'),
+                size: generatedPdf.length,
+              },
+              update: {
+                fileData: generatedPdf.toString('base64'),
+                size: generatedPdf.length,
+              },
+            });
+          } catch (e) {}
+
+          res.setHeader('Content-Type', 'application/pdf');
+          res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+          return res.send(generatedPdf);
+        }
+      }
+
+      // 4. If it's an avatar and not found, return a default healthcare avatar SVG instead of broken 404
+      if (folder === 'avatars') {
+        const fallbackSvg = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+            <rect width="200" height="200" fill="#eff6ff"/>
+            <circle cx="100" cy="75" r="40" fill="#1E20E0" opacity="0.85"/>
+            <path d="M30 180 C30 130, 70 120, 100 120 C130 120, 170 130, 170 180 Z" fill="#1E20E0" opacity="0.85"/>
+          </svg>
+        `.trim();
+        res.setHeader('Content-Type', 'image/svg+xml');
+        return res.send(fallbackSvg);
+      }
+
+      return res.status(404).json({
+        success: false,
+        message: `File '${filename}' not found on server`,
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        message: err.message || 'Error serving uploaded asset',
+      });
     }
   }
 }

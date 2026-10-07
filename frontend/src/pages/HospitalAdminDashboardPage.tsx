@@ -44,7 +44,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { adminApi } from '../api/admin.api';
-import { uploadApi } from '../api/client';
+import { uploadApi, getMediaUrl } from '../api/client';
 import { appointmentsApi } from '../api/appointments.api';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
@@ -621,9 +621,12 @@ export const HospitalAdminDashboardPage: React.FC = () => {
             <div className="w-16 h-16 rounded-2xl overflow-hidden bg-royal-50 border-2 border-royal-200 flex items-center justify-center text-royal-700 shadow-inner">
               {user?.avatarUrl ? (
                 <img
-                  src={user.avatarUrl}
+                  src={getMediaUrl(user.avatarUrl)}
                   alt="Hospital Admin"
                   className="w-full h-full object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = 'none';
+                  }}
                 />
               ) : (
                 <ShieldCheck className="w-8 h-8 text-royal-600" />

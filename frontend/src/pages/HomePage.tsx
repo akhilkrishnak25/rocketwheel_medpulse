@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { hospitalsApi } from '../api/hospitals.api';
 import { labApi } from '../api/lab.api';
+import { getMediaUrl } from '../api/client';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Card, CardContent } from '../components/ui/Card';
@@ -218,9 +219,12 @@ export const HomePage: React.FC = () => {
                 {/* Hospital Image */}
                 <div className="relative h-48 w-full overflow-hidden bg-slate-100">
                   <img
-                    src={hospital.imageUrl}
+                    src={getMediaUrl(hospital.imageUrl) || 'https://images.unsplash.com/photo-1587351021759-3e566b6af7cc?w=800&auto=format&fit=crop&q=80'}
                     alt={hospital.name}
                     className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1587351021759-3e566b6af7cc?w=800&auto=format&fit=crop&q=80';
+                    }}
                   />
                   <div className="absolute top-3 right-3">
                     <Badge variant="gold" className="font-black bg-[#FBA94C] text-slate-950 shadow-sm text-xs">
@@ -243,9 +247,12 @@ export const HomePage: React.FC = () => {
                     <div className="flex items-start gap-3">
                       {hospital.logoUrl && (
                         <img
-                          src={hospital.logoUrl}
+                          src={getMediaUrl(hospital.logoUrl)}
                           alt="logo"
                           className="w-9 h-9 rounded-lg object-cover border border-slate-200 shrink-0"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
                         />
                       )}
                       <div>

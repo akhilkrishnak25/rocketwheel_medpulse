@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { doctorDashboardApi } from '../api/doctor.api';
 import { labApi } from '../api/lab.api';
-import { uploadApi } from '../api/client';
+import { uploadApi, getMediaUrl } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
@@ -935,11 +935,14 @@ export const DoctorDashboardPage: React.FC = () => {
             <div className="flex flex-col sm:flex-row items-center gap-6">
               <div className="relative group">
                 <div className="w-24 h-24 rounded-2xl overflow-hidden bg-royal-50 border-2 border-royal-200 flex items-center justify-center text-royal-700 shadow-inner">
-                  {user?.avatarUrl || profile?.user?.avatarUrl || profile?.avatarUrl ? (
+                  {(user?.avatarUrl || profile?.user?.avatarUrl || profile?.avatarUrl) ? (
                     <img
-                      src={user?.avatarUrl || profile?.user?.avatarUrl || profile?.avatarUrl}
+                      src={getMediaUrl(user?.avatarUrl || profile?.user?.avatarUrl || profile?.avatarUrl)}
                       alt="Doctor Profile"
                       className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=300&auto=format&fit=crop&q=80';
+                      }}
                     />
                   ) : (
                     <User className="w-12 h-12 text-royal-400" />
@@ -1547,7 +1550,7 @@ export const DoctorDashboardPage: React.FC = () => {
                               </div>
                               {req.report.fileUrl && (
                                 <a
-                                  href={req.report.fileUrl}
+                                  href={getMediaUrl(req.report.fileUrl)}
                                   target="_blank"
                                   rel="noreferrer"
                                   className="text-royal-600 font-bold underline block text-[10px]"
@@ -1830,7 +1833,7 @@ export const DoctorDashboardPage: React.FC = () => {
 
                         {req.report?.fileUrl && (
                           <a
-                            href={req.report.fileUrl}
+                            href={getMediaUrl(req.report.fileUrl)}
                             target="_blank"
                             rel="noreferrer"
                             className="text-purple-600 hover:text-purple-800 font-bold underline inline-flex items-center gap-1 text-[11px]"

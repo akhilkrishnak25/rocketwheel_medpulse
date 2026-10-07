@@ -463,3 +463,117 @@ export const generateClinicalConsultationPdf = async (data: ClinicalConsultation
   });
 };
 
+export const generateLabReportPdf = async (report: any): Promise<Buffer> => {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({
+        size: 'A4',
+        margin: 40,
+        info: {
+          Title: `Diagnostic Report - ${report.testRequest?.requestNumber || 'Official Report'}`,
+          Author: report.testRequest?.lab?.name || report.testRequest?.hospital?.name || 'Diagnostic Laboratory Network',
+        },
+      });
+
+      const buffers: Buffer[] = [];
+      doc.on('data', buffers.push.bind(buffers));
+      doc.on('end', () => resolve(Buffer.concat(buffers)));
+
+      const labName = report.testRequest?.lab?.name || report.testRequest?.hospital?.name || 'Accredited Pathology & Diagnostic Services';
+      const hospitalName = report.testRequest?.hospital?.name || 'MediPulse Network Hospital';
+      const patient = report.testRequest?.patient;
+      const doctor = report.testRequest?.doctor;
+
+      // Header Bar
+      doc.rect(40, 40, 360, 6).fill('#7c3aed');
+      doc.rect(400, 40, 155, 6).fill('#1E20E0');
+
+      doc.fillColor('#7c3aed').fontSize(18).font('Helvetica-Bold').text(labName, 40, 55, { width: 360 });
+      doc.fillColor('#64748b').fontSize(8.5).font('Helvetica')
+        .text(`Facility: ${hospitalName} | Accredited Diagnostic Laboratory`, 40, 78, { width: 360 });
+
+      // Badge
+      doc.roundedRect(410, 52, 145, 30, 4).fill('#faf5ff');
+      doc.roundedRect(410, 52, 145, 30, 4).strokeColor('#7c3aed').stroke();
+      doc.fillColor('#7c3aed').fontSize(9).font('Helvetica-Bold').text('OFFICIAL DIAGNOSTIC REPORT', 410, 60, { width: 145, align: 'center' });
+      doc.fillColor('#64748b').fontSize(8).font('Helvetica').text(`Req: #${report.testRequest?.requestNumber || 'LAB-REQ'}`, 410, 70, { width: 145, align: 'center' });
+
+      // Divider
+      doc.moveTo(40, 95).lineTo(555, 95).strokeColor('#e2e8f0').stroke();
+
+      // Patient & Referral Box
+      const infoY = 105;
+      doc.roundedRect(40, infoY, 515, 65, 4).fill('#f8fafc');
+      doc.roundedRect(40, infoY, 515, 65, 4).strokeColor('#e2e8f0').stroke();
+
+      doc.fillColor('#7c3aed').fontSize(8.5).font('Helvetica-Bold').text('PATIENT IDENTIFICATION', 50, infoY + 8);
+      doc.fillColor('#0f172a').fontSize(11).font('Helvetica-Bold').text(patient?.fullName || 'Patient Name', 50, infoY + 20);
+      doc.fillColor('#475569').fontSize(8.5).font('Helvetica')
+        .text(`MRN: ${patient?.patientIdNumber || 'MRN-Pending'}  |  Age/Gender: ${patient?.age || 'N/A'} Y / ${patient?.gender || 'N/A'}  |  Blood: ${patient?.bloodGroup || 'N/A'}`, 50, infoY + 35)
+        .text(`Contact: +91 ${patient?.mobileNumber || 'N/A'}`, 50, infoY + 48);
+
+      doc.fillColor('#7c3aed').fontSize(8.5).font('Helvetica-Bold').text('REFERRING PHYSICIAN', 320, infoY + 8);
+      doc.fillColor('#0f172a').fontSize(10).font('Helvetica-Bold').text(doctor ? `Dr. ${doctor.name}` : 'Self / Outpatient Order', 320, infoY + 20);
+      doc.fillColor('#475569').fontSize(8.5).font('Helvetica')
+        .text(`Dept: ${doctor?.department?.name || 'General OPD'}`, 320, infoY + 35)
+        .text(`Date Completed: ${new Date(report.completedAt || report.createdAt).toLocaleDateString('en-IN')}`, 320, infoY + 48);
+
+      // Section: Requested Tests
+      let curY = infoY + 80;
+      doc.fillColor('#0f172a').fontSize(10).font('Helvetica-Bold').text('INVESTIGATION(S) PERFORMED:', 40, curY);
+      curY += 15;
+
+      let testsArray: any[] = [];
+      try {
+        if (typeof report.testRequest?.tests === 'string') {
+          testsArray = JSON.parse(report.testRequest.tests);
+        } else if (Array.isArray(report.testRequest?.tests)) {
+          testsArray = report.testRequest.tests;
+        }
+      } catch (e) {
+        testsArray = [{ name: String(report.testRequest?.tests || 'Diagnostic Investigation') }];
+      }
+
+      testsArray.forEach((t: any, i: number) => {
+        doc.fillColor('#334155').fontSize(9).font('Helvetica')
+          .text(`${i + 1}. ${t.name || t} ${t.category ? `(${t.category})` : ''}`, 50, curY);
+        curY += 14;
+      });
+      curY += 10;
+
+      // Section: Diagnostic Findings & Results
+      doc.fillColor('#7c3aed').fontSize(10).font('Helvetica-Bold').text('CLINICAL FINDINGS & RESULTS:', 40, curY);
+      curY += 16;
+      doc.roundedRect(40, curY, 515, 80, 4).fill('#faf5ff');
+      doc.roundedRect(40, curY, 515, 80, 4).strokeColor('#e9d5ff').stroke();
+
+      doc.fillColor('#1e1b4b').fontSize(9.5).font('Helvetica').text(report.results || 'Diagnostic tests concluded within acceptable parameters. No critical abnormalities flagged.', 50, curY + 12, { width: 495 });
+      curY += 95;
+
+      // Section: Remarks
+      if (report.remarks) {
+        doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold').text('PATHOLOGIST / CLINICAL REMARKS:', 40, curY);
+        curY += 14;
+        doc.fillColor('#475569').fontSize(8.5).font('Helvetica').text(report.remarks, 40, curY, { width: 515 });
+        curY += 30;
+      }
+
+      // Signatures
+      const sigY = 690;
+      doc.moveTo(380, sigY).lineTo(540, sigY).strokeColor('#94a3b8').stroke();
+      doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold').text(report.technicianName || 'Accredited Lab Technologist', 380, sigY + 6, { width: 160, align: 'center' });
+      doc.fillColor('#64748b').fontSize(7.5).font('Helvetica').text('Authorized Diagnostic Signatory', 380, sigY + 18, { width: 160, align: 'center' });
+
+      // Footer
+      doc.moveTo(40, 765).lineTo(555, 765).strokeColor('#e2e8f0').stroke();
+      doc.fillColor('#94a3b8').fontSize(7).font('Helvetica')
+        .text('Official Diagnostic Document • Rocket Wheel MedPulse Laboratory Network • Certified under Clinical Establishments Act', 40, 772, { width: 515, align: 'center' })
+        .text(`Generated on: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`, 40, 782, { width: 515, align: 'center' });
+
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+};
+

@@ -1,5 +1,27 @@
 export const API_BASE_URL = ((import.meta as any).env?.VITE_API_URL as string) || '/api';
 
+/**
+ * Resolves media, profile photo, and document URLs so they route directly to backend storage.
+ */
+export function getMediaUrl(url?: string | null): string {
+  if (!url) return '';
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:')) {
+    return trimmed;
+  }
+
+  let backendHost = '';
+  if (API_BASE_URL.startsWith('http://') || API_BASE_URL.startsWith('https://')) {
+    backendHost = API_BASE_URL.replace(/\/api\/?$/, '');
+  } else if (typeof window !== 'undefined' && window.location.hostname.includes('.onrender.com')) {
+    backendHost = 'https://medipulse-backend-veca.onrender.com';
+  }
+
+  const cleanPath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  return backendHost ? `${backendHost}${cleanPath}` : cleanPath;
+}
+
 export interface ApiResponse<T = any> {
   success: boolean;
   message?: string;

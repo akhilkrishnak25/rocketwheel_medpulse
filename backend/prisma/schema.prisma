@@ -578,3 +578,15 @@ model AccountToken {
   @@index([token, type])
   @@index([email])
 }
+
+model StoredFile {
+  id        String   @id @default(uuid())
+  path      String   @unique
+  filename  String
+  mimeType  String   @default("application/octet-stream")
+  fileData  String
+  size      Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([filename])
+}

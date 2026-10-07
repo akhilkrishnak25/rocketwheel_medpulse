@@ -25,7 +25,7 @@ import {
   ToggleRight,
 } from 'lucide-react';
 import { labApi } from '../api/lab.api';
-import { uploadApi } from '../api/client';
+import { uploadApi, getMediaUrl } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
@@ -863,7 +863,7 @@ export const LabTechnicianDashboardPage: React.FC = () => {
 
                   <div className="flex items-center gap-2 shrink-0">
                     <a
-                      href={reportFileUrl}
+                      href={getMediaUrl(reportFileUrl)}
                       target="_blank"
                       rel="noreferrer"
                       className="p-1.5 text-emerald-700 hover:bg-emerald-100 rounded-lg transition-colors inline-flex items-center text-xs font-semibold"
@@ -955,7 +955,7 @@ export const LabTechnicianDashboardPage: React.FC = () => {
 
             {viewingReportRequest.report?.fileUrl && (
               <a
-                href={viewingReportRequest.report.fileUrl}
+                href={getMediaUrl(viewingReportRequest.report.fileUrl)}
                 target="_blank"
                 rel="noreferrer"
                 className="text-purple-600 font-bold underline block"

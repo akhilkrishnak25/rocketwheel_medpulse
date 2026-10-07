@@ -15,6 +15,7 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { doctorsApi } from '../api/doctors.api';
+import { getMediaUrl } from '../api/client';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
@@ -61,9 +62,12 @@ export const DoctorProfilePage: React.FC = () => {
       {/* DOCTOR HERO CARD */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8 flex flex-col md:flex-row gap-8 items-start">
         <img
-          src={doctor.photoUrl || 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=400&auto=format&fit=crop&q=80'}
+          src={getMediaUrl(doctor.photoUrl) || 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=400&auto=format&fit=crop&q=80'}
           alt={doctor.name}
           className="w-32 h-32 sm:w-40 sm:h-40 rounded-3xl object-cover border-2 border-slate-100 shadow-md shrink-0"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=400&auto=format&fit=crop&q=80';
+          }}
         />
 
         <div className="flex-1 space-y-4">

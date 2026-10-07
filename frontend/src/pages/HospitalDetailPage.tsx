@@ -17,6 +17,7 @@ import {
   Calendar,
 } from 'lucide-react';
 import { hospitalsApi } from '../api/hospitals.api';
+import { getMediaUrl } from '../api/client';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Card, CardContent } from '../components/ui/Card';
@@ -84,9 +85,12 @@ export const HospitalDetailPage: React.FC = () => {
       <div className="relative bg-[#1E20E0] text-white overflow-hidden shadow-lg border-b border-royal-700">
         <div className="absolute inset-0 opacity-20">
           <img
-            src={hospital.imageUrl}
+            src={getMediaUrl(hospital.imageUrl) || 'https://images.unsplash.com/photo-1587351021759-3e566b6af7cc?w=1200&auto=format&fit=crop&q=80'}
             alt={hospital.name}
             className="w-full h-full object-cover"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1587351021759-3e566b6af7cc?w=1200&auto=format&fit=crop&q=80';
+            }}
           />
         </div>
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
@@ -95,9 +99,12 @@ export const HospitalDetailPage: React.FC = () => {
               <div className="flex items-center gap-3">
                 {hospital.logoUrl && (
                   <img
-                    src={hospital.logoUrl}
+                    src={getMediaUrl(hospital.logoUrl)}
                     alt="logo"
                     className="w-14 h-14 rounded-2xl object-cover border-2 border-white/20 shadow-md shrink-0 bg-white"
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = 'none';
+                    }}
                   />
                 )}
                 <div>
@@ -299,9 +306,12 @@ export const HospitalDetailPage: React.FC = () => {
                 <Card key={doctor.id} hover className="flex flex-col justify-between rounded-2xl p-6 border-slate-200">
                   <div className="flex items-start gap-4">
                     <img
-                      src={doctor.photoUrl || 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=300&auto=format&fit=crop&q=80'}
+                      src={getMediaUrl(doctor.photoUrl) || 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=300&auto=format&fit=crop&q=80'}
                       alt={doctor.name}
                       className="w-20 h-20 rounded-2xl object-cover border border-slate-200 shadow-sm shrink-0"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=300&auto=format&fit=crop&q=80';
+                      }}
                     />
 
                     <div className="flex-1 space-y-1">

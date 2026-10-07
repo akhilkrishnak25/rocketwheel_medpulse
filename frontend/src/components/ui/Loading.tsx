@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Loader2, ImageOff } from 'lucide-react';
+import { getMediaUrl } from '../../api/client';
 
 /**
  * Standard Inline Spinner for Buttons, Inputs, Dropdowns
@@ -130,10 +131,11 @@ export const ImageWithFallback: React.FC<{
   className?: string;
   fallbackIcon?: React.ReactNode;
 }> = ({ src, alt, className = '', fallbackIcon }) => {
+  const resolvedSrc = getMediaUrl(src);
   const [loaded, setLoaded] = useState(false);
-  const [hasError, setHasError] = useState(!src);
+  const [hasError, setHasError] = useState(!resolvedSrc);
 
-  if (hasError || !src) {
+  if (hasError || !resolvedSrc) {
     return (
       <div
         className={`bg-slate-100 flex items-center justify-center text-slate-400 overflow-hidden ${className}`}
@@ -148,7 +150,7 @@ export const ImageWithFallback: React.FC<{
     <div className={`relative overflow-hidden ${className}`}>
       {!loaded && <Skeleton className="absolute inset-0 w-full h-full" />}
       <img
-        src={src}
+        src={resolvedSrc}
         alt={alt}
         loading="lazy"
         onLoad={() => setLoaded(true)}

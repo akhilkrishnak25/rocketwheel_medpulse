@@ -7,6 +7,7 @@ import rateLimit from 'express-rate-limit';
 import apiRouter from './routes';
 import { notFoundHandler, globalErrorHandler } from './middleware/error';
 import { ENV } from './config/env';
+import { UploadController } from './controllers/upload.controller';
 
 const app = express();
 
@@ -15,6 +16,7 @@ app.use(
   helmet({
     contentSecurityPolicy: false, // Allows cross-origin QR and preview loading in development
     crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' }, // Allows cross-origin image & PDF loading
   })
 );
 
@@ -62,8 +64,9 @@ app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Static uploads serving (PDF reports & profile photos)
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Resilient uploads serving (PDF reports & profile photos from disk or DB)
+app.use('/uploads', UploadController.serveUploadedFile);
+app.use('/api/uploads', UploadController.serveUploadedFile);
 
 // Root landing endpoint (GET /)
 app.get('/', (req, res) => {

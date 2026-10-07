@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { doctorsApi } from '../api/doctors.api';
 import { appointmentsApi, CreateAppointmentDTO } from '../api/appointments.api';
+import { getMediaUrl } from '../api/client';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Card, CardContent } from '../components/ui/Card';
@@ -260,9 +261,12 @@ export const BookingPage: React.FC = () => {
       <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <img
-            src={doctor.photoUrl || 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=200&auto=format&fit=crop&q=80'}
+            src={getMediaUrl(doctor.photoUrl) || 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=200&auto=format&fit=crop&q=80'}
             alt={doctor.name}
             className="w-16 h-16 rounded-2xl object-cover border border-slate-200 shrink-0"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=200&auto=format&fit=crop&q=80';
+            }}
           />
           <div>
             <div className="flex items-center gap-2">

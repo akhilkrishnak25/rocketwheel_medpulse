@@ -22,6 +22,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { labApi } from '../api/lab.api';
+import { getMediaUrl } from '../api/client';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Card, CardContent } from '../components/ui/Card';
@@ -327,7 +328,7 @@ export const LabTestsPage: React.FC = () => {
                   <div className="whitespace-pre-wrap text-slate-800">{lookupResult.report.results}</div>
                   {lookupResult.report.fileUrl && (
                     <a
-                      href={lookupResult.report.fileUrl}
+                      href={getMediaUrl(lookupResult.report.fileUrl)}
                       target="_blank"
                       rel="noreferrer"
                       className="text-purple-600 font-bold underline block pt-1"
