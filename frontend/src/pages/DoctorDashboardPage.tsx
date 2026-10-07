@@ -58,6 +58,19 @@ export const DoctorDashboardPage: React.FC = () => {
   const [isConsultModalOpen, setIsConsultModalOpen] = useState(false);
 
   const [activeTab, setActiveTab] = useState<'queue' | 'templates' | 'labs' | 'roster' | 'leaves'>('queue');
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '').toLowerCase();
+      if (['queue', 'templates', 'labs', 'roster', 'leaves'].includes(hash)) {
+        setActiveTab(hash as any);
+      }
+    };
+
+    handleHashChange();
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
   const [sendToPharmacy, setSendToPharmacy] = useState(false);
 
   // Profile Photo Upload State (Requirement 20)
@@ -574,65 +587,34 @@ export const DoctorDashboardPage: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      {/* Title & Navigation */}
+      {/* Title & Actions - Navigation is cleanly hosted in Left Sidebar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-            Doctor OPD Consultation Room
-          </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Manage your daily patient queue, start consultations, and issue digital prescriptions
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+              {activeTab === 'queue' && "Today's OPD Consultation Room"}
+              {activeTab === 'templates' && "Clinical Prescription Templates"}
+              {activeTab === 'labs' && "Diagnostic Laboratory Requisitions"}
+              {activeTab === 'roster' && "Doctor Practice Roster & Timings"}
+              {activeTab === 'leaves' && "Doctor Leave & Absence Calendar"}
+            </h1>
+            <Badge variant="success" className="text-[11px] font-bold">
+              OPD Active
+            </Badge>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            {activeTab === 'queue' && "Manage today's patient token queue, initiate clinical consultations, and dispense e-prescriptions"}
+            {activeTab === 'templates' && "Manage reusable disease medication templates for faster consultation dispensing"}
+            {activeTab === 'labs' && "Track patient laboratory investigation requests, statuses, and completed reports"}
+            {activeTab === 'roster' && "Configure OPD consultation schedules, slot durations, and hospital practice hours"}
+            {activeTab === 'leaves' && "Submit leave requests and view upcoming duty off days"}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex bg-slate-200/80 p-1 rounded-xl text-xs font-bold overflow-x-auto no-scrollbar whitespace-nowrap">
-            <button
-              onClick={() => setActiveTab('queue')}
-              className={`px-3.5 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
-                activeTab === 'queue' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Users className="w-3.5 h-3.5 text-royal-600" />
-              Today's OPD Queue ({(appointments || []).length})
-            </button>
-            <button
-              onClick={() => setActiveTab('templates')}
-              className={`px-3.5 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
-                activeTab === 'templates' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <BookOpen className="w-3.5 h-3.5 text-royal-600" />
-              Rx Templates ({(templates || []).length})
-            </button>
-            <button
-              onClick={() => setActiveTab('labs')}
-              className={`px-3.5 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
-                activeTab === 'labs' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <FlaskConical className="w-3.5 h-3.5 text-purple-600" />
-              Diagnostic Lab Requests ({(labRequests || []).length})
-            </button>
-            <button
-              onClick={() => setActiveTab('roster')}
-              className={`px-3.5 py-1.5 rounded-lg transition-colors ${
-                activeTab === 'roster' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              My Roster & Hours
-            </button>
-            <button
-              onClick={() => setActiveTab('leaves')}
-              className={`px-3.5 py-1.5 rounded-lg transition-colors ${
-                activeTab === 'leaves' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Leave Management
-            </button>
-          </div>
           {activeTab === 'queue' && (
-            <Button variant="outline" size="sm" onClick={() => refetch()} className="shrink-0 text-xs">
-              Refresh Queue
+            <Button variant="outline" size="sm" onClick={() => refetch()} className="shrink-0 text-xs font-bold flex items-center gap-1.5 shadow-sm">
+              <Users className="w-3.5 h-3.5 text-royal-600" />
+              Refresh Queue ({(appointments || []).length})
             </Button>
           )}
         </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Building2,
@@ -37,6 +37,19 @@ export const SuperAdminDashboardPage: React.FC = () => {
   const toast = useToast();
 
   const [activeTab, setActiveTab] = useState<'hospitals' | 'pending' | 'doctors' | 'appointments' | 'audit' | 'analytics' | 'labs'>('hospitals');
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '').toLowerCase();
+      if (['hospitals', 'pending', 'doctors', 'appointments', 'audit', 'analytics', 'labs'].includes(hash)) {
+        setActiveTab(hash as any);
+      }
+    };
+
+    handleHashChange();
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   // Analytics Filter States
   const [analyticsStartDate, setAnalyticsStartDate] = useState('');
