@@ -94,4 +94,10 @@ export const doctorDashboardApi = {
     }
     return res.blob();
   },
+
+  // Designated Support Staff Assignment for Vitals Recording
+  getHospitalSupportStaff: () => api.get<any[]>('/doctor/support-staff'),
+
+  updateAssignedStaff: (assignedStaffId: string | null) =>
+    api.patch<any>('/doctor/assigned-staff', { assignedStaffId }),
 };

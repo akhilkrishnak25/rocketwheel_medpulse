@@ -94,6 +94,8 @@ export interface Doctor {
   departmentId: string;
   hospital?: Partial<Hospital>;
   department?: Department;
+  assignedStaffId?: string | null;
+  assignedStaff?: SupportStaff;
   reviews?: Review[];
   averageRating?: number;
   reviewCount?: number;
@@ -341,6 +343,8 @@ export interface Appointment {
   prescription?: Prescription;
   vitals?: PatientVital[];
   labRequests?: LabTestRequest[];
+  assignedStaffId?: string | null;
+  assignedStaff?: SupportStaff;
   createdAt: string;
 }
 

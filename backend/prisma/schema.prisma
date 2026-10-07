@@ -105,6 +105,8 @@ model SupportStaff {
   status       String      @default("PENDING") // PENDING, APPROVED, REJECTED, ACTIVE
   approvedBy   String?
   approvedAt   DateTime?
+  assignedDoctors      Doctor[]      @relation("DoctorAssignedSupportStaff")
+  assignedAppointments Appointment[] @relation("AppointmentAssignedSupportStaff")
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 }
@@ -151,6 +153,8 @@ model Doctor {
   breakEnd              String?                @default("14:00")
   isActive              Boolean                @default(true)
   status                String                 @default("ACTIVE")
+  assignedStaffId       String?
+  assignedStaff         SupportStaff?          @relation("DoctorAssignedSupportStaff", fields: [assignedStaffId], references: [id], onDelete: SetNull)
   schedules             DoctorSchedule[]
   leaves                DoctorLeave[]
   appointments          Appointment[]
@@ -244,6 +248,8 @@ model Appointment {
   appointmentSlot    AppointmentSlot?
   vitals             PatientVital[]
   labRequests        LabTestRequest[]
+  assignedStaffId    String?
+  assignedStaff      SupportStaff?    @relation("AppointmentAssignedSupportStaff", fields: [assignedStaffId], references: [id], onDelete: SetNull)
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
 
@@ -251,6 +257,7 @@ model Appointment {
   @@index([doctorId, appointmentDate])
   @@index([patientId])
   @@index([bookingType])
+  @@index([assignedStaffId])
 }
 
 model AppointmentSlot {

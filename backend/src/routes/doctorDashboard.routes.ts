@@ -38,4 +38,8 @@ router.get('/leaves', DoctorDashboardController.getLeaves);
 router.post('/leaves', DoctorDashboardController.applyLeave);
 router.delete('/leaves/:leaveId', DoctorDashboardController.cancelLeave);
 
+// Hospital Support Staff Assignment
+router.get('/support-staff', DoctorDashboardController.getHospitalSupportStaff);
+router.patch('/assigned-staff', DoctorDashboardController.updateAssignedStaff);
+
 export default router;

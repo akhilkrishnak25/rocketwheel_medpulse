@@ -289,6 +289,15 @@ export const SupportStaffDashboardPage: React.FC = () => {
                         <td className="px-5 py-3.5">
                           <div className="font-semibold text-slate-800">Dr. {apt.doctor?.name}</div>
                           <div className="text-[11px] text-slate-400">{apt.doctor?.specialization || 'OPD'}</div>
+                          {apt.assignedStaffId || apt.doctor?.assignedStaffId ? (
+                            <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-bold text-teal-800 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full">
+                              <Check className="w-2.5 h-2.5 text-teal-600" /> Designated for Dr. {apt.doctor?.name}
+                            </span>
+                          ) : (
+                            <span className="inline-block mt-1 text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                              General Pool
+                            </span>
+                          )}
                         </td>
                         <td className="px-5 py-3.5">
                           <Badge

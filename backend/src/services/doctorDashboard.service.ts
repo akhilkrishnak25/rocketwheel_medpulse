@@ -22,6 +22,11 @@ export class DoctorDashboardService {
         },
         medicalRecord: true,
         digitalOp: true,
+        assignedStaff: {
+          include: {
+            user: { select: { id: true, name: true, email: true, phone: true } },
+          },
+        },
         vitals: {
           orderBy: { createdAt: 'desc' },
           take: 1,
@@ -42,6 +47,12 @@ export class DoctorDashboardService {
           select: { id: true, name: true, city: true, phone: true, emergencyContact: true, logoUrl: true },
         },
         department: { select: { id: true, name: true, code: true, icon: true } },
+        assignedStaff: {
+          include: {
+            user: { select: { id: true, name: true, email: true, phone: true } },
+            department: true,
+          },
+        },
         schedules: { orderBy: { dayOfWeek: 'asc' } },
         leaves: { orderBy: { startDate: 'desc' } },
       },
@@ -821,5 +832,77 @@ export class DoctorDashboardService {
     });
 
     return pdfBuffer;
+  }
+
+  static async getHospitalSupportStaff(doctorId: string) {
+    const doc = await prisma.doctor.findUnique({
+      where: { id: doctorId },
+      select: { hospitalId: true },
+    });
+    if (!doc) throw new Error('Doctor profile not found');
+
+    return prisma.supportStaff.findMany({
+      where: {
+        hospitalId: doc.hospitalId,
+        status: { in: ['ACTIVE', 'APPROVED'] },
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true, phone: true, avatarUrl: true } },
+        department: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  static async updateAssignedSupportStaff(doctorId: string, assignedStaffId: string | null, requestingUserId?: string) {
+    const doc = await prisma.doctor.findUnique({
+      where: { id: doctorId },
+      select: { id: true, hospitalId: true, name: true },
+    });
+    if (!doc) throw new Error('Doctor profile not found');
+
+    if (assignedStaffId) {
+      const staff = await prisma.supportStaff.findFirst({
+        where: { id: assignedStaffId, hospitalId: doc.hospitalId },
+        include: { user: true },
+      });
+      if (!staff) {
+        throw new Error('Selected support staff is not registered or approved in your hospital');
+      }
+    }
+
+    const updated = await prisma.doctor.update({
+      where: { id: doctorId },
+      data: { assignedStaffId },
+      include: {
+        assignedStaff: {
+          include: {
+            user: { select: { id: true, name: true, email: true, phone: true } },
+            department: true,
+          },
+        },
+      },
+    });
+
+    // Also sync existing active / upcoming appointments for this doctor to this assigned staff
+    const today = new Date().toISOString().split('T')[0];
+    await prisma.appointment.updateMany({
+      where: {
+        doctorId,
+        appointmentDate: { gte: today },
+        status: { in: ['CONFIRMED', 'WAITING', 'PENDING_PAYMENT'] },
+      },
+      data: { assignedStaffId },
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'UPDATE_DOCTOR_ASSIGNED_STAFF',
+      entity: 'Doctor',
+      entityId: doctorId,
+      details: { assignedStaffId, doctorName: doc.name },
+    });
+
+    return updated;
   }
 }

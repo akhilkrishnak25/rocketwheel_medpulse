@@ -2,20 +2,57 @@ import prisma from '../config/prisma';
 import { AuditService } from '../utils/audit';
 
 export class SupportStaffService {
-  static async getTodayQueue(hospitalId: string, date?: string) {
+  static async getStaffByUserId(userId: string) {
+    return prisma.supportStaff.findFirst({
+      where: { userId },
+      include: {
+        user: { select: { id: true, name: true, email: true, phone: true } },
+        department: true,
+      },
+    });
+  }
+
+  static async getTodayQueue(hospitalId: string, staffId?: string, date?: string) {
     const targetDate = date || new Date().toISOString().split('T')[0];
 
+    const whereClause: any = {
+      hospitalId,
+      appointmentDate: targetDate,
+      status: { in: ['CONFIRMED', 'WAITING', 'IN_CONSULTATION'] },
+    };
+
+    if (staffId) {
+      whereClause.OR = [
+        { assignedStaffId: staffId },
+        { doctor: { assignedStaffId: staffId } },
+        {
+          AND: [
+            { assignedStaffId: null },
+            { doctor: { assignedStaffId: null } },
+          ],
+        },
+      ];
+    }
+
     return prisma.appointment.findMany({
-      where: {
-        hospitalId,
-        appointmentDate: targetDate,
-        status: { in: ['CONFIRMED', 'WAITING', 'IN_CONSULTATION'] },
-      },
+      where: whereClause,
       include: {
         patient: true,
-        doctor: { select: { id: true, name: true, specialization: true } },
+        doctor: {
+          select: {
+            id: true,
+            name: true,
+            specialization: true,
+            assignedStaffId: true,
+          },
+        },
         department: { select: { id: true, name: true } },
         vitals: { orderBy: { createdAt: 'desc' }, take: 1 },
+        assignedStaff: {
+          include: {
+            user: { select: { name: true, email: true } },
+          },
+        },
       },
       orderBy: { tokenNumber: 'asc' },
     });
@@ -74,13 +111,15 @@ export class SupportStaffService {
         },
       });
 
-      // 2. Mark appointment status to WAITING if currently CONFIRMED
-      if (apt.status === 'CONFIRMED') {
-        await tx.appointment.update({
-          where: { id: data.appointmentId },
-          data: { status: 'WAITING' },
-        });
-      }
+      // 2. Mark appointment status to WAITING and assign staff if not previously assigned
+      const staffProfile = await tx.supportStaff.findFirst({ where: { userId: staffUserId } });
+      await tx.appointment.update({
+        where: { id: data.appointmentId },
+        data: {
+          ...(apt.status === 'CONFIRMED' ? { status: 'WAITING' } : {}),
+          ...((!apt.assignedStaffId && staffProfile) ? { assignedStaffId: staffProfile.id } : {}),
+        },
+      });
 
       await tx.auditLog.create({
         data: {

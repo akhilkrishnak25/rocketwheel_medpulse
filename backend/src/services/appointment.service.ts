@@ -167,6 +167,7 @@ export class AppointmentService {
         platformFee,
         totalAmount,
         notes,
+        assignedStaffId: doctor.assignedStaffId || null,
       },
       include: {
         hospital: true,
@@ -802,6 +803,7 @@ export class AppointmentService {
         platformFee: 0,
         totalAmount: fee,
         notes,
+        assignedStaffId: doctor.assignedStaffId || null,
       },
       include: {
         hospital: true,

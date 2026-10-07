@@ -7,6 +7,7 @@ import {
   doctorScheduleUpdateSchema,
   prescriptionTemplateSchema,
   createLabRequestSchema,
+  updateDoctorAssignedStaffSchema,
 } from '../validators/schemas';
 
 export class DoctorDashboardController {
@@ -307,6 +308,44 @@ export class DoctorDashboardController {
       return successResponse(res, requests, 'Laboratory test requests and reports retrieved');
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to fetch lab requests', 500);
+    }
+  }
+
+  // -------------------------------------------------------------
+  // SUPPORT STAFF ASSIGNMENT (FOR PRE-CONSULTATION VITALS)
+  // -------------------------------------------------------------
+  static async getHospitalSupportStaff(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const staff = await DoctorDashboardService.getHospitalSupportStaff(doctorId);
+      return successResponse(res, staff, 'Hospital support staff retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch hospital support staff', 500);
+    }
+  }
+
+  static async updateAssignedStaff(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const validated = updateDoctorAssignedStaffSchema.parse(req.body);
+      const updated = await DoctorDashboardService.updateAssignedSupportStaff(
+        doctorId,
+        validated.assignedStaffId || null,
+        req.user?.id
+      );
+
+      const staffName = updated.assignedStaff?.user?.name;
+      const message = staffName
+        ? `Support staff ${staffName} assigned to your OPD. Booked appointments will now be routed exclusively to them for vitals recording.`
+        : 'Assigned support staff cleared. Your OPD appointments will now be available to the general hospital triage pool.';
+
+      return successResponse(res, updated, message);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to update assigned support staff', 400, error.errors);
     }
   }
 }

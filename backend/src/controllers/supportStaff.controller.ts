@@ -11,8 +11,10 @@ export class SupportStaffController {
         return errorResponse(res, 'Hospital not associated with this staff account', 400);
       }
 
+      // Look up support staff record for current logged in user
+      const staff = await SupportStaffService.getStaffByUserId(req.user?.userId || req.user?.id || '');
       const { date } = req.query;
-      const queue = await SupportStaffService.getTodayQueue(hospitalId, date as string);
+      const queue = await SupportStaffService.getTodayQueue(hospitalId, staff?.id, date as string);
       return successResponse(res, queue, 'Today OP queue retrieved for vitals screening');
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to fetch queue', 500);

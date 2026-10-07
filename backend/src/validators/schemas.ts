@@ -265,6 +265,10 @@ export const doctorScheduleUpdateSchema = z.object({
   ),
 });
 
+export const updateDoctorAssignedStaffSchema = z.object({
+  assignedStaffId: z.string().nullable().optional(),
+});
+
 export const completeConsultationSchema = z.object({
   diagnosis: z.string().min(2, 'Diagnosis is required'),
   medicines: z
