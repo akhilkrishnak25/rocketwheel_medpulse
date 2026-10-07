@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, API_BASE_URL } from './client';
 
 export const superAdminApi = {
   getMetrics: () => api.get<any>('/super-admin/metrics'),
@@ -61,6 +61,43 @@ export const superAdminApi = {
     return api.get<any>(`/super-admin/analytics/op${qs ? `?${qs}` : ''}`);
   },
 
+  exportBookingsExcel: async (filters: {
+    startDate?: string;
+    endDate?: string;
+    date?: string;
+    hospitalId?: string;
+    doctorId?: string;
+    status?: string;
+    bookingType?: string;
+  } = {}) => {
+    const query = new URLSearchParams();
+    if (filters.startDate) query.append('startDate', filters.startDate);
+    if (filters.endDate) query.append('endDate', filters.endDate);
+    if (filters.date) query.append('date', filters.date);
+    if (filters.hospitalId) query.append('hospitalId', filters.hospitalId);
+    if (filters.doctorId) query.append('doctorId', filters.doctorId);
+    if (filters.status) query.append('status', filters.status);
+    if (filters.bookingType) query.append('bookingType', filters.bookingType);
+    const qs = query.toString();
+    const token =
+      localStorage.getItem('rocketwheel_access_token') ||
+      localStorage.getItem('medipulse_access_token') ||
+      localStorage.getItem('token');
+
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const res = await fetch(`${API_BASE_URL}/super-admin/export/excel${qs ? `?${qs}` : ''}`, {
+      headers,
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to export Excel report (${res.status})`);
+    }
+    return res.blob();
+  },
+
   getExportExcelUrl: (filters: {
     startDate?: string;
     endDate?: string;
@@ -79,7 +116,6 @@ export const superAdminApi = {
     if (filters.status) query.append('status', filters.status);
     if (filters.bookingType) query.append('bookingType', filters.bookingType);
     const qs = query.toString();
-    const baseUrl = (api as any).client?.defaults?.baseURL || '/api';
-    return `${baseUrl}/super-admin/export/excel${qs ? `?${qs}` : ''}`;
+    return `${API_BASE_URL}/super-admin/export/excel${qs ? `?${qs}` : ''}`;
   },
 };

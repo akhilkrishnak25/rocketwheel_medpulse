@@ -596,6 +596,20 @@ export class SuperAdminService {
   // -------------------------------------------------------------
   // OP / BOOKING ANALYTICS (REAL DATABASE CALCULATIONS)
   // -------------------------------------------------------------
+  static normalizeDate(d?: string): string | undefined {
+    if (!d) return undefined;
+    const trimmed = d.trim();
+    if (!trimmed) return undefined;
+    const m = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (m) {
+      const day = m[1].padStart(2, '0');
+      const month = m[2].padStart(2, '0');
+      const year = m[3];
+      return `${year}-${month}-${day}`;
+    }
+    return trimmed;
+  }
+
   static async getOpAnalytics(filters: {
     startDate?: string;
     endDate?: string;
@@ -607,12 +621,16 @@ export class SuperAdminService {
   }) {
     const where: any = {};
 
-    if (filters.date) {
-      where.appointmentDate = filters.date;
-    } else if (filters.startDate || filters.endDate) {
+    const normDate = SuperAdminService.normalizeDate(filters.date);
+    const normStartDate = SuperAdminService.normalizeDate(filters.startDate);
+    const normEndDate = SuperAdminService.normalizeDate(filters.endDate);
+
+    if (normDate) {
+      where.appointmentDate = normDate;
+    } else if (normStartDate || normEndDate) {
       where.appointmentDate = {};
-      if (filters.startDate) where.appointmentDate.gte = filters.startDate;
-      if (filters.endDate) where.appointmentDate.lte = filters.endDate;
+      if (normStartDate) where.appointmentDate.gte = normStartDate;
+      if (normEndDate) where.appointmentDate.lte = normEndDate;
     }
 
     if (filters.hospitalId) where.hospitalId = filters.hospitalId;
@@ -633,8 +651,9 @@ export class SuperAdminService {
         bookingType: true,
         totalAmount: true,
         consultationFee: true,
-        hospital: { select: { id: true, name: true, code: true } },
-        doctor: { select: { id: true, name: true, specialization: true } },
+        hospital: { select: { id: true, name: true, code: true, city: true, state: true } },
+        doctor: { select: { id: true, name: true, specialization: true, consultationFee: true } },
+        department: { select: { id: true, name: true } },
       },
       orderBy: { appointmentDate: 'desc' },
     });
@@ -643,36 +662,12 @@ export class SuperAdminService {
     let onlineBookingCount = 0;
     let offlineBookingCount = 0;
     let completedCount = 0;
+    let confirmedCount = 0;
     let cancelledCount = 0;
     let totalRevenue = 0;
 
     // Hierarchical analysis: Hospital -> Doctor breakdown
-    const hospitalMap = new Map<
-      string,
-      {
-        hospitalId: string;
-        hospitalName: string;
-        hospitalCode: string;
-        totalOp: number;
-        onlineOp: number;
-        offlineOp: number;
-        completedOp: number;
-        cancelledOp: number;
-        doctors: Map<
-          string,
-          {
-            doctorId: string;
-            doctorName: string;
-            specialization: string;
-            totalOp: number;
-            onlineOp: number;
-            offlineOp: number;
-            completedOp: number;
-            cancelledOp: number;
-          }
-        >;
-      }
-    >();
+    const hospitalMap = new Map<string, any>();
 
     for (const apt of appointments) {
       if (apt.bookingType === 'OFFLINE') {
@@ -685,70 +680,138 @@ export class SuperAdminService {
         completedCount++;
       } else if (apt.status === 'CANCELLED') {
         cancelledCount++;
+      } else if (['CONFIRMED', 'WAITING', 'IN_CONSULTATION'].includes(apt.status)) {
+        confirmedCount++;
       }
 
-      totalRevenue += apt.totalAmount;
+      const rev = Number(apt.totalAmount ?? apt.consultationFee ?? 0);
+      totalRevenue += rev;
 
       // Group by hospital
       const hId = apt.hospitalId;
       if (!hospitalMap.has(hId)) {
         hospitalMap.set(hId, {
+          id: hId,
           hospitalId: hId,
+          name: apt.hospital?.name || 'Unknown Hospital',
           hospitalName: apt.hospital?.name || 'Unknown Hospital',
+          code: apt.hospital?.code || 'HOSP',
           hospitalCode: apt.hospital?.code || 'HOSP',
+          city: apt.hospital?.city || '',
+          state: apt.hospital?.state || '',
+          totalAppointments: 0,
           totalOp: 0,
+          onlineAppointments: 0,
           onlineOp: 0,
+          offlineAppointments: 0,
           offlineOp: 0,
+          completedAppointments: 0,
           completedOp: 0,
+          confirmedAppointments: 0,
+          cancelledAppointments: 0,
           cancelledOp: 0,
-          doctors: new Map(),
+          totalRevenue: 0,
+          doctorsMap: new Map<string, any>(),
         });
       }
 
       const hStats = hospitalMap.get(hId)!;
+      hStats.totalAppointments++;
       hStats.totalOp++;
-      if (apt.bookingType === 'OFFLINE') hStats.offlineOp++;
-      else hStats.onlineOp++;
-      if (apt.status === 'COMPLETED') hStats.completedOp++;
-      else if (apt.status === 'CANCELLED') hStats.cancelledOp++;
+      if (apt.bookingType === 'OFFLINE') {
+        hStats.offlineAppointments++;
+        hStats.offlineOp++;
+      } else {
+        hStats.onlineAppointments++;
+        hStats.onlineOp++;
+      }
+
+      if (apt.status === 'COMPLETED') {
+        hStats.completedAppointments++;
+        hStats.completedOp++;
+      } else if (apt.status === 'CANCELLED') {
+        hStats.cancelledAppointments++;
+        hStats.cancelledOp++;
+      } else if (['CONFIRMED', 'WAITING', 'IN_CONSULTATION'].includes(apt.status)) {
+        hStats.confirmedAppointments++;
+      }
+
+      hStats.totalRevenue += rev;
 
       // Group by doctor
       const dId = apt.doctorId;
-      if (!hStats.doctors.has(dId)) {
-        hStats.doctors.set(dId, {
+      if (!hStats.doctorsMap.has(dId)) {
+        hStats.doctorsMap.set(dId, {
+          id: dId,
           doctorId: dId,
+          name: apt.doctor?.name || 'Unknown Doctor',
           doctorName: apt.doctor?.name || 'Unknown Doctor',
-          specialization: apt.doctor?.specialization || 'General',
+          department: apt.department?.name || apt.doctor?.specialization || 'General OPD',
+          specialization: apt.doctor?.specialization || 'General OPD',
+          totalAppointments: 0,
           totalOp: 0,
+          onlineAppointments: 0,
           onlineOp: 0,
+          offlineAppointments: 0,
           offlineOp: 0,
+          completedAppointments: 0,
           completedOp: 0,
+          confirmedAppointments: 0,
+          cancelledAppointments: 0,
           cancelledOp: 0,
+          totalRevenue: 0,
+          consultationFee: apt.consultationFee ?? apt.doctor?.consultationFee ?? 0,
         });
       }
 
-      const dStats = hStats.doctors.get(dId)!;
+      const dStats = hStats.doctorsMap.get(dId)!;
+      dStats.totalAppointments++;
       dStats.totalOp++;
-      if (apt.bookingType === 'OFFLINE') dStats.offlineOp++;
-      else dStats.onlineOp++;
-      if (apt.status === 'COMPLETED') dStats.completedOp++;
-      else if (apt.status === 'CANCELLED') dStats.cancelledOp++;
+      if (apt.bookingType === 'OFFLINE') {
+        dStats.offlineAppointments++;
+        dStats.offlineOp++;
+      } else {
+        dStats.onlineAppointments++;
+        dStats.onlineOp++;
+      }
+
+      if (apt.status === 'COMPLETED') {
+        dStats.completedAppointments++;
+        dStats.completedOp++;
+      } else if (apt.status === 'CANCELLED') {
+        dStats.cancelledAppointments++;
+        dStats.cancelledOp++;
+      } else if (['CONFIRMED', 'WAITING', 'IN_CONSULTATION'].includes(apt.status)) {
+        dStats.confirmedAppointments++;
+      }
+
+      dStats.totalRevenue += rev;
     }
 
-    const hierarchical = Array.from(hospitalMap.values()).map((h) => ({
-      ...h,
-      doctors: Array.from(h.doctors.values()),
-    }));
+    const hierarchical = Array.from(hospitalMap.values()).map((h) => {
+      const { doctorsMap, ...rest } = h;
+      return {
+        ...rest,
+        doctors: Array.from(doctorsMap.values()),
+      };
+    });
 
     return {
       summary: {
+        totalAppointments: totalOpCount,
         totalOpCount,
+        onlineAppointments: onlineBookingCount,
         onlineBookingCount,
+        offlineAppointments: offlineBookingCount,
         offlineBookingCount,
+        completedAppointments: completedCount,
         completedCount,
+        confirmedAppointments: confirmedCount,
+        cancelledAppointments: cancelledCount,
         cancelledCount,
         totalRevenue,
       },
+      hospitals: hierarchical,
       hierarchical,
     };
   }
@@ -770,12 +833,16 @@ export class SuperAdminService {
   ) {
     const where: any = {};
 
-    if (filters.date) {
-      where.appointmentDate = filters.date;
-    } else if (filters.startDate || filters.endDate) {
+    const normDate = SuperAdminService.normalizeDate(filters.date);
+    const normStartDate = SuperAdminService.normalizeDate(filters.startDate);
+    const normEndDate = SuperAdminService.normalizeDate(filters.endDate);
+
+    if (normDate) {
+      where.appointmentDate = normDate;
+    } else if (normStartDate || normEndDate) {
       where.appointmentDate = {};
-      if (filters.startDate) where.appointmentDate.gte = filters.startDate;
-      if (filters.endDate) where.appointmentDate.lte = filters.endDate;
+      if (normStartDate) where.appointmentDate.gte = normStartDate;
+      if (normEndDate) where.appointmentDate.lte = normEndDate;
     }
 
     if (filters.hospitalId) where.hospitalId = filters.hospitalId;
@@ -829,19 +896,19 @@ export class SuperAdminService {
 
     for (const apt of appointments) {
       worksheet.addRow({
-        patientId: apt.patient.patientIdNumber || apt.patient.id.substring(0, 8),
-        patientName: apt.patient.fullName,
-        patientMobile: apt.patient.mobileNumber,
-        hospital: apt.hospital.name,
-        doctor: apt.doctor.name,
-        department: apt.department.name,
+        patientId: apt.patient?.patientIdNumber || (apt.patient?.id ? apt.patient.id.substring(0, 8) : 'N/A'),
+        patientName: apt.patient?.fullName || 'Patient',
+        patientMobile: apt.patient?.mobileNumber || '',
+        hospital: apt.hospital?.name || 'Hospital',
+        doctor: apt.doctor?.name || 'Doctor',
+        department: apt.department?.name || apt.doctor?.specialization || 'General',
         bookingId: apt.appointmentNumber,
         bookingDate: apt.appointmentDate,
         bookingTime: apt.timeSlot,
         bookingType: apt.bookingType,
         bookingStatus: apt.status,
         paymentStatus: apt.payment?.status || (apt.bookingType === 'OFFLINE' ? 'PAID_COUNTER' : 'PENDING'),
-        fee: apt.consultationFee,
+        fee: apt.consultationFee ?? apt.totalAmount ?? 0,
       });
     }
 

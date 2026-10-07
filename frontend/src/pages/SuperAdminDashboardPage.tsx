@@ -141,7 +141,7 @@ export const SuperAdminDashboardPage: React.FC = () => {
   });
 
   // OP & Booking Analytics Query
-  const { data: opAnalytics, isLoading: analyticsLoading } = useQuery({
+  const { data: opAnalytics, isLoading: analyticsLoading, refetch: refetchOpAnalytics } = useQuery({
     queryKey: [
       'super-admin-op-analytics',
       analyticsStartDate,
@@ -198,8 +198,7 @@ export const SuperAdminDashboardPage: React.FC = () => {
   const handleExportExcel = async () => {
     setIsExporting(true);
     try {
-      const token = localStorage.getItem('token');
-      const url = superAdminApi.getExportExcelUrl({
+      const blob = await superAdminApi.exportBookingsExcel({
         startDate: analyticsStartDate || undefined,
         endDate: analyticsEndDate || undefined,
         hospitalId: analyticsHospitalId || undefined,
@@ -208,17 +207,6 @@ export const SuperAdminDashboardPage: React.FC = () => {
         bookingType: analyticsBookingType || undefined,
       });
 
-      const res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!res.ok) {
-        throw new Error('Failed to download Excel report');
-      }
-
-      const blob = await res.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = downloadUrl;
@@ -227,7 +215,7 @@ export const SuperAdminDashboardPage: React.FC = () => {
       a.click();
       a.remove();
       window.URL.revokeObjectURL(downloadUrl);
-      toast.success('Export Successful', 'OP Booking Analytics report exported to Excel');
+      toast.success('Export Successful', 'OP Booking Analytics report exported to Excel (.xlsx)');
     } catch (err: any) {
       toast.error('Export Error', err.message || 'Could not export Excel file');
     } finally {
@@ -1115,6 +1103,17 @@ export const SuperAdminDashboardPage: React.FC = () => {
                 )}
 
                 <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refetchOpAnalytics()}
+                  disabled={analyticsLoading}
+                  className="text-xs font-semibold text-slate-700 border-slate-300"
+                >
+                  <Activity className="w-3.5 h-3.5 mr-1 text-royal-600" />
+                  Refresh
+                </Button>
+
+                <Button
                   size="sm"
                   onClick={handleExportExcel}
                   isLoading={isExporting}
@@ -1132,28 +1131,28 @@ export const SuperAdminDashboardPage: React.FC = () => {
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1">
               <span className="text-[10px] uppercase font-bold text-slate-400">Total OP Bookings</span>
               <div className="text-2xl font-black text-royal-600">
-                {opAnalytics?.summary?.totalAppointments ?? 0}
+                {opAnalytics?.summary?.totalAppointments ?? opAnalytics?.summary?.totalOpCount ?? 0}
               </div>
             </div>
 
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1">
               <span className="text-[10px] uppercase font-bold text-blue-500">Online OP</span>
               <div className="text-2xl font-black text-blue-600">
-                {opAnalytics?.summary?.onlineAppointments ?? 0}
+                {opAnalytics?.summary?.onlineAppointments ?? opAnalytics?.summary?.onlineBookingCount ?? 0}
               </div>
             </div>
 
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1">
               <span className="text-[10px] uppercase font-bold text-amber-500">Offline Walk-ins</span>
               <div className="text-2xl font-black text-amber-600">
-                {opAnalytics?.summary?.offlineAppointments ?? 0}
+                {opAnalytics?.summary?.offlineAppointments ?? opAnalytics?.summary?.offlineBookingCount ?? 0}
               </div>
             </div>
 
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1">
               <span className="text-[10px] uppercase font-bold text-emerald-500">Completed OP</span>
               <div className="text-2xl font-black text-emerald-600">
-                {opAnalytics?.summary?.completedAppointments ?? 0}
+                {opAnalytics?.summary?.completedAppointments ?? opAnalytics?.summary?.completedCount ?? 0}
               </div>
             </div>
 
@@ -1167,7 +1166,7 @@ export const SuperAdminDashboardPage: React.FC = () => {
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-1">
               <span className="text-[10px] uppercase font-bold text-slate-500">Revenue Computed</span>
               <div className="text-2xl font-black text-slate-900">
-                ₹{opAnalytics?.summary?.totalRevenue ?? 0}
+                ₹{(opAnalytics?.summary?.totalRevenue ?? 0).toLocaleString('en-IN')}
               </div>
             </div>
           </div>
@@ -1185,7 +1184,7 @@ export const SuperAdminDashboardPage: React.FC = () => {
                 </p>
               </div>
               <Badge variant="outline" className="text-xs font-mono">
-                {opAnalytics?.hospitals?.length || 0} Facilities
+                {(opAnalytics?.hospitals || opAnalytics?.hierarchical || []).length} Facilities
               </Badge>
             </CardHeader>
 
@@ -1209,14 +1208,14 @@ export const SuperAdminDashboardPage: React.FC = () => {
                         Computing real-time OP metrics from live database...
                       </td>
                     </tr>
-                  ) : (opAnalytics?.hospitals || []).length === 0 ? (
+                  ) : (opAnalytics?.hospitals || opAnalytics?.hierarchical || []).length === 0 ? (
                     <tr>
                       <td colSpan={7} className="text-center py-10 text-slate-400">
                         No appointments found matching the selected filter criteria.
                       </td>
                     </tr>
                   ) : (
-                    (opAnalytics?.hospitals || []).map((hosp: any) => {
+                    (opAnalytics?.hospitals || opAnalytics?.hierarchical || []).map((hosp: any) => {
                       const isExpanded = !!expandedHospitals[hosp.id];
                       return (
                         <React.Fragment key={hosp.id}>
@@ -1238,31 +1237,31 @@ export const SuperAdminDashboardPage: React.FC = () => {
                               )}
                             </td>
                             <td className="px-5 py-3.5">
-                              <div className="font-bold text-slate-900 text-sm">{hosp.name}</div>
+                              <div className="font-bold text-slate-900 text-sm">{hosp.name || hosp.hospitalName}</div>
                               <div className="text-[11px] text-slate-400 font-mono">
-                                Code: {hosp.code} • {hosp.city}, {hosp.state}
+                                Code: {hosp.code || hosp.hospitalCode} {hosp.city ? `• ${hosp.city}, ${hosp.state}` : ''}
                               </div>
                             </td>
                             <td className="px-5 py-3.5 text-center font-bold text-royal-700 text-sm">
-                              {hosp.totalAppointments}
+                              {hosp.totalAppointments ?? hosp.totalOp ?? 0}
                             </td>
                             <td className="px-5 py-3.5 text-center">
                               <span className="bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded-full text-[11px]">
-                                {hosp.onlineAppointments}
+                                {hosp.onlineAppointments ?? hosp.onlineOp ?? 0}
                               </span>
                             </td>
                             <td className="px-5 py-3.5 text-center">
                               <span className="bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded-full text-[11px]">
-                                {hosp.offlineAppointments}
+                                {hosp.offlineAppointments ?? hosp.offlineOp ?? 0}
                               </span>
                             </td>
                             <td className="px-5 py-3.5 text-center">
                               <span className="bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-full text-[11px]">
-                                {hosp.completedAppointments}
+                                {hosp.completedAppointments ?? hosp.completedOp ?? 0}
                               </span>
                             </td>
                             <td className="px-5 py-3.5 text-right font-black text-slate-900">
-                              ₹{hosp.totalRevenue?.toLocaleString('en-IN') || 0}
+                              ₹{(hosp.totalRevenue ?? 0).toLocaleString('en-IN')}
                             </td>
                           </tr>
 
@@ -1272,7 +1271,7 @@ export const SuperAdminDashboardPage: React.FC = () => {
                               <td colSpan={7} className="p-0 bg-slate-50/70 border-y border-slate-200">
                                 <div className="p-4 sm:px-8 space-y-2">
                                   <div className="text-[11px] font-bold uppercase text-slate-500 tracking-wider">
-                                    Doctor Performance Breakdown ({hosp.name})
+                                    Doctor Performance Breakdown ({hosp.name || hosp.hospitalName})
                                   </div>
                                   {(hosp.doctors || []).length === 0 ? (
                                     <div className="text-xs text-slate-400 py-3">
@@ -1295,22 +1294,22 @@ export const SuperAdminDashboardPage: React.FC = () => {
                                         {hosp.doctors.map((doc: any) => (
                                           <tr key={doc.id} className="hover:bg-slate-50">
                                             <td className="px-4 py-2.5 font-bold text-slate-800">
-                                              Dr. {doc.name}
+                                              Dr. {doc.name || doc.doctorName}
                                             </td>
                                             <td className="px-4 py-2.5 text-slate-500">
                                               {doc.department || doc.specialization}
                                             </td>
                                             <td className="px-4 py-2.5 text-center font-bold text-royal-600">
-                                              {doc.totalAppointments}
+                                              {doc.totalAppointments ?? doc.totalOp ?? 0}
                                             </td>
                                             <td className="px-4 py-2.5 text-center text-blue-600 font-semibold">
-                                              {doc.onlineAppointments}
+                                              {doc.onlineAppointments ?? doc.onlineOp ?? 0}
                                             </td>
                                             <td className="px-4 py-2.5 text-center text-amber-600 font-semibold">
-                                              {doc.offlineAppointments}
+                                              {doc.offlineAppointments ?? doc.offlineOp ?? 0}
                                             </td>
                                             <td className="px-4 py-2.5 text-center text-emerald-600 font-semibold">
-                                              {doc.completedAppointments}
+                                              {doc.completedAppointments ?? doc.completedOp ?? 0}
                                             </td>
                                             <td className="px-4 py-2.5 text-right font-mono text-slate-600">
                                               ₹{doc.consultationFee || 0}
