@@ -588,11 +588,12 @@ export const DoctorDashboardPage: React.FC = () => {
           <div className="flex bg-slate-200/80 p-1 rounded-xl text-xs font-bold overflow-x-auto no-scrollbar whitespace-nowrap">
             <button
               onClick={() => setActiveTab('queue')}
-              className={`px-3.5 py-1.5 rounded-lg transition-colors ${
+              className={`px-3.5 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
                 activeTab === 'queue' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Today's Queue ({(appointments || []).length})
+              <Users className="w-3.5 h-3.5 text-royal-600" />
+              Today's OPD Queue ({(appointments || []).length})
             </button>
             <button
               onClick={() => setActiveTab('templates')}
