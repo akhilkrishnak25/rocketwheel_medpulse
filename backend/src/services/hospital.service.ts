@@ -75,34 +75,53 @@ export class HospitalService {
           where: { isActive: true, status: 'ACTIVE' },
           select: { id: true, name: true, specialization: true, consultationFee: true },
         },
+        hospitalAdmins: {
+          include: {
+            user: { select: { avatarUrl: true } },
+          },
+        },
       },
       orderBy,
     });
 
-    return hospitals.map((h) => ({
-      id: h.id,
-      name: h.name,
-      slug: h.slug,
-      code: h.code,
-      logoUrl: h.logoUrl,
-      imageUrl: h.imageUrl,
-      address: h.address,
-      city: h.city,
-      state: h.state,
-      pincode: h.pincode,
-      phone: h.phone,
-      emergencyContact: h.emergencyContact,
-      openingHours: h.openingHours,
-      about: h.about,
-      facilities: JSON.parse(h.facilities || '[]'),
-      rating: h.rating,
-      isEmergencyAvailable: h.isEmergencyAvailable,
-      doctorCount: h.doctors.length,
-      departments: h.departments,
-      minConsultationFee: h.doctors.length > 0
-        ? Math.min(...h.doctors.map((d) => d.consultationFee))
-        : 400,
-    }));
+    return hospitals.map((h) => {
+      const adminCustomAvatar = h.hospitalAdmins?.find(
+        (ha: any) => ha.user?.avatarUrl && ha.user.avatarUrl.startsWith('/uploads/')
+      )?.user?.avatarUrl;
+
+      const effectiveImageUrl = (h.imageUrl && !h.imageUrl.includes('unsplash.com'))
+        ? h.imageUrl
+        : (adminCustomAvatar || h.imageUrl);
+
+      const effectiveLogoUrl = (h.logoUrl && !h.logoUrl.includes('unsplash.com'))
+        ? h.logoUrl
+        : (adminCustomAvatar || h.logoUrl);
+
+      return {
+        id: h.id,
+        name: h.name,
+        slug: h.slug,
+        code: h.code,
+        logoUrl: effectiveLogoUrl,
+        imageUrl: effectiveImageUrl,
+        address: h.address,
+        city: h.city,
+        state: h.state,
+        pincode: h.pincode,
+        phone: h.phone,
+        emergencyContact: h.emergencyContact,
+        openingHours: h.openingHours,
+        about: h.about,
+        facilities: JSON.parse(h.facilities || '[]'),
+        rating: h.rating,
+        isEmergencyAvailable: h.isEmergencyAvailable,
+        doctorCount: h.doctors.length,
+        departments: h.departments,
+        minConsultationFee: h.doctors.length > 0
+          ? Math.min(...h.doctors.map((d) => d.consultationFee))
+          : 400,
+      };
+    });
   }
 
   static async getHospitalByIdOrSlug(idOrSlug: string) {
@@ -127,13 +146,32 @@ export class HospitalService {
             },
           },
         },
+        hospitalAdmins: {
+          include: {
+            user: { select: { avatarUrl: true } },
+          },
+        },
       },
     });
 
     if (!hospital) return null;
 
+    const adminCustomAvatar = hospital.hospitalAdmins?.find(
+      (ha: any) => ha.user?.avatarUrl && ha.user.avatarUrl.startsWith('/uploads/')
+    )?.user?.avatarUrl;
+
+    const effectiveImageUrl = (hospital.imageUrl && !hospital.imageUrl.includes('unsplash.com'))
+      ? hospital.imageUrl
+      : (adminCustomAvatar || hospital.imageUrl);
+
+    const effectiveLogoUrl = (hospital.logoUrl && !hospital.logoUrl.includes('unsplash.com'))
+      ? hospital.logoUrl
+      : (adminCustomAvatar || hospital.logoUrl);
+
     return {
       ...hospital,
+      imageUrl: effectiveImageUrl,
+      logoUrl: effectiveLogoUrl,
       facilities: JSON.parse(hospital.facilities || '[]'),
       doctorCount: hospital.doctors.length,
     };

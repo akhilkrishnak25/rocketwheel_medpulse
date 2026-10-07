@@ -41,6 +41,12 @@ import {
   Eye,
   EyeOff,
   ExternalLink,
+  Building2,
+  Image as ImageIcon,
+  Sparkles,
+  MapPin,
+  Phone,
+  Info,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { adminApi } from '../api/admin.api';
@@ -78,6 +84,19 @@ export const HospitalAdminDashboardPage: React.FC = () => {
   // Hospital Admin Avatar Upload State (Requirement 20)
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
+  // Hospital Profile & Branding State
+  const [isBrandingModalOpen, setIsBrandingModalOpen] = useState(false);
+  const [isSavingBranding, setIsSavingBranding] = useState(false);
+  const [isUploadingBanner, setIsUploadingBanner] = useState(false);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [brandingLogo, setBrandingLogo] = useState('');
+  const [brandingImage, setBrandingImage] = useState('');
+  const [brandingPhone, setBrandingPhone] = useState('');
+  const [brandingEmergency, setBrandingEmergency] = useState('');
+  const [brandingAbout, setBrandingAbout] = useState('');
+  const [brandingAddress, setBrandingAddress] = useState('');
+  const [brandingCity, setBrandingCity] = useState('');
+
   // Hospital Labs Management State (Requirement 6)
   const [editingLab, setEditingLab] = useState<any | null>(null);
   const [labSearch, setLabSearch] = useState('');
@@ -101,14 +120,14 @@ export const HospitalAdminDashboardPage: React.FC = () => {
     window.location.hash = `#${tab}`;
   };
 
-  // Admin Profile Photo Upload & Remove (Requirement 20)
+  // Admin Profile Photo & Hospital Branding Upload (Requirement 20)
   const handleProfilePhotoUpload = async (file: File) => {
     if (!file.type.startsWith('image/')) {
       toast.error('Invalid Format', 'Please upload an image file (JPG, PNG, WebP).');
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('File Exceeds Limit', 'Maximum allowed image size is 5MB.');
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error('File Exceeds Limit', 'Maximum allowed image size is 8MB.');
       return;
     }
 
@@ -118,9 +137,30 @@ export const HospitalAdminDashboardPage: React.FC = () => {
       reader.onload = async () => {
         try {
           const base64Data = reader.result as string;
-          const result = await uploadApi.uploadProfilePhoto(base64Data);
-          updateUser({ avatarUrl: result.url });
-          toast.success('Profile Photo Updated', 'Hospital admin avatar updated successfully.');
+          // Upload to hospital asset & profile photo
+          const result = await uploadApi.uploadHospitalAsset(base64Data, 'both');
+          try {
+            await adminApi.updateHospitalProfile({
+              logoUrl: result.url,
+              imageUrl: result.url,
+            });
+          } catch (profileErr) {
+            console.warn('Profile sync fallback:', profileErr);
+          }
+
+          updateUser({
+            avatarUrl: result.url,
+            hospital: user?.hospital
+              ? { ...user.hospital, logoUrl: result.url, imageUrl: result.url }
+              : undefined,
+          });
+
+          queryClient.invalidateQueries({ queryKey: ['admin-profile'] });
+          queryClient.invalidateQueries({ queryKey: ['hospitals'] });
+          queryClient.invalidateQueries({ queryKey: ['hospital-detail'] });
+          queryClient.invalidateQueries({ queryKey: ['super-admin-hospitals'] });
+
+          toast.success('Hospital Image Updated', 'Hospital logo and image updated successfully across the entire platform.');
         } catch (err: any) {
           toast.error('Upload Failed', err.message || 'Could not upload photo');
         } finally {
@@ -139,16 +179,133 @@ export const HospitalAdminDashboardPage: React.FC = () => {
   };
 
   const handleProfilePhotoRemove = async () => {
-    if (!window.confirm('Remove hospital admin profile photo?')) return;
+    if (!window.confirm('Remove hospital photo?')) return;
     setIsUploadingPhoto(true);
     try {
       await uploadApi.removeProfilePhoto();
-      updateUser({ avatarUrl: null });
-      toast.success('Photo Removed', 'Hospital admin avatar reset to default.');
+      updateUser({
+        avatarUrl: null,
+        hospital: user?.hospital ? { ...user.hospital, logoUrl: undefined } : undefined,
+      });
+      queryClient.invalidateQueries({ queryKey: ['admin-profile'] });
+      queryClient.invalidateQueries({ queryKey: ['hospitals'] });
+      queryClient.invalidateQueries({ queryKey: ['hospital-detail'] });
+      toast.success('Photo Removed', 'Hospital photo reset.');
     } catch (err: any) {
       toast.error('Removal Failed', err.message || 'Could not remove photo');
     } finally {
       setIsUploadingPhoto(false);
+    }
+  };
+
+  const openBrandingModal = () => {
+    setBrandingLogo(hospitalProfile?.logoUrl || user?.hospital?.logoUrl || user?.avatarUrl || '');
+    setBrandingImage(hospitalProfile?.imageUrl || user?.hospital?.imageUrl || '');
+    setBrandingPhone(hospitalProfile?.phone || '');
+    setBrandingEmergency(hospitalProfile?.emergencyContact || '');
+    setBrandingAbout(hospitalProfile?.about || '');
+    setBrandingAddress(hospitalProfile?.address || '');
+    setBrandingCity(hospitalProfile?.city || '');
+    setIsBrandingModalOpen(true);
+  };
+
+  const handleBannerUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error('Invalid Format', 'Please upload an image file (JPG, PNG, WebP).');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error('File Exceeds Limit', 'Maximum allowed image size is 8MB.');
+      return;
+    }
+    setIsUploadingBanner(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64Data = reader.result as string;
+          const res = await uploadApi.uploadHospitalAsset(base64Data, 'cover');
+          setBrandingImage(res.url);
+          toast.success('Cover Photo Uploaded', 'Hospital cover photo uploaded. Click "Save Hospital Profile" to apply.');
+        } catch (err: any) {
+          toast.error('Upload Failed', err.message || 'Could not upload cover photo');
+        } finally {
+          setIsUploadingBanner(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      toast.error('Upload Failed', err.message);
+      setIsUploadingBanner(false);
+    }
+  };
+
+  const handleLogoUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error('Invalid Format', 'Please upload an image file (JPG, PNG, WebP).');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('File Exceeds Limit', 'Maximum allowed image size is 5MB.');
+      return;
+    }
+    setIsUploadingLogo(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64Data = reader.result as string;
+          const res = await uploadApi.uploadHospitalAsset(base64Data, 'logo');
+          setBrandingLogo(res.url);
+          toast.success('Logo Uploaded', 'Hospital emblem uploaded. Click "Save Hospital Profile" to apply.');
+        } catch (err: any) {
+          toast.error('Upload Failed', err.message || 'Could not upload logo');
+        } finally {
+          setIsUploadingLogo(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      toast.error('Upload Failed', err.message);
+      setIsUploadingLogo(false);
+    }
+  };
+
+  const handleSaveBranding = async () => {
+    setIsSavingBranding(true);
+    try {
+      await adminApi.updateHospitalProfile({
+        logoUrl: brandingLogo.trim() || undefined,
+        imageUrl: brandingImage.trim() || undefined,
+        phone: brandingPhone.trim() || undefined,
+        emergencyContact: brandingEmergency.trim() || undefined,
+        about: brandingAbout.trim() || undefined,
+        address: brandingAddress.trim() || undefined,
+        city: brandingCity.trim() || undefined,
+      });
+
+      updateUser({
+        avatarUrl: brandingLogo.trim() || brandingImage.trim() || user?.avatarUrl,
+        hospital: user?.hospital
+          ? {
+              ...user.hospital,
+              logoUrl: brandingLogo.trim() || user.hospital.logoUrl,
+              imageUrl: brandingImage.trim() || user.hospital.imageUrl,
+            }
+          : undefined,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ['admin-profile'] });
+      queryClient.invalidateQueries({ queryKey: ['hospitals'] });
+      queryClient.invalidateQueries({ queryKey: ['hospital-detail'] });
+      queryClient.invalidateQueries({ queryKey: ['super-admin-hospitals'] });
+
+      toast.success('Hospital Profile Updated', 'Hospital branding and details saved successfully.');
+      setIsBrandingModalOpen(false);
+    } catch (err: any) {
+      toast.error('Save Failed', err.message || 'Could not update hospital profile');
+    } finally {
+      setIsSavingBranding(false);
     }
   };
 
@@ -259,6 +416,12 @@ export const HospitalAdminDashboardPage: React.FC = () => {
     queryKey: ['admin-notifications'],
     queryFn: () => adminApi.getNotifications(),
     refetchInterval: 10000,
+  });
+
+  // Fetch hospital profile & branding
+  const { data: hospitalProfile, refetch: refetchHospitalProfile } = useQuery({
+    queryKey: ['admin-profile'],
+    queryFn: () => adminApi.getHospitalProfile(),
   });
 
   // Immediate popup/toast notifications when new alerts arrive (Requirement 13)
@@ -619,10 +782,10 @@ export const HospitalAdminDashboardPage: React.FC = () => {
         <div className="flex items-center gap-4">
           <div className="relative group shrink-0">
             <div className="w-16 h-16 rounded-2xl overflow-hidden bg-royal-50 border-2 border-royal-200 flex items-center justify-center text-royal-700 shadow-inner">
-              {user?.avatarUrl ? (
+              {hospitalProfile?.logoUrl || user?.hospital?.logoUrl || user?.avatarUrl || hospitalProfile?.imageUrl ? (
                 <img
-                  src={getMediaUrl(user.avatarUrl)}
-                  alt="Hospital Admin"
+                  src={getMediaUrl(hospitalProfile?.logoUrl || user?.hospital?.logoUrl || user?.avatarUrl || hospitalProfile?.imageUrl)}
+                  alt="Hospital Emblem"
                   className="w-full h-full object-cover"
                   onError={(e) => {
                     (e.target as HTMLElement).style.display = 'none';
@@ -641,7 +804,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
             <label
               htmlFor="admin-avatar-file-input"
               className="absolute -bottom-1.5 -right-1.5 p-1.5 bg-royal-600 hover:bg-royal-700 text-white rounded-lg shadow-md cursor-pointer transition-all hover:scale-105"
-              title="Upload Hospital Admin Profile Photo"
+              title="Upload Hospital Logo & Image"
             >
               <Camera className="w-3.5 h-3.5" />
               <input
@@ -663,29 +826,54 @@ export const HospitalAdminDashboardPage: React.FC = () => {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-black text-slate-900 tracking-tight">
-                {user?.hospital?.name || 'Hospital Admin Operations Portal'}
+                {hospitalProfile?.name || user?.hospital?.name || 'Hospital Admin Operations Portal'}
               </h1>
               <Badge variant="purple" className="text-[10px]">
                 {isSubAdmin ? (user?.hospitalSubAdmin?.roleTitle || 'Hospital Sub-Admin') : 'Hospital Admin'}
               </Badge>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Admin: <span className="font-semibold text-slate-700">{user?.name}</span> ({user?.email}) • Code: <span className="font-mono font-bold text-royal-700">{user?.hospital?.code || 'RW-HOSP'}</span>
+              Admin: <span className="font-semibold text-slate-700">{user?.name}</span> ({user?.email}) • Code: <span className="font-mono font-bold text-royal-700">{hospitalProfile?.code || user?.hospital?.code || 'RW-HOSP'}</span>
+              {(hospitalProfile?.city || hospitalProfile?.phone) && (
+                <span className="ml-2 font-medium text-slate-400">
+                  • {hospitalProfile?.city} {hospitalProfile?.phone ? `(${hospitalProfile.phone})` : ''}
+                </span>
+              )}
             </p>
-            {user?.avatarUrl && (
-              <button
-                type="button"
-                onClick={handleProfilePhotoRemove}
-                disabled={isUploadingPhoto}
-                className="text-[11px] text-rose-600 hover:text-rose-800 font-semibold underline mt-0.5 inline-block"
-              >
-                Remove photo
-              </button>
+            {(user?.avatarUrl || hospitalProfile?.logoUrl || hospitalProfile?.imageUrl) && (
+              <div className="flex items-center gap-3 mt-0.5">
+                <button
+                  type="button"
+                  onClick={handleProfilePhotoRemove}
+                  disabled={isUploadingPhoto}
+                  className="text-[11px] text-rose-600 hover:text-rose-800 font-semibold underline inline-block"
+                >
+                  Reset image
+                </button>
+                <button
+                  type="button"
+                  onClick={openBrandingModal}
+                  className="text-[11px] text-royal-600 hover:text-royal-800 font-semibold underline inline-block"
+                >
+                  Manage Branding & Cover
+                </button>
+              </div>
             )}
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          {/* HOSPITAL BRANDING & SETTINGS BUTTON */}
+          <Button
+            variant="outline"
+            onClick={openBrandingModal}
+            className="border-royal-200 text-royal-700 hover:bg-royal-50 font-bold text-xs flex items-center gap-1.5 shadow-sm"
+            size="sm"
+          >
+            <Building2 className="w-4 h-4 text-royal-600" />
+            Hospital Branding
+          </Button>
+
           {/* OFFLINE WALK-IN BOOKING BUTTON */}
           {canManageAppointments && (
             <Button
@@ -3225,6 +3413,255 @@ Dr. Vikram Verma,vikram.verma@hospital.org,Consultant Physician,MBBS MD,${c2},8,
                 isLoading={updateSubAdminMutation.isPending}
               >
                 Save Privileges
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* HOSPITAL PROFILE & BRANDING MODAL */}
+      {isBrandingModalOpen && (
+        <Modal
+          isOpen={isBrandingModalOpen}
+          onClose={() => setIsBrandingModalOpen(false)}
+          title={`Hospital Profile & Branding: ${hospitalProfile?.name || user?.hospital?.name || 'Care Hospital'}`}
+          maxWidth="2xl"
+        >
+          <div className="space-y-6 text-sm">
+            <p className="text-xs text-slate-500">
+              Customize your hospital branding images and official public directory details. Changes will be reflected immediately across patient booking portals, hospital cards, and certificates.
+            </p>
+
+            {/* IMAGES & BRANDING SECTION */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* HOSPITAL LOGO / EMBLEM */}
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                      <Building2 className="w-4 h-4 text-royal-600" />
+                      Hospital Emblem / Logo
+                    </span>
+                    <Badge variant="purple" className="text-[10px]">Square 1:1</Badge>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mb-3">
+                    Displayed on doctor badges, OP tokens, search cards, and dashboard header.
+                  </p>
+                  <div className="flex items-center gap-4 mb-3">
+                    <div className="w-20 h-20 rounded-2xl overflow-hidden bg-white border-2 border-slate-200 shadow-sm shrink-0 flex items-center justify-center relative">
+                      {brandingLogo ? (
+                        <img
+                          src={getMediaUrl(brandingLogo)}
+                          alt="Hospital Logo Preview"
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      ) : (
+                        <Building2 className="w-8 h-8 text-slate-400" />
+                      )}
+                      {isUploadingLogo && (
+                        <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center">
+                          <InlineSpinner size="sm" className="text-royal-600" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-2 flex-1">
+                      <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-royal-600 hover:bg-royal-700 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-sm transition-colors">
+                        <Upload className="w-3.5 h-3.5" />
+                        Upload Logo File
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files[0]) {
+                              handleLogoUpload(e.target.files[0]);
+                            }
+                          }}
+                          disabled={isUploadingLogo}
+                        />
+                      </label>
+                      <input
+                        type="text"
+                        value={brandingLogo}
+                        onChange={(e) => setBrandingLogo(e.target.value)}
+                        placeholder="Or paste image URL"
+                        className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-1 focus:ring-royal-500 outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* HOSPITAL COVER / BANNER */}
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                      <ImageIcon className="w-4 h-4 text-emerald-600" />
+                      Cover / Exterior Photo
+                    </span>
+                    <Badge variant="success" className="text-[10px]">Landscape 16:9</Badge>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mb-3">
+                    Hero banner on Hospital Page and card on Home Directory.
+                  </p>
+                  <div className="w-full h-20 rounded-xl overflow-hidden bg-white border-2 border-slate-200 shadow-sm mb-3 relative flex items-center justify-center">
+                    {brandingImage ? (
+                      <img
+                        src={getMediaUrl(brandingImage)}
+                        alt="Hospital Cover Preview"
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <ImageIcon className="w-8 h-8 text-slate-400" />
+                    )}
+                    {isUploadingBanner && (
+                      <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center">
+                        <InlineSpinner size="sm" className="text-emerald-600" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-sm transition-colors shrink-0">
+                      <Upload className="w-3.5 h-3.5" />
+                      Upload Banner
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            handleBannerUpload(e.target.files[0]);
+                          }
+                        }}
+                        disabled={isUploadingBanner}
+                      />
+                    </label>
+                    <input
+                      type="text"
+                      value={brandingImage}
+                      onChange={(e) => setBrandingImage(e.target.value)}
+                      placeholder="Or paste banner image URL"
+                      className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-1 focus:ring-emerald-500 outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* LIVE PREVIEW OF HOSPITAL CARD */}
+            <div className="bg-slate-100 p-3 rounded-2xl border border-slate-200">
+              <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-2">
+                Public Directory Card Live Preview
+              </span>
+              <div className="max-w-sm mx-auto bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm">
+                <div className="h-28 w-full bg-slate-200 relative overflow-hidden">
+                  <img
+                    src={getMediaUrl(brandingImage || brandingLogo) || 'https://images.unsplash.com/photo-1587351021759-3e566b6af7cc?w=800&auto=format&fit=crop&q=80'}
+                    alt="Preview"
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute bottom-2 left-2 flex items-center gap-2 bg-white/95 backdrop-blur-sm px-2 py-1 rounded-xl shadow">
+                    <img
+                      src={getMediaUrl(brandingLogo) || getMediaUrl(brandingImage) || 'https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=150&auto=format&fit=crop&q=80'}
+                      alt="Logo"
+                      className="w-6 h-6 rounded-lg object-cover border border-slate-200"
+                    />
+                    <span className="text-xs font-black text-slate-900 truncate max-w-[160px]">
+                      {hospitalProfile?.name || user?.hospital?.name || 'Care Hospital'}
+                    </span>
+                  </div>
+                </div>
+                <div className="p-3 text-xs text-slate-600 space-y-1">
+                  <p className="flex items-center gap-1.5 font-medium text-slate-700">
+                    <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    {brandingAddress || hospitalProfile?.address || 'Hospital Address'}, {brandingCity || hospitalProfile?.city || 'City'}
+                  </p>
+                  <p className="flex items-center gap-1.5 text-slate-500 text-[11px]">
+                    <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    {brandingPhone || hospitalProfile?.phone || 'Main helpline'} • Emergency: <span className="font-semibold text-rose-600">{brandingEmergency || hospitalProfile?.emergencyContact || '108'}</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* DETAILS FORM */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Helpline Phone Number</label>
+                <input
+                  type="text"
+                  value={brandingPhone}
+                  onChange={(e) => setBrandingPhone(e.target.value)}
+                  placeholder="e.g. +91 98765 43210"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-royal-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Emergency 24x7 Contact</label>
+                <input
+                  type="text"
+                  value={brandingEmergency}
+                  onChange={(e) => setBrandingEmergency(e.target.value)}
+                  placeholder="e.g. 108 or 040-23456789"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-royal-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Facility Address</label>
+                <input
+                  type="text"
+                  value={brandingAddress}
+                  onChange={(e) => setBrandingAddress(e.target.value)}
+                  placeholder="Street address / locality"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-royal-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">City</label>
+                <input
+                  type="text"
+                  value={brandingCity}
+                  onChange={(e) => setBrandingCity(e.target.value)}
+                  placeholder="City"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-royal-500 outline-none"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="font-semibold text-slate-700 block mb-1">About Hospital</label>
+                <textarea
+                  rows={2}
+                  value={brandingAbout}
+                  onChange={(e) => setBrandingAbout(e.target.value)}
+                  placeholder="Short description of hospital specialties and facilities..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-royal-500 outline-none"
+                />
+              </div>
+            </div>
+
+            {/* MODAL FOOTER */}
+            <div className="flex justify-end items-center gap-3 pt-4 border-t border-slate-200">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsBrandingModalOpen(false)}
+                disabled={isSavingBranding}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveBranding}
+                isLoading={isSavingBranding}
+                className="bg-royal-600 hover:bg-royal-700 text-white font-bold px-5"
+              >
+                Save Hospital Profile
               </Button>
             </div>
           </div>

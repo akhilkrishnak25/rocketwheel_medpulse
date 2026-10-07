@@ -11,4 +11,7 @@ router.post('/report', authenticate, UploadController.uploadReportPdf);
 router.post('/profile-photo', authenticate, UploadController.uploadProfilePhoto);
 router.delete('/profile-photo', authenticate, UploadController.removeProfilePhoto);
 
+// Hospital logo / cover image branding uploads
+router.post('/hospital-asset', authenticate, UploadController.uploadHospitalAsset);
+
 export default router;

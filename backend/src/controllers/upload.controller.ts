@@ -172,9 +172,144 @@ export class UploadController {
         });
       }
 
+      // Automatically sync Hospital logo & image if user is Hospital Admin or Sub-Admin
+      if (req.user?.role === 'HOSPITAL_ADMIN' || req.user?.role === 'HOSPITAL_SUB_ADMIN') {
+        let hospitalId = req.user?.hospitalId;
+        if (!hospitalId) {
+          const adminRec = await prisma.hospitalAdmin.findFirst({ where: { userId } });
+          if (adminRec) hospitalId = adminRec.hospitalId;
+        }
+        if (!hospitalId) {
+          const subAdminRec = await prisma.hospitalSubAdmin.findFirst({ where: { userId } });
+          if (subAdminRec) hospitalId = subAdminRec.hospitalId;
+        }
+
+        if (hospitalId) {
+          await prisma.hospital.update({
+            where: { id: hospitalId },
+            data: {
+              logoUrl: url,
+              imageUrl: url,
+            },
+          });
+        }
+      }
+
       return successResponse(res, { url }, 'Profile photo updated successfully');
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to upload profile photo', 500);
+    }
+  }
+
+  static async uploadHospitalAsset(req: Request, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        return errorResponse(res, 'Authentication required', 401);
+      }
+
+      let hospitalId = req.user?.hospitalId;
+      if (!hospitalId) {
+        const adminRec = await prisma.hospitalAdmin.findFirst({ where: { userId } });
+        if (adminRec) hospitalId = adminRec.hospitalId;
+      }
+      if (!hospitalId) {
+        const subAdminRec = await prisma.hospitalSubAdmin.findFirst({ where: { userId } });
+        if (subAdminRec) hospitalId = subAdminRec.hospitalId;
+      }
+      if (!hospitalId && req.user?.role === 'SUPER_ADMIN') {
+        hospitalId = req.body.hospitalId;
+      }
+
+      if (!hospitalId) {
+        return errorResponse(res, 'Hospital not associated with this account', 403);
+      }
+
+      const { fileData, assetType = 'both' } = req.body;
+      if (!fileData) {
+        return errorResponse(res, 'Image data (base64) is required', 400);
+      }
+
+      let base64Content = fileData;
+      let extension = '.jpg';
+      let mimeType = 'image/jpeg';
+
+      if (typeof fileData === 'string' && fileData.startsWith('data:')) {
+        const matches = fileData.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
+        if (!matches || matches.length !== 3) {
+          return errorResponse(res, 'Invalid image data format. Must be PNG, JPEG, or WEBP.', 400);
+        }
+        let ext = matches[1].toLowerCase();
+        if (ext === 'jpeg') ext = 'jpg';
+        if (!['jpg', 'png', 'webp', 'svg'].includes(ext)) {
+          return errorResponse(res, 'Only JPG, PNG, and WEBP images are supported', 400);
+        }
+        extension = `.${ext}`;
+        mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+        base64Content = matches[2];
+      }
+
+      const buffer = Buffer.from(base64Content, 'base64');
+      if (buffer.length > 8 * 1024 * 1024) {
+        return errorResponse(res, 'Hospital image size exceeds 8MB limit', 400);
+      }
+
+      const randomName = `hospital-${hospitalId}-${assetType}-${Date.now()}${extension}`;
+      const filePath = path.join(AVATARS_DIR, randomName);
+      try {
+        fs.writeFileSync(filePath, buffer);
+      } catch (writeErr) {
+        console.warn('Failed to write hospital image to disk:', writeErr);
+      }
+
+      const url = `/uploads/avatars/${randomName}`;
+
+      // Persist to StoredFile database
+      try {
+        await prisma.storedFile.upsert({
+          where: { path: url },
+          create: {
+            path: url,
+            filename: randomName,
+            mimeType,
+            fileData: base64Content,
+            size: buffer.length,
+          },
+          update: {
+            fileData: base64Content,
+            size: buffer.length,
+          },
+        });
+      } catch (dbErr) {
+        console.warn('Could not persist hospital asset to database:', dbErr);
+      }
+
+      const updateData: any = {};
+      if (assetType === 'logo') {
+        updateData.logoUrl = url;
+      } else if (assetType === 'cover') {
+        updateData.imageUrl = url;
+      } else {
+        updateData.logoUrl = url;
+        updateData.imageUrl = url;
+      }
+
+      const updated = await prisma.hospital.update({
+        where: { id: hospitalId },
+        data: updateData,
+      });
+
+      // Keep user avatar in sync if logo or both
+      if (assetType === 'logo' || assetType === 'both') {
+        await prisma.user.update({
+          where: { id: userId },
+          data: { avatarUrl: url },
+        });
+      }
+
+      return successResponse(res, { url, hospital: updated }, 'Hospital image updated successfully');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to upload hospital asset', 500);
     }
   }
 

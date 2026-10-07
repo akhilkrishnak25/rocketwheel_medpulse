@@ -131,4 +131,10 @@ export const uploadApi = {
       method: 'DELETE',
     });
   },
+  uploadHospitalAsset: async (fileData: string, assetType: 'logo' | 'cover' | 'both' = 'both', hospitalId?: string) => {
+    return apiClient<{ url: string; hospital: any }>('/upload/hospital-asset', {
+      method: 'POST',
+      body: JSON.stringify({ fileData, assetType, hospitalId }),
+    });
+  },
 };

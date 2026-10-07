@@ -753,13 +753,48 @@ export class AdminService {
 
   // Hospital Profile
   static async getHospitalProfile(hospitalId: string) {
-    return prisma.hospital.findUnique({
+    const hospital = await prisma.hospital.findUnique({
       where: { id: hospitalId },
       include: {
         departments: true,
+        hospitalAdmins: {
+          include: {
+            user: { select: { id: true, name: true, email: true, avatarUrl: true } },
+          },
+        },
         _count: { select: { doctors: true, appointments: true, departments: true } },
       },
     });
+
+    if (hospital) {
+      // Auto-sync: If hospital still has default Unsplash image/logo but admin has uploaded a custom avatar
+      const adminWithAvatar = hospital.hospitalAdmins?.find(
+        (ha: any) => ha.user?.avatarUrl && ha.user.avatarUrl.startsWith('/uploads/')
+      );
+      if (adminWithAvatar?.user?.avatarUrl) {
+        const customUrl = adminWithAvatar.user.avatarUrl;
+        const isDefaultImage = !hospital.imageUrl || hospital.imageUrl.includes('unsplash.com');
+        const isDefaultLogo = !hospital.logoUrl || hospital.logoUrl.includes('unsplash.com');
+
+        if (isDefaultImage || isDefaultLogo) {
+          try {
+            const updated = await prisma.hospital.update({
+              where: { id: hospitalId },
+              data: {
+                ...(isDefaultImage ? { imageUrl: customUrl } : {}),
+                ...(isDefaultLogo ? { logoUrl: customUrl } : {}),
+              },
+            });
+            hospital.imageUrl = updated.imageUrl;
+            hospital.logoUrl = updated.logoUrl;
+          } catch (syncErr) {
+            console.warn('Could not auto-sync hospital image from admin avatar:', syncErr);
+          }
+        }
+      }
+    }
+
+    return hospital;
   }
 
   static async updateHospitalProfile(hospitalId: string, data: any, requestingUserId?: string) {
@@ -771,6 +806,9 @@ export class AdminService {
         ? JSON.stringify(data.facilities)
         : data.facilities
       : undefined;
+
+    const newLogo = data.logoUrl !== undefined ? data.logoUrl : existing.logoUrl;
+    const newImage = data.imageUrl !== undefined ? data.imageUrl : existing.imageUrl;
 
     const updated = await prisma.hospital.update({
       where: { id: hospitalId },
@@ -786,10 +824,22 @@ export class AdminService {
         openingHours: data.openingHours !== undefined ? data.openingHours : existing.openingHours,
         about: data.about !== undefined ? data.about : existing.about,
         facilities: facilitiesJson !== undefined ? facilitiesJson : existing.facilities,
-        logoUrl: data.logoUrl !== undefined ? data.logoUrl : existing.logoUrl,
-        imageUrl: data.imageUrl !== undefined ? data.imageUrl : existing.imageUrl,
+        logoUrl: newLogo,
+        imageUrl: newImage,
       },
     });
+
+    // Also sync admin user's avatar if logo or image was updated
+    if (requestingUserId && (data.logoUrl || data.imageUrl)) {
+      try {
+        await prisma.user.update({
+          where: { id: requestingUserId },
+          data: { avatarUrl: newLogo || newImage },
+        });
+      } catch (userErr) {
+        console.warn('Could not sync user avatar with hospital profile update:', userErr);
+      }
+    }
 
     await AuditService.log({
       userId: requestingUserId,

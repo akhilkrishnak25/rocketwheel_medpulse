@@ -26,6 +26,8 @@ export interface User {
     slug: string;
     code: string;
     status?: HospitalStatus;
+    logoUrl?: string;
+    imageUrl?: string;
   };
   doctor?: Doctor;
   hospitalSubAdmin?: HospitalSubAdmin;
