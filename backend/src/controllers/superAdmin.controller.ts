@@ -174,10 +174,20 @@ export class SuperAdminController {
   // -------------------------------------------------------------
   static async getAllLabs(req: Request, res: Response) {
     try {
-      const labs = await SuperAdminService.getAllLabs();
+      const { status } = req.query;
+      const labs = await SuperAdminService.getAllLabs(status as string);
       return successResponse(res, labs, 'All diagnostic laboratories retrieved');
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to fetch laboratories', 500);
+    }
+  }
+
+  static async getPendingLabs(req: Request, res: Response) {
+    try {
+      const labs = await SuperAdminService.getAllLabs('PENDING');
+      return successResponse(res, labs, 'Pending diagnostic laboratories retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch pending laboratories', 500);
     }
   }
 

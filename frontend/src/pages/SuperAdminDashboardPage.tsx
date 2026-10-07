@@ -24,6 +24,7 @@ import {
   FileSpreadsheet,
   Check,
   X,
+  RefreshCw,
 } from 'lucide-react';
 import { superAdminApi } from '../api/superAdmin.api';
 import { Button } from '../components/ui/Button';
@@ -99,6 +100,8 @@ export const SuperAdminDashboardPage: React.FC = () => {
   // Filters for other tabs
   const [doctorSearch, setDoctorSearch] = useState('');
   const [appointmentStatusFilter, setAppointmentStatusFilter] = useState('ALL');
+  const [labStatusFilter, setLabStatusFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('ALL');
+  const [labSearchQuery, setLabSearchQuery] = useState('');
 
   // Queries
   const { data: metrics, isLoading: metricsLoading } = useQuery({
@@ -163,11 +166,38 @@ export const SuperAdminDashboardPage: React.FC = () => {
     enabled: activeTab === 'analytics',
   });
 
-  // Independent Labs Query
-  const { data: pendingLabs, isLoading: pendingLabsLoading } = useQuery({
-    queryKey: ['super-admin-pending-labs'],
-    queryFn: () => superAdminApi.getPendingLabs(),
+  // Diagnostic Labs Query (All Labs with Status)
+  const {
+    data: allLabsData,
+    isLoading: labsLoading,
+    refetch: refetchLabs,
+    isFetching: labsFetching,
+  } = useQuery({
+    queryKey: ['super-admin-labs'],
+    queryFn: () => superAdminApi.getAllLabs(),
     enabled: activeTab === 'labs',
+    refetchInterval: 12000,
+  });
+
+  const labsList: any[] = allLabsData || [];
+  const pendingLabsCount = labsList.filter((l: any) => l.status === 'PENDING').length;
+  const approvedLabsCount = labsList.filter((l: any) => l.status === 'APPROVED' || l.status === 'ACTIVE').length;
+  const rejectedLabsCount = labsList.filter((l: any) => l.status === 'REJECTED').length;
+
+  const filteredLabs = labsList.filter((lab: any) => {
+    if (labStatusFilter === 'PENDING' && lab.status !== 'PENDING') return false;
+    if (labStatusFilter === 'APPROVED' && lab.status !== 'APPROVED' && lab.status !== 'ACTIVE') return false;
+    if (labStatusFilter === 'REJECTED' && lab.status !== 'REJECTED') return false;
+
+    if (labSearchQuery.trim()) {
+      const q = labSearchQuery.toLowerCase();
+      const matchName = lab.name?.toLowerCase().includes(q);
+      const matchCity = lab.city?.toLowerCase().includes(q);
+      const matchLicense = lab.licenseNumber?.toLowerCase().includes(q);
+      const matchEmail = lab.email?.toLowerCase().includes(q);
+      return Boolean(matchName || matchCity || matchLicense || matchEmail);
+    }
+    return true;
   });
 
   // Lab Approval & Rejection Mutations
@@ -175,6 +205,7 @@ export const SuperAdminDashboardPage: React.FC = () => {
     mutationFn: (id: string) => superAdminApi.approveLab(id),
     onSuccess: () => {
       toast.success('Lab Accredited', 'Diagnostic laboratory accreditation approved successfully');
+      queryClient.invalidateQueries({ queryKey: ['super-admin-labs'] });
       queryClient.invalidateQueries({ queryKey: ['super-admin-pending-labs'] });
     },
     onError: (err: any) => {
@@ -188,6 +219,7 @@ export const SuperAdminDashboardPage: React.FC = () => {
       toast.info('Lab Application Rejected', 'Diagnostic laboratory application has been rejected');
       setRejectingLab(null);
       setLabRejectReason('');
+      queryClient.invalidateQueries({ queryKey: ['super-admin-labs'] });
       queryClient.invalidateQueries({ queryKey: ['super-admin-pending-labs'] });
     },
     onError: (err: any) => {
@@ -450,9 +482,9 @@ export const SuperAdminDashboardPage: React.FC = () => {
           >
             <FlaskConical className="w-3.5 h-3.5 text-purple-600" />
             Labs Accreditation
-            {(pendingLabs || []).length > 0 && (
+            {pendingLabsCount > 0 && (
               <span className="bg-purple-600 text-white text-[10px] font-extrabold px-1.5 py-0.2 rounded-full">
-                {(pendingLabs || []).length}
+                {pendingLabsCount}
               </span>
             )}
           </button>
@@ -1337,20 +1369,109 @@ export const SuperAdminDashboardPage: React.FC = () => {
       {/* TAB 6: DIAGNOSTIC LABS ACCREDITATION & APPROVALS */}
       {activeTab === 'labs' && (
         <Card className="rounded-2xl border-slate-200 shadow-sm overflow-hidden">
-          <CardHeader className="p-5 border-b border-slate-100 flex flex-row items-center justify-between">
+          <CardHeader className="p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <CardTitle className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <FlaskConical className="w-4 h-4 text-purple-600" />
-                Diagnostic Laboratory Accreditation Requests
+                Diagnostic Laboratories Accreditation Oversight
               </CardTitle>
               <p className="text-xs text-slate-500 mt-0.5">
                 Review and approve independent laboratory networks seeking platform diagnostic authorization
               </p>
             </div>
-            <Badge variant="outline" className="text-xs">
-              {(pendingLabs || []).length} Pending
-            </Badge>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Filter Tabs */}
+              <div className="flex items-center bg-slate-100 p-1 rounded-xl text-xs">
+                <button
+                  type="button"
+                  onClick={() => setLabStatusFilter('ALL')}
+                  className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
+                    labStatusFilter === 'ALL'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  All ({labsList.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLabStatusFilter('PENDING')}
+                  className={`px-3 py-1.5 rounded-lg font-semibold transition-all flex items-center gap-1.5 ${
+                    labStatusFilter === 'PENDING'
+                      ? 'bg-white text-amber-700 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Pending ({pendingLabsCount})
+                  {pendingLabsCount > 0 && (
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLabStatusFilter('APPROVED')}
+                  className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
+                    labStatusFilter === 'APPROVED'
+                      ? 'bg-white text-emerald-700 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Accredited ({approvedLabsCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLabStatusFilter('REJECTED')}
+                  className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
+                    labStatusFilter === 'REJECTED'
+                      ? 'bg-white text-rose-700 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Rejected ({rejectedLabsCount})
+                </button>
+              </div>
+
+              {/* Refresh Button */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetchLabs()}
+                disabled={labsFetching}
+                className="text-xs"
+                title="Refresh Laboratories"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 mr-1 ${labsFetching ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </div>
           </CardHeader>
+
+          {/* Search Bar */}
+          <div className="p-3.5 bg-slate-50/70 border-b border-slate-100 flex items-center justify-between gap-3">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search labs by name, city, license..."
+                value={labSearchQuery}
+                onChange={(e) => setLabSearchQuery(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-purple-500"
+              />
+            </div>
+            {labSearchQuery && (
+              <button
+                type="button"
+                onClick={() => setLabSearchQuery('')}
+                className="text-xs text-slate-500 hover:text-slate-700 underline"
+              >
+                Clear Search
+              </button>
+            )}
+            <div className="text-[11px] text-slate-400 font-medium">
+              Showing {filteredLabs.length} of {labsList.length} laboratories
+            </div>
+          </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
@@ -1361,70 +1482,132 @@ export const SuperAdminDashboardPage: React.FC = () => {
                   <th className="px-5 py-3">Type</th>
                   <th className="px-5 py-3">Contact</th>
                   <th className="px-5 py-3">Location</th>
+                  <th className="px-5 py-3 text-center">Status</th>
                   <th className="px-5 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
-                {pendingLabsLoading ? (
+                {labsLoading ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-8 text-slate-400">
-                      Loading pending laboratory applications...
+                    <td colSpan={7} className="text-center py-8 text-slate-400">
+                      Loading diagnostic laboratories...
                     </td>
                   </tr>
-                ) : (pendingLabs || []).length === 0 ? (
+                ) : filteredLabs.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-12 text-slate-400">
+                    <td colSpan={7} className="text-center py-12 text-slate-400">
                       <FlaskConical className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                      No pending diagnostic laboratory applications awaiting approval.
+                      {labSearchQuery
+                        ? `No laboratories matching "${labSearchQuery}"`
+                        : labStatusFilter === 'PENDING'
+                        ? 'No pending diagnostic laboratory applications awaiting approval.'
+                        : 'No laboratories found matching the selected filter.'}
                     </td>
                   </tr>
                 ) : (
-                  (pendingLabs || []).map((lab: any) => (
-                    <tr key={lab.id} className="hover:bg-slate-50">
-                      <td className="px-5 py-3.5">
-                        <div className="font-bold text-slate-900">{lab.name}</div>
-                        <div className="text-[11px] text-slate-400">
-                          Applied: {new Date(lab.createdAt).toLocaleDateString()}
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5 font-mono text-[11px] text-slate-600">
-                        {lab.licenseNumber || 'Under Review'}
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <Badge
-                          variant={lab.type === 'INDEPENDENT' ? 'primary' : 'outline'}
-                          className="text-[10px]"
-                        >
-                          {lab.type}
-                        </Badge>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <div className="font-medium text-slate-800">{lab.email}</div>
-                        <div className="text-slate-400 text-[11px]">{lab.phone}</div>
-                      </td>
-                      <td className="px-5 py-3.5 text-slate-600">
-                        {lab.city}, {lab.state}
-                      </td>
-                      <td className="px-5 py-3.5 text-right space-x-2">
-                        <Button
-                          size="sm"
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
-                          onClick={() => approveLabMutation.mutate(lab.id)}
-                          isLoading={approveLabMutation.isPending}
-                        >
-                          <Check className="w-3.5 h-3.5 mr-1" /> Approve
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-rose-600 hover:bg-rose-50 border-rose-200 text-xs"
-                          onClick={() => setRejectingLab(lab)}
-                        >
-                          <X className="w-3.5 h-3.5 mr-1" /> Reject
-                        </Button>
-                      </td>
-                    </tr>
-                  ))
+                  filteredLabs.map((lab: any) => {
+                    const isPending = lab.status === 'PENDING';
+                    const isApproved = lab.status === 'APPROVED' || lab.status === 'ACTIVE';
+                    const isRejected = lab.status === 'REJECTED';
+
+                    return (
+                      <tr key={lab.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-5 py-3.5">
+                          <div className="font-bold text-slate-900">{lab.name}</div>
+                          <div className="text-[11px] text-slate-400">
+                            Applied: {new Date(lab.createdAt).toLocaleDateString()}
+                          </div>
+                          {lab.hospital && (
+                            <div className="text-[11px] text-royal-600 font-medium">
+                              Linked: {lab.hospital.name} ({lab.hospital.code})
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-5 py-3.5 font-mono text-[11px] text-slate-600">
+                          {lab.licenseNumber || 'Under Review'}
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <Badge
+                            variant={lab.type === 'INDEPENDENT' ? 'primary' : 'outline'}
+                            className="text-[10px]"
+                          >
+                            {lab.type}
+                          </Badge>
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <div className="font-medium text-slate-800">{lab.email}</div>
+                          <div className="text-slate-400 text-[11px]">{lab.phone}</div>
+                        </td>
+                        <td className="px-5 py-3.5 text-slate-600">
+                          {lab.city || '—'}, {lab.state || '—'}
+                        </td>
+                        <td className="px-5 py-3.5 text-center">
+                          {isApproved ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              Accredited
+                            </span>
+                          ) : isPending ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
+                              <Clock className="w-3.5 h-3.5 text-amber-600" />
+                              Pending Review
+                            </span>
+                          ) : isRejected ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-0.5 rounded-full">
+                              <X className="w-3.5 h-3.5 text-rose-600" />
+                              Rejected
+                            </span>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px]">
+                              {lab.status}
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="px-5 py-3.5 text-right space-x-2">
+                          {isPending && (
+                            <>
+                              <Button
+                                size="sm"
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                                onClick={() => approveLabMutation.mutate(lab.id)}
+                                isLoading={approveLabMutation.isPending}
+                              >
+                                <Check className="w-3.5 h-3.5 mr-1" /> Approve
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-rose-600 hover:bg-rose-50 border-rose-200 text-xs"
+                                onClick={() => setRejectingLab(lab)}
+                              >
+                                <X className="w-3.5 h-3.5 mr-1" /> Reject
+                              </Button>
+                            </>
+                          )}
+                          {isApproved && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-rose-600 hover:bg-rose-50 border-rose-200 text-xs"
+                              onClick={() => setRejectingLab(lab)}
+                            >
+                              Revoke / Reject
+                            </Button>
+                          )}
+                          {isRejected && (
+                            <Button
+                              size="sm"
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                              onClick={() => approveLabMutation.mutate(lab.id)}
+                              isLoading={approveLabMutation.isPending}
+                            >
+                              <Check className="w-3.5 h-3.5 mr-1" /> Re-Approve
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

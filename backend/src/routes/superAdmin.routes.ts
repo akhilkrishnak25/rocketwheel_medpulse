@@ -30,6 +30,7 @@ router.get('/appointments', SuperAdminController.getAllAppointments);
 
 // Lab Accreditation & Approvals
 router.get('/labs', SuperAdminController.getAllLabs);
+router.get('/pending-labs', SuperAdminController.getPendingLabs);
 router.patch('/labs/:id/approve', SuperAdminController.approveLab);
 router.patch('/labs/:id/reject', SuperAdminController.rejectLab);
 

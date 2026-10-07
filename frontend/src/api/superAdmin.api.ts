@@ -34,8 +34,8 @@ export const superAdminApi = {
   getAuditLogs: (limit?: number) => api.get<any[]>(`/super-admin/audit-logs${limit ? `?limit=${limit}` : ''}`),
 
   // Lab Accreditations & Approvals
-  getAllLabs: () => api.get<any[]>('/super-admin/labs'),
-  getPendingLabs: () => api.get<any[]>('/super-admin/labs'),
+  getAllLabs: (status?: string) => api.get<any[]>(`/super-admin/labs${status ? `?status=${status}` : ''}`),
+  getPendingLabs: () => api.get<any[]>('/super-admin/labs?status=PENDING'),
   approveLab: (id: string) => api.patch<any>(`/super-admin/labs/${id}/approve`, {}),
   rejectLab: (id: string, reason?: string) => api.patch<any>(`/super-admin/labs/${id}/reject`, { reason }),
 

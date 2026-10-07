@@ -512,8 +512,9 @@ export class SuperAdminService {
   // -------------------------------------------------------------
   // LAB ACCREDITATION & APPROVAL MANAGEMENT
   // -------------------------------------------------------------
-  static async getAllLabs() {
+  static async getAllLabs(status?: string) {
     return prisma.lab.findMany({
+      where: status ? { status: status as any } : undefined,
       include: {
         hospital: { select: { id: true, name: true, code: true } },
         technicians: {
