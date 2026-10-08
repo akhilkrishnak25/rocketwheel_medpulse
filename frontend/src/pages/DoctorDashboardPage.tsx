@@ -29,6 +29,9 @@ import {
   Square,
   Camera,
   UserCheck,
+  Printer,
+  Calendar,
+  CalendarDays,
 } from 'lucide-react';
 import { doctorDashboardApi } from '../api/doctor.api';
 import { labApi } from '../api/lab.api';
@@ -127,11 +130,27 @@ export const DoctorDashboardPage: React.FC = () => {
   const [leaveEnd, setLeaveEnd] = useState('');
   const [leaveReason, setLeaveReason] = useState('');
 
-  // Fetch today's appointments for this doctor
+  // Date filtering for OP bookings (Doctor can view OPs booked for today, tomorrow, or next days)
+  const [selectedDateFilter, setSelectedDateFilter] = useState<'TODAY' | 'TOMORROW' | 'NEXT_DAYS' | 'CUSTOM'>('TODAY');
+  const [customDate, setCustomDate] = useState<string>('');
+
+  const effectiveDateParam =
+    selectedDateFilter === 'CUSTOM'
+      ? customDate || undefined
+      : selectedDateFilter;
+
+  // Fetch appointments for this doctor (Today or Next Days)
   const { data: appointments, isLoading, refetch } = useQuery({
-    queryKey: ['doctor-queue'],
-    queryFn: () => doctorDashboardApi.getAppointments(),
+    queryKey: ['doctor-queue', effectiveDateParam],
+    queryFn: () => doctorDashboardApi.getAppointments(effectiveDateParam),
     refetchInterval: 8000,
+  });
+
+  // Query upcoming appointments count for next days
+  const { data: upcomingAppointments } = useQuery({
+    queryKey: ['doctor-queue-upcoming-count'],
+    queryFn: () => doctorDashboardApi.getAppointments('NEXT_DAYS'),
+    refetchInterval: 20000,
   });
 
   // Immediate popup/toast notifications when new patients arrive in queue or vitals ready (Requirement 13)
@@ -529,6 +548,31 @@ export const DoctorDashboardPage: React.FC = () => {
     }
   };
 
+  // Print Clinical Consultation PDF with 2-inch top margin for Hospital Letterhead
+  const handlePrintConsultationPdf = async (appointmentId: string) => {
+    try {
+      setIsDownloadingPdf(true);
+      toast.info('Preparing Print Document', 'Generating consultation document with 2-inch hospital letterhead space...');
+      const blob = await doctorDashboardApi.downloadConsultationPdf(appointmentId);
+      const url = window.URL.createObjectURL(blob);
+      const printWindow = window.open(url, '_blank');
+      if (!printWindow) {
+        // Fall back to opening direct link
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+      toast.success('Print Document Ready', 'Consultation document opened. Ready to print on hospital letterhead.');
+    } catch (err: any) {
+      toast.error('Print Failed', err.message || 'Could not prepare print document');
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
+
   // Profile Photo Upload & Remove (Requirement 20)
   const handleProfilePhotoUpload = async (file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -795,21 +839,117 @@ export const DoctorDashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* TODAY'S OPD QUEUE */}
+      {/* OPD QUEUE & UPCOMING BOOKINGS */}
       <Card className="rounded-2xl border-slate-200 shadow-sm overflow-hidden">
-        <CardHeader className="bg-slate-50/80 p-5 flex items-center justify-between">
+        {/* Date Filter & View Selector Banner */}
+        <div className="bg-white border-b border-slate-200 p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                Schedule View:
+              </span>
+              <div className="flex flex-wrap items-center bg-slate-100 p-1 rounded-xl text-xs font-bold gap-1">
+                <button
+                  type="button"
+                  onClick={() => setSelectedDateFilter('TODAY')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                    selectedDateFilter === 'TODAY'
+                      ? 'bg-royal-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Today's OPs
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedDateFilter('TOMORROW')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                    selectedDateFilter === 'TOMORROW'
+                      ? 'bg-royal-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Tomorrow
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedDateFilter('NEXT_DAYS')}
+                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                    selectedDateFilter === 'NEXT_DAYS'
+                      ? 'bg-royal-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span>Next Days (All Upcoming)</span>
+                  {(upcomingAppointments?.length || 0) > 0 && (
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                        selectedDateFilter === 'NEXT_DAYS'
+                          ? 'bg-white text-royal-700'
+                          : 'bg-royal-100 text-royal-700'
+                      }`}
+                    >
+                      {upcomingAppointments?.length}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs">
+              <Calendar className="w-3.5 h-3.5 text-royal-600" />
+              <span className="text-slate-500 font-medium">Select Date:</span>
+              <input
+                type="date"
+                value={selectedDateFilter === 'CUSTOM' ? customDate : ''}
+                onChange={(e) => {
+                  setCustomDate(e.target.value);
+                  setSelectedDateFilter('CUSTOM');
+                }}
+                className="bg-transparent text-slate-800 font-bold focus:outline-none cursor-pointer text-xs"
+              />
+            </div>
+            {selectedDateFilter !== 'TODAY' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedDateFilter('TODAY')}
+                className="text-xs text-royal-600 hover:text-royal-800 hover:bg-royal-50 font-bold"
+              >
+                Reset to Today
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Card Header displaying title and counts */}
+        <CardHeader className="bg-slate-50/80 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200">
           <CardTitle className="text-sm font-bold text-slate-900 flex items-center gap-2">
             <Users className="w-4 h-4 text-royal-600" />
-            Today's OPD Queue ({(appointments || []).length} Total Booked)
+            {selectedDateFilter === 'TODAY' && `Today's OPD Queue (${(appointments || []).length} Total Booked)`}
+            {selectedDateFilter === 'TOMORROW' && `Tomorrow's Booked OPs (${(appointments || []).length} Scheduled)`}
+            {selectedDateFilter === 'NEXT_DAYS' && `Upcoming OP Bookings for Next Days (${(appointments || []).length} Scheduled)`}
+            {selectedDateFilter === 'CUSTOM' && `Booked OPs for ${customDate} (${(appointments || []).length} Scheduled)`}
           </CardTitle>
+
           <div className="flex gap-2 text-xs font-semibold">
-            <span className="text-royal-700">
-              {(appointments || []).filter((a) => a.status === 'COMPLETED').length} Completed
-            </span>
-            <span>•</span>
-            <span className="text-gold-600">
-              {(appointments || []).filter((a) => a.status === 'WAITING' || a.status === 'CONFIRMED').length} Waiting
-            </span>
+            {selectedDateFilter === 'TODAY' ? (
+              <>
+                <span className="text-royal-700">
+                  {(appointments || []).filter((a) => a.status === 'COMPLETED').length} Completed
+                </span>
+                <span>•</span>
+                <span className="text-gold-600">
+                  {(appointments || []).filter((a) => a.status === 'WAITING' || a.status === 'CONFIRMED').length} Waiting
+                </span>
+              </>
+            ) : (
+              <Badge variant="purple" className="text-[11px] font-bold">
+                Upcoming Pre-Booked Tokens
+              </Badge>
+            )}
           </div>
         </CardHeader>
 
@@ -818,6 +958,9 @@ export const DoctorDashboardPage: React.FC = () => {
             <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
               <tr>
                 <th className="px-5 py-3.5">Token</th>
+                {selectedDateFilter !== 'TODAY' && (
+                  <th className="px-5 py-3.5">Scheduled Date</th>
+                )}
                 <th className="px-5 py-3.5">Patient Details</th>
                 <th className="px-5 py-3.5">Slot Time</th>
                 <th className="px-5 py-3.5">OP Number</th>
@@ -828,14 +971,18 @@ export const DoctorDashboardPage: React.FC = () => {
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-10 text-slate-400">
+                  <td colSpan={selectedDateFilter !== 'TODAY' ? 7 : 6} className="text-center py-10 text-slate-400">
                     Loading doctor queue...
                   </td>
                 </tr>
               ) : !appointments || appointments.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-12 text-slate-400">
-                    No appointments booked for today.
+                  <td colSpan={selectedDateFilter !== 'TODAY' ? 7 : 6} className="text-center py-12 text-slate-400">
+                    {selectedDateFilter === 'TODAY'
+                      ? 'No appointments booked for today.'
+                      : selectedDateFilter === 'TOMORROW'
+                      ? 'No appointments booked for tomorrow.'
+                      : 'No upcoming appointments booked for selected period.'}
                   </td>
                 </tr>
               ) : (
@@ -844,6 +991,14 @@ export const DoctorDashboardPage: React.FC = () => {
                     <td className="px-5 py-4 font-black text-slate-900 text-base">
                       #{String(apt.tokenNumber).padStart(2, '0')}
                     </td>
+                    {selectedDateFilter !== 'TODAY' && (
+                      <td className="px-5 py-4 font-bold text-royal-700 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-royal-500" />
+                          <span>{apt.appointmentDate}</span>
+                        </div>
+                      </td>
+                    )}
                     <td className="px-5 py-4">
                       <div className="font-bold text-slate-900">{apt.patient.fullName}</div>
                       <div className="text-[11px] text-slate-500">
@@ -890,21 +1045,44 @@ export const DoctorDashboardPage: React.FC = () => {
                       )}
 
                       {(apt.status === 'CONFIRMED' || apt.status === 'WAITING') && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-xs text-royal-700 bg-royal-50 border-royal-200 hover:bg-royal-100 font-bold"
-                          onClick={() => startMutation.mutate(apt.id)}
-                        >
-                          <Play className="w-3.5 h-3.5 mr-1" /> Call Patient
-                        </Button>
+                        selectedDateFilter === 'TODAY' ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-xs text-royal-700 bg-royal-50 border-royal-200 hover:bg-royal-100 font-bold"
+                            onClick={() => startMutation.mutate(apt.id)}
+                          >
+                            <Play className="w-3.5 h-3.5 mr-1" /> Call Patient
+                          </Button>
+                        ) : (
+                          <div className="flex items-center justify-end gap-1.5">
+                            <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">
+                              Scheduled
+                            </span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-xs text-royal-700 hover:bg-royal-50 font-bold"
+                              onClick={() => handleOpenConsultModal(apt)}
+                              title="Pre-consultation Workspace"
+                            >
+                              <FileText className="w-3 h-3 mr-1" /> View Details
+                            </Button>
+                          </div>
+                        )
                       )}
 
                       {apt.status === 'COMPLETED' && (
-                        <div className="flex items-center justify-end gap-2">
-                          <span className="text-emerald-700 font-semibold text-xs flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5" /> Rx Issued
-                          </span>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handlePrintConsultationPdf(apt.id)}
+                            className="text-xs border-royal-200 text-royal-700 hover:bg-royal-50 font-bold"
+                            title="Print on Hospital Letterhead Paper"
+                          >
+                            <Printer className="w-3.5 h-3.5 mr-1" /> Print Rx
+                          </Button>
                           <Button
                             size="sm"
                             variant="outline"
@@ -2041,16 +2219,29 @@ export const DoctorDashboardPage: React.FC = () => {
 
             {/* Actions (Requirement 13 & 12) */}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-100">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => handleDownloadConsultationPdf(activeAppointment.id, activeAppointment.patient.fullName)}
-                isLoading={isDownloadingPdf}
-                className="border-royal-300 text-royal-700 hover:bg-royal-50 font-bold"
-              >
-                <Download className="w-3.5 h-3.5 mr-1.5" /> Download Clinical Consultation
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePrintConsultationPdf(activeAppointment.id)}
+                  isLoading={isDownloadingPdf}
+                  className="border-royal-300 text-royal-700 hover:bg-royal-50 font-bold"
+                  title="Print on Hospital Letterhead Paper (with 2-inch top margin)"
+                >
+                  <Printer className="w-3.5 h-3.5 mr-1.5" /> Print Rx (Letterhead)
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleDownloadConsultationPdf(activeAppointment.id, activeAppointment.patient.fullName)}
+                  isLoading={isDownloadingPdf}
+                  className="border-slate-300 text-slate-700 hover:bg-slate-50 font-bold"
+                >
+                  <Download className="w-3.5 h-3.5 mr-1.5" /> Download PDF
+                </Button>
+              </div>
 
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setIsConsultModalOpen(false)}>

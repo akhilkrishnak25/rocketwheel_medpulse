@@ -6,12 +6,34 @@ import { generateClinicalConsultationPdf } from '../utils/pdf';
 
 export class DoctorDashboardService {
   static async getDoctorAppointments(doctorId: string, date?: string) {
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const today = new Date().toISOString().split('T')[0];
+    let dateFilter: any = today;
+    let orderClause: any = { tokenNumber: 'asc' };
+
+    if (!date || date.toUpperCase() === 'TODAY') {
+      dateFilter = today;
+      orderClause = { tokenNumber: 'asc' };
+    } else if (date.toUpperCase() === 'TOMORROW') {
+      const tom = new Date();
+      tom.setDate(tom.getDate() + 1);
+      dateFilter = tom.toISOString().split('T')[0];
+      orderClause = { tokenNumber: 'asc' };
+    } else if (date.toUpperCase() === 'UPCOMING' || date.toUpperCase() === 'NEXT_DAYS') {
+      // All future days from tomorrow onwards
+      dateFilter = { gt: today };
+      orderClause = [{ appointmentDate: 'asc' }, { tokenNumber: 'asc' }];
+    } else if (date.toUpperCase() === 'ALL_FUTURE') {
+      dateFilter = { gte: today };
+      orderClause = [{ appointmentDate: 'asc' }, { tokenNumber: 'asc' }];
+    } else {
+      dateFilter = date;
+      orderClause = { tokenNumber: 'asc' };
+    }
 
     return prisma.appointment.findMany({
       where: {
         doctorId,
-        appointmentDate: targetDate,
+        appointmentDate: dateFilter,
         status: { in: ['CONFIRMED', 'WAITING', 'IN_CONSULTATION', 'COMPLETED', 'NO_SHOW', 'CANCELLED'] },
       },
       include: {
@@ -35,7 +57,7 @@ export class DoctorDashboardService {
           include: { lab: true, report: true },
         },
       },
-      orderBy: { tokenNumber: 'asc' },
+      orderBy: orderClause,
     });
   }
 

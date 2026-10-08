@@ -292,31 +292,11 @@ export const generateClinicalConsultationPdf = async (data: ClinicalConsultation
         resolve(Buffer.concat(buffers));
       });
 
-      // Header Accent Bars
-      doc.rect(40, 35, 360, 5).fill('#1E20E0');
-      doc.rect(400, 35, 155, 5).fill('#FF1D6B');
-
-      // Hospital Details
-      doc.fillColor('#1E20E0').fontSize(18).font('Helvetica-Bold')
-         .text(data.hospital.name, 40, 48, { width: 360 });
-      doc.fillColor('#64748b').fontSize(8.5).font('Helvetica')
-         .text(`${data.hospital.address}, ${data.hospital.city}`, 40, 70, { width: 360 })
-         .text(`Phone: ${data.hospital.phone} ${data.hospital.email ? '| Email: ' + data.hospital.email : ''}`, 40, 82, { width: 360 });
-
-      // Badge
-      doc.roundedRect(390, 48, 165, 42, 4).fill('#eff6ff');
-      doc.roundedRect(390, 48, 165, 42, 4).strokeColor('#1E20E0').stroke();
-      doc.fillColor('#1E20E0').fontSize(9).font('Helvetica-Bold')
-         .text('CLINICAL CONSULTATION & Rx', 390, 55, { width: 165, align: 'center' });
-      doc.fillColor('#475569').fontSize(8).font('Helvetica')
-         .text(`Date: ${data.consultationDate}`, 390, 68, { width: 165, align: 'center' })
-         .text(`OP Ref: #${data.appointmentNumber}`, 390, 78, { width: 165, align: 'center' });
-
-      // Divider
-      doc.moveTo(40, 100).lineTo(555, 100).strokeColor('#cbd5e1').stroke();
+      // 2 inches (144 points) space at the top reserved for Hospital Letterhead
+      // Content from old header (hospital name, address, CLINICAL CONSULTATION badge) is omitted
+      const infoTop = 144;
 
       // Two Column: Doctor & Patient Summary
-      const infoTop = 108;
       doc.roundedRect(40, infoTop, 250, 68, 4).fill('#f8fafc');
       doc.roundedRect(40, infoTop, 250, 68, 4).strokeColor('#e2e8f0').stroke();
 
