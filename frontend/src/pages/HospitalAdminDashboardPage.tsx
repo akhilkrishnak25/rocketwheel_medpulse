@@ -1488,6 +1488,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                         <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
                           {apt.status === 'CONFIRMED' && (
                             <Button
+                              variant="outline"
                               size="sm"
                               className="text-xs px-2.5 py-1 text-royal-700 bg-royal-50 border border-royal-200 hover:bg-royal-100 font-bold rounded-lg shadow-2xs"
                               onClick={() =>
@@ -1500,6 +1501,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
 
                           {apt.status === 'WAITING' && (
                             <Button
+                              variant="outline"
                               size="sm"
                               className="text-xs px-2.5 py-1 text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 font-bold rounded-lg shadow-2xs"
                               onClick={() =>
@@ -1525,6 +1527,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
 
                           {apt.status !== 'COMPLETED' && apt.status !== 'CANCELLED' && (
                             <Button
+                              variant="outline"
                               size="sm"
                               className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-300 hover:bg-rose-100 hover:border-rose-400 px-2.5 py-1 rounded-lg shadow-2xs"
                               onClick={() => {
@@ -1685,6 +1688,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                           <CheckCircle className="w-3.5 h-3.5 mr-1" /> Approve
                         </Button>
                         <Button
+                          variant="outline"
                           size="sm"
                           className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-300 hover:bg-rose-100 hover:border-rose-400 py-1.5 shadow-2xs"
                           onClick={() => {
@@ -1818,6 +1822,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                                 <CheckCircle className="w-3.5 h-3.5 mr-1" /> Approve
                               </Button>
                               <Button
+                                variant="outline"
                                 size="sm"
                                 className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-300 hover:bg-rose-100 hover:border-rose-400 shadow-2xs"
                                 onClick={() => {
@@ -2105,6 +2110,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                               <Check className="w-3 h-3 mr-1" /> Approve
                             </Button>
                             <Button
+                              variant="outline"
                               size="sm"
                               className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-300 hover:bg-rose-100 hover:border-rose-400 shadow-2xs"
                               onClick={() => rejectStaffMutation.mutate(staff.id)}

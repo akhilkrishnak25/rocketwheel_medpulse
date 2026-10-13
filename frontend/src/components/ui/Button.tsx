@@ -23,9 +23,9 @@ export const Button: React.FC<ButtonProps> = ({
 
   const variants = {
     primary:
-      'bg-royal-600 !text-white text-white hover:bg-royal-700 focus:ring-royal-500 shadow-sm active:bg-royal-800 font-bold',
+      'bg-royal-600 text-white hover:bg-royal-700 focus:ring-royal-500 shadow-sm active:bg-royal-800 font-bold',
     pink:
-      'bg-[#FF1D6B] !text-white text-white hover:bg-[#e1145a] focus:ring-pink-500 shadow-sm active:bg-[#be0c47] font-bold',
+      'bg-[#FF1D6B] text-white hover:bg-[#e1145a] focus:ring-pink-500 shadow-sm active:bg-[#be0c47] font-bold',
     gold:
       'bg-[#FBA94C] text-slate-950 font-bold hover:bg-[#f59e0b] focus:ring-amber-400 shadow-sm',
     secondary:
@@ -35,9 +35,9 @@ export const Button: React.FC<ButtonProps> = ({
     ghost:
       'text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus:ring-slate-300 font-semibold',
     danger:
-      'bg-rose-600 !text-white text-white hover:bg-rose-700 focus:ring-rose-500 shadow-sm font-bold',
+      'bg-rose-600 text-white hover:bg-rose-700 focus:ring-rose-500 shadow-sm font-bold',
     success:
-      'bg-emerald-600 !text-white text-white hover:bg-emerald-700 focus:ring-emerald-500 shadow-sm font-bold',
+      'bg-emerald-600 text-white hover:bg-emerald-700 focus:ring-emerald-500 shadow-sm font-bold',
   };
 
   const sizes = {
@@ -46,17 +46,12 @@ export const Button: React.FC<ButtonProps> = ({
     lg: 'text-base px-6 py-2.5 gap-2.5',
   };
 
-  const isLightTextVariant = variant === 'primary' || variant === 'pink' || variant === 'danger' || variant === 'success';
-
   return (
     <button
       type={type}
       className={twMerge(clsx(baseStyles, variants[variant], sizes[size], className))}
       disabled={disabled || isLoading}
-      style={{
-        color: isLightTextVariant ? '#ffffff' : undefined,
-        ...props.style,
-      }}
+      style={props.style}
       {...props}
     >
       {isLoading && (
@@ -81,7 +76,7 @@ export const Button: React.FC<ButtonProps> = ({
           ></path>
         </svg>
       )}
-      <span className="inline-flex items-center justify-center gap-2" style={{ color: 'inherit' }}>
+      <span className="inline-flex items-center justify-center gap-2">
         {children}
       </span>
     </button>

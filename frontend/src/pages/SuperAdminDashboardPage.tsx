@@ -725,6 +725,7 @@ export const SuperAdminDashboardPage: React.FC = () => {
                         {/* Action buttons */}
                         <div className="flex items-center gap-2 shrink-0">
                           <Button
+                            variant="outline"
                             size="sm"
                             onClick={() => {
                               setSelectedRejectHospital(h);
