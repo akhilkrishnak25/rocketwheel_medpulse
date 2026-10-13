@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import ExcelJS from 'exceljs';
+import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuditService } from '../utils/audit';
 import { NotificationService } from './notification.service';
@@ -9,6 +11,38 @@ export class DoctorDashboardService {
     const today = new Date().toISOString().split('T')[0];
     let dateFilter: any = today;
     let orderClause: any = { tokenNumber: 'asc' };
+    let statusFilterClause: any = { in: ['CONFIRMED', 'WAITING', 'IN_CONSULTATION', 'COMPLETED', 'NO_SHOW', 'CANCELLED'] };
+
+    if (date?.toUpperCase() === 'COMPLETED') {
+      return prisma.appointment.findMany({
+        where: {
+          doctorId,
+          status: 'COMPLETED',
+        },
+        include: {
+          patient: true,
+          department: true,
+          prescription: {
+            include: { pharmacy: true },
+          },
+          medicalRecord: true,
+          digitalOp: true,
+          assignedStaff: {
+            include: {
+              user: { select: { id: true, name: true, email: true, phone: true } },
+            },
+          },
+          vitals: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+          labRequests: {
+            include: { lab: true, report: true },
+          },
+        },
+        orderBy: [{ appointmentDate: 'desc' }, { tokenNumber: 'asc' }],
+      });
+    }
 
     if (!date || date.toUpperCase() === 'TODAY') {
       dateFilter = today;
@@ -25,6 +59,9 @@ export class DoctorDashboardService {
     } else if (date.toUpperCase() === 'ALL_FUTURE') {
       dateFilter = { gte: today };
       orderClause = [{ appointmentDate: 'asc' }, { tokenNumber: 'asc' }];
+    } else if (date.toUpperCase() === 'ALL') {
+      dateFilter = undefined;
+      orderClause = [{ appointmentDate: 'desc' }, { tokenNumber: 'asc' }];
     } else {
       dateFilter = date;
       orderClause = { tokenNumber: 'asc' };
@@ -33,8 +70,8 @@ export class DoctorDashboardService {
     return prisma.appointment.findMany({
       where: {
         doctorId,
-        appointmentDate: dateFilter,
-        status: { in: ['CONFIRMED', 'WAITING', 'IN_CONSULTATION', 'COMPLETED', 'NO_SHOW', 'CANCELLED'] },
+        ...(dateFilter ? { appointmentDate: dateFilter } : {}),
+        status: statusFilterClause,
       },
       include: {
         patient: true,
@@ -926,5 +963,324 @@ export class DoctorDashboardService {
     });
 
     return updated;
+  }
+
+  // -------------------------------------------------------------
+  // EXPORT ALL DOCTOR DATA TO EXCEL WORKBOOK (.xlsx)
+  // -------------------------------------------------------------
+  static async exportAllDoctorDataToExcel(doctorId: string, res: Response, filterStatus?: string) {
+    const doctor = await prisma.doctor.findUnique({
+      where: { id: doctorId },
+      include: {
+        hospital: { select: { id: true, name: true, code: true, city: true, state: true } },
+        department: { select: { id: true, name: true } },
+        user: { select: { id: true, name: true, email: true, phone: true } },
+        assignedStaff: {
+          include: {
+            user: { select: { id: true, name: true, email: true, phone: true } },
+          },
+        },
+      },
+    });
+
+    if (!doctor) {
+      throw new Error('Doctor record not found');
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const aptWhere: any = { doctorId };
+    if (filterStatus && filterStatus !== 'ALL') {
+      aptWhere.status = filterStatus;
+    }
+
+    // Fetch all related doctor records
+    const [
+      appointments,
+      templates,
+      labRequests,
+      schedules,
+      leaves,
+    ] = await Promise.all([
+      prisma.appointment.findMany({
+        where: aptWhere,
+        include: {
+          patient: true,
+          department: true,
+          vitals: { orderBy: { createdAt: 'desc' }, take: 1 },
+          prescription: true,
+          assignedStaff: { include: { user: { select: { name: true, phone: true } } } },
+          payment: { select: { status: true, paymentMethod: true } },
+        },
+        orderBy: [{ appointmentDate: 'desc' }, { tokenNumber: 'asc' }],
+      }),
+      prisma.prescriptionTemplate.findMany({
+        where: { doctorId },
+        orderBy: { diseaseName: 'asc' },
+      }),
+      prisma.labTestRequest.findMany({
+        where: { doctorId },
+        include: {
+          patient: true,
+          report: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.doctorSchedule.findMany({
+        where: { doctorId },
+        orderBy: { dayOfWeek: 'asc' },
+      }),
+      prisma.doctorLeave.findMany({
+        where: { doctorId },
+        orderBy: { startDate: 'desc' },
+      }),
+    ]);
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'RocketWheel MedPulse Platform';
+    workbook.created = new Date();
+
+    const applyHeaderStyle = (row: ExcelJS.Row, bgArgb = 'FF0F766E') => {
+      row.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+      row.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: bgArgb },
+      };
+      row.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      row.height = 26;
+    };
+
+    // -------------------------------------------------------------
+    // SHEET 1: DOCTOR SUMMARY & METRICS
+    // -------------------------------------------------------------
+    const summarySheet = workbook.addWorksheet('Overview & Summary');
+    summarySheet.columns = [
+      { header: 'Profile Field / Metric', key: 'metric', width: 35 },
+      { header: 'Details / Current Value', key: 'value', width: 45 },
+    ];
+    applyHeaderStyle(summarySheet.getRow(1), 'FF1E40AF');
+
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    const summaryRows = [
+      { metric: 'Doctor Full Name', value: doctor.user?.name || doctor.name },
+      { metric: 'Clinical Specialization', value: doctor.specialization },
+      { metric: 'Medical Qualifications', value: doctor.qualification },
+      { metric: 'Hospital Facility', value: doctor.hospital?.name || 'N/A' },
+      { metric: 'Department', value: doctor.department?.name || 'N/A' },
+      { metric: 'Consultation Fee (INR)', value: `₹${doctor.consultationFee}` },
+      { metric: 'Experience', value: `${doctor.experienceYears} Years` },
+      { metric: 'Working Hours', value: `${doctor.workingHoursStart} - ${doctor.workingHoursEnd} (${doctor.slotDurationMinutes}m slots)` },
+      { metric: 'Designated Support Staff (Nurse)', value: doctor.assignedStaff?.user?.name || 'Hospital General Pool' },
+      { metric: 'Doctor Contact Email', value: doctor.user?.email || 'N/A' },
+      { metric: 'Doctor Contact Phone', value: doctor.user?.phone ? `+91 ${doctor.user.phone}` : 'N/A' },
+      { metric: '--- DATA TOTALS ---', value: '------------------------' },
+      { metric: 'Total Patient Records on File', value: appointments.length },
+      { metric: 'Today\'s Patient Queue', value: appointments.filter((a) => a.appointmentDate === today).length },
+      { metric: 'Completed Consultations', value: appointments.filter((a) => a.status === 'COMPLETED').length },
+      { metric: 'In Consultation / Waiting', value: appointments.filter((a) => ['WAITING', 'IN_CONSULTATION', 'CONFIRMED'].includes(a.status)).length },
+      { metric: 'Cancelled Appointments', value: appointments.filter((a) => a.status === 'CANCELLED').length },
+      { metric: 'Disease Prescription Templates', value: templates.length },
+      { metric: 'Diagnostic Lab Requisitions', value: labRequests.length },
+      { metric: 'Active Duty Schedules', value: schedules.filter((s) => s.isAvailable).length },
+      { metric: 'Doctor Duty Leaves on Record', value: leaves.length },
+      { metric: 'Report Export Generated At', value: new Date().toLocaleString() },
+    ];
+
+    summaryRows.forEach((r) => summarySheet.addRow(r));
+
+    // -------------------------------------------------------------
+    // SHEET 2: ALL PATIENT QUEUE & APPOINTMENTS
+    // -------------------------------------------------------------
+    const queueSheet = workbook.addWorksheet(filterStatus === 'COMPLETED' ? 'Completed Consultations' : 'Patient Queue & Consultations');
+    queueSheet.columns = [
+      { header: 'Token #', key: 'tokenNumber', width: 10 },
+      { header: 'Booking ID', key: 'appointmentNumber', width: 20 },
+      { header: 'Date', key: 'appointmentDate', width: 14 },
+      { header: 'Time Slot', key: 'timeSlot', width: 16 },
+      { header: 'Patient UHID / ID', key: 'patientId', width: 18 },
+      { header: 'Patient Name', key: 'patientName', width: 22 },
+      { header: 'Age / Gender', key: 'demographics', width: 16 },
+      { header: 'Mobile Number', key: 'mobile', width: 16 },
+      { header: 'Queue Status', key: 'status', width: 16 },
+      { header: 'Booking Type', key: 'bookingType', width: 14 },
+      { header: 'Follow-up Date', key: 'followUpDate', width: 16 },
+      { header: 'Assigned Nurse', key: 'nurse', width: 20 },
+      { header: 'BP (mmHg)', key: 'bp', width: 14 },
+      { header: 'Pulse (bpm)', key: 'pulse', width: 12 },
+      { header: 'Temp (°F)', key: 'temp', width: 12 },
+      { header: 'SpO2 (%)', key: 'spo2', width: 12 },
+      { header: 'Weight (kg)', key: 'weight', width: 12 },
+      { header: 'Height (cm)', key: 'height', width: 12 },
+      { header: 'BMI', key: 'bmi', width: 10 },
+      { header: 'Fee (₹)', key: 'fee', width: 12 },
+      { header: 'Payment Status', key: 'paymentStatus', width: 16 },
+      { header: 'Clinical Diagnosis', key: 'diagnosis', width: 28 },
+      { header: 'Doctor Notes', key: 'notes', width: 28 },
+    ];
+    applyHeaderStyle(queueSheet.getRow(1), 'FF0D9488'); // Teal header
+
+    for (const apt of appointments) {
+      const v = apt.vitals?.[0];
+      const bmi = v?.weight && v?.height ? (v.weight / Math.pow(v.height / 100, 2)).toFixed(1) : 'N/A';
+      queueSheet.addRow({
+        tokenNumber: apt.tokenNumber,
+        appointmentNumber: apt.appointmentNumber,
+        appointmentDate: apt.appointmentDate,
+        timeSlot: apt.timeSlot,
+        patientId: apt.patient?.patientIdNumber || apt.patient?.id?.substring(0, 8) || 'N/A',
+        patientName: apt.patient?.fullName || 'N/A',
+        demographics: `${apt.patient?.gender || 'Unknown'}, ${apt.patient?.dateOfBirth ? Math.floor((Date.now() - new Date(apt.patient.dateOfBirth).getTime()) / (365.25 * 24 * 3600 * 1000)) + 'y' : 'N/A'}`,
+        mobile: apt.patient?.mobileNumber || 'N/A',
+        status: apt.status,
+        bookingType: apt.bookingType,
+        followUpDate: apt.prescription?.followUpDate || 'N/A',
+        nurse: apt.assignedStaff?.user?.name || doctor.assignedStaff?.user?.name || 'General Nursing Pool',
+        bp: v?.bloodPressure || (v?.bpSystolic && v?.bpDiastolic ? `${v.bpSystolic}/${v.bpDiastolic}` : 'N/A'),
+        pulse: v?.pulseRate ? `${v.pulseRate}` : 'N/A',
+        temp: v?.temperature ? `${v.temperature}°F` : 'N/A',
+        spo2: v?.spo2 ? `${v.spo2}%` : 'N/A',
+        weight: v?.weight ? `${v.weight} kg` : 'N/A',
+        height: v?.height ? `${v.height} cm` : 'N/A',
+        bmi,
+        fee: apt.consultationFee ?? apt.totalAmount ?? 0,
+        paymentStatus: apt.payment?.status || (apt.bookingType === 'OFFLINE' ? 'PAID_COUNTER' : 'PENDING'),
+        diagnosis: apt.prescription?.diagnosis || 'N/A',
+        notes: apt.prescription?.instructions || apt.notes || '',
+      });
+    }
+
+    // -------------------------------------------------------------
+    // SHEET 3: PRESCRIPTION DISEASE TEMPLATES
+    // -------------------------------------------------------------
+    const tmplSheet = workbook.addWorksheet('Prescription Templates');
+    tmplSheet.columns = [
+      { header: 'Template Disease Name', key: 'diseaseName', width: 28 },
+      { header: 'Medicines Count', key: 'medCount', width: 16 },
+      { header: 'Prescribed Medicines', key: 'medicinesList', width: 45 },
+      { header: 'Clinical Instructions', key: 'instructions', width: 35 },
+      { header: 'Diagnosis Note', key: 'diagnosis', width: 25 },
+      { header: 'Created Date', key: 'createdAt', width: 16 },
+    ];
+    applyHeaderStyle(tmplSheet.getRow(1), 'FF7C3AED'); // Purple header
+
+    for (const tmpl of templates) {
+      let meds: any[] = [];
+      try {
+        meds = typeof tmpl.medicines === 'string' ? JSON.parse(tmpl.medicines) : (tmpl.medicines || []);
+      } catch {
+        meds = [];
+      }
+      const medsFormatted = meds.map((m: any) => `${m.name || 'Medicine'} ${m.dosage || ''} (${m.frequency || ''}, ${m.duration || ''})`).join('; ');
+      tmplSheet.addRow({
+        diseaseName: tmpl.diseaseName,
+        medCount: meds.length,
+        medicinesList: medsFormatted || 'None',
+        instructions: tmpl.instructions || 'N/A',
+        diagnosis: tmpl.diagnosis || 'N/A',
+        createdAt: new Date(tmpl.createdAt).toLocaleDateString(),
+      });
+    }
+
+    // -------------------------------------------------------------
+    // SHEET 4: LAB INVESTIGATION REQUISITIONS
+    // -------------------------------------------------------------
+    const labSheet = workbook.addWorksheet('Lab Requisitions');
+    labSheet.columns = [
+      { header: 'Requisition #', key: 'requestNumber', width: 18 },
+      { header: 'Patient Name', key: 'patientName', width: 22 },
+      { header: 'Patient Mobile', key: 'patientMobile', width: 16 },
+      { header: 'Tests Ordered', key: 'tests', width: 35 },
+      { header: 'Priority', key: 'priority', width: 14 },
+      { header: 'Status', key: 'status', width: 16 },
+      { header: 'Clinical Indication', key: 'notes', width: 30 },
+      { header: 'Requested Date', key: 'requestedDate', width: 16 },
+      { header: 'Report File', key: 'report', width: 20 },
+    ];
+    applyHeaderStyle(labSheet.getRow(1), 'FF2563EB'); // Royal Blue header
+
+    for (const lr of labRequests) {
+      let testsText = '';
+      try {
+        const parsed = typeof (lr as any).testsRequested === 'string' ? JSON.parse((lr as any).testsRequested) : (lr as any).testsRequested;
+        testsText = Array.isArray(parsed) ? parsed.map((t: any) => t.name || t).join(', ') : (lr as any).testsRequested || 'Diagnostic Investigation';
+      } catch {
+        testsText = (lr as any).testsRequested || 'Diagnostic Investigation';
+      }
+
+      labSheet.addRow({
+        requestNumber: lr.requestNumber,
+        patientName: lr.patient?.fullName || 'N/A',
+        patientMobile: lr.patient?.mobileNumber || 'N/A',
+        tests: testsText,
+        priority: (lr as any).priority || 'ROUTINE',
+        status: (lr as any).status || 'REQUESTED',
+        notes: (lr as any).clinicalNotes || 'N/A',
+        requestedDate: new Date(lr.createdAt).toLocaleDateString(),
+        report: lr.report ? 'Published' : 'Pending',
+      });
+    }
+
+    // -------------------------------------------------------------
+    // SHEET 5: PRACTICE SCHEDULES & ROSTER
+    // -------------------------------------------------------------
+    const schedSheet = workbook.addWorksheet('Weekly Practice Schedules');
+    schedSheet.columns = [
+      { header: 'Day of Week', key: 'day', width: 18 },
+      { header: 'Start Time', key: 'startTime', width: 16 },
+      { header: 'End Time', key: 'endTime', width: 16 },
+      { header: 'Slot Duration (Min)', key: 'duration', width: 20 },
+      { header: 'Available Status', key: 'status', width: 18 },
+    ];
+    applyHeaderStyle(schedSheet.getRow(1), 'FFD97706'); // Amber header
+
+    for (const sc of schedules) {
+      schedSheet.addRow({
+        day: dayNames[sc.dayOfWeek] || `Day ${sc.dayOfWeek}`,
+        startTime: sc.startTime,
+        endTime: sc.endTime,
+        duration: `${sc.slotDurationMinutes} Minutes`,
+        status: sc.isAvailable ? 'Active Schedule' : 'Duty Off',
+      });
+    }
+
+    // -------------------------------------------------------------
+    // SHEET 6: DOCTOR LEAVE RECORDS
+    // -------------------------------------------------------------
+    const leaveSheet = workbook.addWorksheet('Leave Records');
+    leaveSheet.columns = [
+      { header: 'Leave ID', key: 'leaveId', width: 18 },
+      { header: 'Start Date', key: 'startDate', width: 16 },
+      { header: 'End Date', key: 'endDate', width: 16 },
+      { header: 'Reason', key: 'reason', width: 35 },
+      { header: 'Leave Status', key: 'status', width: 16 },
+      { header: 'Created Date', key: 'createdAt', width: 16 },
+    ];
+    applyHeaderStyle(leaveSheet.getRow(1), 'FFE11D48'); // Rose header
+
+    for (const lv of leaves) {
+      leaveSheet.addRow({
+        leaveId: lv.id.substring(0, 8),
+        startDate: new Date(lv.startDate).toLocaleDateString(),
+        endDate: new Date(lv.endDate).toLocaleDateString(),
+        reason: (lv as any).reason || 'Personal Leave',
+        status: (lv as any).status || 'APPROVED',
+        createdAt: new Date(lv.createdAt).toLocaleDateString(),
+      });
+    }
+
+    // Set Response Headers and Stream Workbook
+    const safeDoctorName = (doctor.name || 'Doctor').replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `MedPulse_Doctor_${safeDoctorName}_AllData_${today}.xlsx`;
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
   }
 }

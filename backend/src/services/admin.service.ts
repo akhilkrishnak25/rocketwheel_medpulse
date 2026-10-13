@@ -1,4 +1,6 @@
 import bcrypt from 'bcryptjs';
+import ExcelJS from 'exceljs';
+import { Response } from 'express';
 import prisma from '../config/prisma';
 import { AuditService } from '../utils/audit';
 import { NotificationService } from './notification.service';
@@ -10,6 +12,7 @@ export class AdminService {
     const [
       todayAppointments,
       upcomingAppointments,
+      waitingAppointments,
       completedAppointments,
       cancelledAppointments,
       noShowAppointments,
@@ -22,7 +25,16 @@ export class AdminService {
         where: { hospitalId, appointmentDate: today, status: { not: 'CANCELLED' } },
       }),
       prisma.appointment.count({
-        where: { hospitalId, appointmentDate: { gt: today }, status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] } },
+        where: {
+          hospitalId,
+          OR: [
+            { appointmentDate: { gt: today }, status: { in: ['CONFIRMED', 'PENDING_PAYMENT'] } },
+            { appointmentDate: today, status: 'CONFIRMED' },
+          ],
+        },
+      }),
+      prisma.appointment.count({
+        where: { hospitalId, appointmentDate: today, status: 'WAITING' },
       }),
       prisma.appointment.count({
         where: { hospitalId, status: 'COMPLETED' },
@@ -67,6 +79,7 @@ export class AdminService {
     return {
       todayAppointments,
       upcomingAppointments,
+      waitingAppointments,
       completedAppointments,
       cancelledAppointments,
       noShowAppointments,
@@ -124,6 +137,9 @@ export class AdminService {
         department: true,
         payment: true,
         digitalOp: true,
+        prescription: {
+          select: { id: true, followUpDate: true },
+        },
       },
       orderBy: [{ appointmentDate: 'desc' }, { tokenNumber: 'asc' }],
     });
@@ -1227,6 +1243,595 @@ export class AdminService {
     });
 
     return updated;
+  }
+
+  static async deleteLab(
+    hospitalId: string,
+    labId: string,
+    requestingUserId?: string
+  ) {
+    const lab = await prisma.lab.findFirst({
+      where: { id: labId, hospitalId },
+    });
+    if (!lab) {
+      throw new Error('Laboratory not found or does not belong to your hospital');
+    }
+
+    // Delete tests under this lab
+    await prisma.labTest.deleteMany({
+      where: { labId },
+    });
+
+    // Delete lab record
+    await prisma.lab.delete({
+      where: { id: labId },
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'DELETE_HOSPITAL_LAB',
+      entity: 'Lab',
+      entityId: labId,
+      details: { deletedLabName: lab.name },
+    });
+
+    return { success: true, message: `Laboratory "${lab.name}" deleted successfully.` };
+  }
+
+  static async getHospitalLabRequests(hospitalId: string, date?: string) {
+    const where: any = {
+      OR: [
+        { hospitalId },
+        { doctor: { hospitalId } },
+      ],
+    };
+
+    if (date) {
+      where.createdAt = {
+        gte: new Date(`${date}T00:00:00.000Z`),
+        lte: new Date(`${date}T23:59:59.999Z`),
+      };
+    }
+
+    return prisma.labTestRequest.findMany({
+      where,
+      include: {
+        patient: { select: { id: true, fullName: true, mobileNumber: true, patientIdNumber: true } },
+        doctor: { select: { id: true, name: true, specialization: true } },
+        lab: { select: { id: true, name: true, phone: true, visibility: true } },
+        appointment: { select: { id: true, appointmentNumber: true, appointmentDate: true, timeSlot: true } },
+        report: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  // -------------------------------------------------------------
+  // EXPORT ALL HOSPITAL DATA TO EXCEL WORKBOOK (.xlsx)
+  // -------------------------------------------------------------
+  static async exportAllHospitalDataToExcel(hospitalId: string, res: Response) {
+    const hospital = await prisma.hospital.findUnique({
+      where: { id: hospitalId },
+    });
+
+    if (!hospital) {
+      throw new Error('Hospital record not found');
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const [
+      appointments,
+      doctors,
+      departments,
+      staff,
+      patients,
+      subAdmins,
+    ] = await Promise.all([
+      prisma.appointment.findMany({
+        where: { hospitalId },
+        include: {
+          patient: true,
+          doctor: true,
+          department: true,
+          payment: { select: { status: true, paymentMethod: true } },
+          vitals: { orderBy: { createdAt: 'desc' }, take: 1 },
+        },
+        orderBy: [{ appointmentDate: 'desc' }, { tokenNumber: 'asc' }],
+      }),
+      prisma.doctor.findMany({
+        where: { hospitalId },
+        include: {
+          department: true,
+          user: { select: { name: true, email: true, phone: true } },
+          assignedStaff: { include: { user: { select: { name: true } } } },
+        },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.department.findMany({
+        where: { hospitalId },
+        include: {
+          _count: { select: { doctors: true, appointments: true } },
+        },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.supportStaff.findMany({
+        where: { hospitalId },
+        include: {
+          user: { select: { name: true, email: true, phone: true } },
+          department: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.patient.findMany({
+        where: { hospitalId },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.hospitalSubAdmin.findMany({
+        where: { hospitalId },
+        include: {
+          user: { select: { name: true, email: true, phone: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'RocketWheel MedPulse Platform';
+    workbook.created = new Date();
+
+    const applyHeaderStyle = (row: ExcelJS.Row, bgArgb = 'FF1E40AF') => {
+      row.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+      row.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: bgArgb },
+      };
+      row.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      row.height = 26;
+    };
+
+    // SHEET 1: HOSPITAL OVERVIEW & KPI METRICS
+    const summarySheet = workbook.addWorksheet('Hospital Overview & KPIs');
+    summarySheet.columns = [
+      { header: 'Hospital Field / Metric', key: 'metric', width: 35 },
+      { header: 'Details / Current Value', key: 'value', width: 45 },
+    ];
+    applyHeaderStyle(summarySheet.getRow(1), 'FF1E40AF');
+
+    const totalRevenue = appointments
+      .filter((a) => a.status === 'COMPLETED')
+      .reduce((sum, a) => sum + (a.consultationFee ?? a.totalAmount ?? 0), 0);
+
+    const summaryRows = [
+      { metric: 'Hospital Name', value: hospital.name },
+      { metric: 'Facility Code / Slug', value: `${hospital.code} (${hospital.slug})` },
+      { metric: 'Location', value: `${hospital.city}, ${hospital.state}` },
+      { metric: 'Address', value: hospital.address || 'N/A' },
+      { metric: 'Hospital Contact Email', value: hospital.email || 'N/A' },
+      { metric: 'Hospital Contact Phone', value: hospital.phone ? `+91 ${hospital.phone}` : 'N/A' },
+      { metric: 'Registration Status', value: hospital.status },
+      { metric: '--- PLATFORM TOTALS ---', value: '------------------------' },
+      { metric: 'Total Appointments on Record', value: appointments.length },
+      { metric: 'Today\'s OP Bookings', value: appointments.filter((a) => a.appointmentDate === today).length },
+      { metric: 'Completed Consultations', value: appointments.filter((a) => a.status === 'COMPLETED').length },
+      { metric: 'Waiting / In-Consultation', value: appointments.filter((a) => ['WAITING', 'IN_CONSULTATION', 'CONFIRMED'].includes(a.status)).length },
+      { metric: 'Cancelled Bookings', value: appointments.filter((a) => a.status === 'CANCELLED').length },
+      { metric: 'Total Consultation Revenue (INR)', value: `₹${totalRevenue.toLocaleString()}` },
+      { metric: 'Registered Doctors Count', value: doctors.length },
+      { metric: 'Clinical Departments', value: departments.length },
+      { metric: 'Support Staff / Nurses', value: staff.length },
+      { metric: 'Patient Records', value: patients.length },
+      { metric: 'Sub-Administrators', value: subAdmins.length },
+      { metric: 'Export Generated At', value: new Date().toLocaleString() },
+    ];
+    summaryRows.forEach((r) => summarySheet.addRow(r));
+
+    // SHEET 2: ALL APPOINTMENTS
+    const aptSheet = workbook.addWorksheet('Appointments & OP Bookings');
+    aptSheet.columns = [
+      { header: 'Booking ID', key: 'id', width: 20 },
+      { header: 'Date', key: 'date', width: 14 },
+      { header: 'Token #', key: 'token', width: 10 },
+      { header: 'Time Slot', key: 'slot', width: 16 },
+      { header: 'Patient Name', key: 'patient', width: 22 },
+      { header: 'Patient Mobile', key: 'mobile', width: 16 },
+      { header: 'Doctor', key: 'doctor', width: 22 },
+      { header: 'Department', key: 'dept', width: 20 },
+      { header: 'Booking Type', key: 'type', width: 14 },
+      { header: 'Status', key: 'status', width: 16 },
+      { header: 'Fee (₹)', key: 'fee', width: 12 },
+      { header: 'Payment Status', key: 'payment', width: 16 },
+    ];
+    applyHeaderStyle(aptSheet.getRow(1), 'FF0D9488');
+
+    for (const a of appointments) {
+      aptSheet.addRow({
+        id: a.appointmentNumber,
+        date: a.appointmentDate,
+        token: a.tokenNumber,
+        slot: a.timeSlot,
+        patient: a.patient?.fullName || 'N/A',
+        mobile: a.patient?.mobileNumber || 'N/A',
+        doctor: a.doctor?.name || 'N/A',
+        dept: a.department?.name || 'General OPD',
+        type: a.bookingType,
+        status: a.status,
+        fee: a.consultationFee ?? a.totalAmount ?? 0,
+        payment: a.payment?.status || (a.bookingType === 'OFFLINE' ? 'PAID_COUNTER' : 'PENDING'),
+      });
+    }
+
+    // SHEET 3: DOCTORS
+    const docSheet = workbook.addWorksheet('Registered Doctors');
+    docSheet.columns = [
+      { header: 'Doctor Name', key: 'name', width: 22 },
+      { header: 'Department', key: 'dept', width: 20 },
+      { header: 'Specialization', key: 'spec', width: 22 },
+      { header: 'Qualifications', key: 'qual', width: 20 },
+      { header: 'Consultation Fee (₹)', key: 'fee', width: 20 },
+      { header: 'Experience (Yrs)', key: 'exp', width: 16 },
+      { header: 'Assigned Nurse', key: 'nurse', width: 22 },
+      { header: 'Status', key: 'status', width: 14 },
+      { header: 'Email', key: 'email', width: 25 },
+      { header: 'Phone', key: 'phone', width: 16 },
+    ];
+    applyHeaderStyle(docSheet.getRow(1), 'FF2563EB');
+
+    for (const d of doctors) {
+      docSheet.addRow({
+        name: d.name,
+        dept: d.department?.name || 'General OPD',
+        spec: d.specialization,
+        qual: d.qualification,
+        fee: d.consultationFee,
+        exp: d.experienceYears,
+        nurse: d.assignedStaff?.user?.name || 'General Nursing Pool',
+        status: d.status,
+        email: d.user?.email || 'N/A',
+        phone: d.user?.phone ? `+91 ${d.user.phone}` : 'N/A',
+      });
+    }
+
+    // SHEET 4: DEPARTMENTS
+    const deptSheet = workbook.addWorksheet('Clinical Departments');
+    deptSheet.columns = [
+      { header: 'Department Name', key: 'name', width: 25 },
+      { header: 'Code', key: 'code', width: 14 },
+      { header: 'Doctors Count', key: 'doctorsCount', width: 16 },
+      { header: 'Appointments Total', key: 'appointmentsCount', width: 20 },
+      { header: 'Description', key: 'description', width: 35 },
+    ];
+    applyHeaderStyle(deptSheet.getRow(1), 'FF7C3AED');
+
+    for (const dp of departments) {
+      deptSheet.addRow({
+        name: dp.name,
+        code: dp.code,
+        doctorsCount: (dp as any)._count?.doctors || 0,
+        appointmentsCount: (dp as any)._count?.appointments || 0,
+        description: dp.description || 'N/A',
+      });
+    }
+
+    // SHEET 5: SUPPORT STAFF
+    const staffSheet = workbook.addWorksheet('Support Staff & Nurses');
+    staffSheet.columns = [
+      { header: 'Staff Name', key: 'name', width: 22 },
+      { header: 'Role Title', key: 'role', width: 22 },
+      { header: 'Department', key: 'dept', width: 20 },
+      { header: 'Status', key: 'status', width: 14 },
+      { header: 'Email', key: 'email', width: 25 },
+      { header: 'Phone', key: 'phone', width: 16 },
+    ];
+    applyHeaderStyle(staffSheet.getRow(1), 'FF059669');
+
+    for (const s of staff) {
+      staffSheet.addRow({
+        name: s.user?.name || 'Staff Member',
+        role: s.roleTitle || 'Triage / Screening Nurse',
+        dept: s.department?.name || 'General OPD',
+        status: s.status,
+        email: s.user?.email || 'N/A',
+        phone: s.user?.phone ? `+91 ${s.user.phone}` : 'N/A',
+      });
+    }
+
+    // SHEET 6: PATIENTS
+    const patientSheet = workbook.addWorksheet('Patient Records');
+    patientSheet.columns = [
+      { header: 'Patient UHID / ID', key: 'uhid', width: 20 },
+      { header: 'Full Name', key: 'name', width: 22 },
+      { header: 'Gender', key: 'gender', width: 12 },
+      { header: 'Blood Group', key: 'blood', width: 14 },
+      { header: 'Mobile Number', key: 'mobile', width: 16 },
+      { header: 'Email', key: 'email', width: 25 },
+      { header: 'Address', key: 'location', width: 28 },
+    ];
+    applyHeaderStyle(patientSheet.getRow(1), 'FFD97706');
+
+    for (const p of patients) {
+      patientSheet.addRow({
+        uhid: p.patientIdNumber || p.id.substring(0, 8),
+        name: p.fullName,
+        gender: p.gender || 'Unknown',
+        blood: p.bloodGroup || 'N/A',
+        mobile: p.mobileNumber,
+        email: p.email || 'N/A',
+        location: p.address || 'N/A',
+      });
+    }
+
+    // Set Response Headers and Stream
+    const safeHospName = (hospital.name || 'Hospital').replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `MedPulse_${safeHospName}_AllData_${today}.xlsx`;
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  }
+
+  // -------------------------------------------------------------
+  // EXPORT APPOINTMENTS SEPARATELY TO EXCEL WORKBOOK (.xlsx)
+  // -------------------------------------------------------------
+  static async exportAppointmentsToExcel(
+    hospitalId: string,
+    query: { status?: string; date?: string; search?: string; doctorId?: string },
+    res: Response
+  ) {
+    const hospital = await prisma.hospital.findUnique({
+      where: { id: hospitalId },
+    });
+    if (!hospital) {
+      throw new Error('Hospital record not found');
+    }
+
+    const where: any = { hospitalId };
+    if (query.status && query.status !== 'ALL') {
+      where.status = query.status;
+    }
+    if (query.date) {
+      where.appointmentDate = query.date;
+    }
+    if (query.doctorId) {
+      where.doctorId = query.doctorId;
+    }
+    if (query.search) {
+      const s = query.search.trim();
+      where.OR = [
+        { appointmentNumber: { contains: s } },
+        { patient: { fullName: { contains: s } } },
+        { patient: { mobileNumber: { contains: s } } },
+        { doctor: { name: { contains: s } } },
+        { digitalOp: { opNumber: { contains: s } } },
+      ];
+    }
+
+    const appointments = await prisma.appointment.findMany({
+      where,
+      include: {
+        patient: true,
+        doctor: {
+          select: { name: true, specialization: true, department: { select: { name: true } } },
+        },
+        department: true,
+        payment: true,
+        digitalOp: true,
+        vitals: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
+      orderBy: [{ appointmentDate: 'desc' }, { tokenNumber: 'asc' }],
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'RocketWheel MedPulse Platform';
+    workbook.created = new Date();
+
+    const applyHeaderStyle = (row: ExcelJS.Row, bgArgb = 'FF0D9488') => {
+      row.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+      row.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: bgArgb },
+      };
+      row.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      row.height = 28;
+    };
+
+    const sheet = workbook.addWorksheet('Appointments & OP Bookings');
+    sheet.columns = [
+      { header: 'Token #', key: 'token', width: 10 },
+      { header: 'Booking Ref ID', key: 'id', width: 22 },
+      { header: 'Digital OP #', key: 'opNumber', width: 22 },
+      { header: 'Appointment Date', key: 'date', width: 16 },
+      { header: 'Time Slot', key: 'slot', width: 18 },
+      { header: 'Patient Full Name', key: 'patientName', width: 24 },
+      { header: 'Patient MRN / UHID', key: 'patientMrn', width: 20 },
+      { header: 'Mobile Number', key: 'mobile', width: 16 },
+      { header: 'Age / Gender', key: 'ageGender', width: 16 },
+      { header: 'Blood Group', key: 'blood', width: 14 },
+      { header: 'Doctor Name', key: 'doctor', width: 24 },
+      { header: 'Specialization / Dept', key: 'dept', width: 24 },
+      { header: 'Booking Type', key: 'type', width: 14 },
+      { header: 'Status', key: 'status', width: 18 },
+      { header: 'Consultation Fee (₹)', key: 'fee', width: 18 },
+      { header: 'Total Paid (₹)', key: 'total', width: 16 },
+      { header: 'Payment Status', key: 'payment', width: 18 },
+      { header: 'Payment Method', key: 'payMethod', width: 16 },
+      { header: 'Screening Vitals', key: 'vitals', width: 28 },
+      { header: 'Cancellation Reason', key: 'cancelReason', width: 25 },
+      { header: 'Clinical Notes', key: 'notes', width: 30 },
+    ];
+    applyHeaderStyle(sheet.getRow(1), 'FF0D9488');
+
+    appointments.forEach((a, idx) => {
+      const v = a.vitals?.[0];
+      const vitalsText = v
+        ? `BP: ${v.bloodPressure || 'N/A'}, Pulse: ${v.pulseRate || 'N/A'}, Temp: ${v.temperature || 'N/A'}, SpO2: ${v.spo2 ? `${v.spo2}%` : 'N/A'}`
+        : 'Not recorded';
+
+      const ageGender = [a.patient?.age ? `${a.patient.age}y` : '', a.patient?.gender || ''].filter(Boolean).join(' / ') || 'N/A';
+
+      const row = sheet.addRow({
+        token: `#${String(a.tokenNumber).padStart(2, '0')}`,
+        id: a.appointmentNumber,
+        opNumber: a.digitalOp?.opNumber || 'N/A',
+        date: a.appointmentDate,
+        slot: a.timeSlot,
+        patientName: a.patient?.fullName || 'N/A',
+        patientMrn: a.patient?.patientIdNumber || 'N/A',
+        mobile: a.patient?.mobileNumber ? `+91 ${a.patient.mobileNumber}` : 'N/A',
+        ageGender,
+        blood: a.patient?.bloodGroup || 'N/A',
+        doctor: a.doctor?.name ? `Dr. ${a.doctor.name}` : 'N/A',
+        dept: `${a.doctor?.specialization || 'OPD'} (${a.department?.name || 'General'})`,
+        type: a.bookingType || 'ONLINE',
+        status: a.status,
+        fee: a.consultationFee ?? 0,
+        total: a.totalAmount ?? 0,
+        payment: a.payment?.status || (a.bookingType === 'OFFLINE' ? 'PAID_COUNTER' : 'PAID'),
+        payMethod: a.payment?.paymentMethod || (a.bookingType === 'OFFLINE' ? 'COUNTER_CASH' : 'RAZORPAY_ONLINE'),
+        vitals: vitalsText,
+        cancelReason: a.cancellationReason || '',
+        notes: a.notes || '',
+      });
+
+      if (idx % 2 === 1) {
+        row.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFF0FDFA' },
+        };
+      }
+    });
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const safeHospName = (hospital.name || 'Hospital').replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `MedPulse_${safeHospName}_Appointments_${todayStr}.xlsx`;
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  }
+
+  // -------------------------------------------------------------
+  // EXPORT PATIENTS SEPARATELY TO EXCEL WORKBOOK (.xlsx)
+  // -------------------------------------------------------------
+  static async exportPatientsToExcel(
+    hospitalId: string,
+    query: { search?: string },
+    res: Response
+  ) {
+    const hospital = await prisma.hospital.findUnique({
+      where: { id: hospitalId },
+    });
+    if (!hospital) {
+      throw new Error('Hospital record not found');
+    }
+
+    const where: any = { hospitalId };
+    if (query.search) {
+      const s = query.search.trim();
+      where.OR = [
+        { fullName: { contains: s } },
+        { mobileNumber: { contains: s } },
+        { patientIdNumber: { contains: s } },
+        { email: { contains: s } },
+      ];
+    }
+
+    const patients = await prisma.patient.findMany({
+      where,
+      include: {
+        appointments: {
+          select: { id: true, appointmentDate: true, status: true },
+          orderBy: { appointmentDate: 'desc' },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'RocketWheel MedPulse Platform';
+    workbook.created = new Date();
+
+    const applyHeaderStyle = (row: ExcelJS.Row, bgArgb = 'FF1E40AF') => {
+      row.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+      row.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: bgArgb },
+      };
+      row.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      row.height = 28;
+    };
+
+    const sheet = workbook.addWorksheet('Hospital Patient Directory');
+    sheet.columns = [
+      { header: 'Patient MRN / UHID', key: 'mrn', width: 22 },
+      { header: 'Full Legal Name', key: 'name', width: 26 },
+      { header: 'Mobile Number', key: 'mobile', width: 16 },
+      { header: 'Email Address', key: 'email', width: 26 },
+      { header: 'Age', key: 'age', width: 10 },
+      { header: 'Date of Birth', key: 'dob', width: 14 },
+      { header: 'Gender', key: 'gender', width: 12 },
+      { header: 'Blood Group', key: 'blood', width: 14 },
+      { header: 'Address / City', key: 'address', width: 30 },
+      { header: 'Emergency Contact', key: 'emergency', width: 20 },
+      { header: 'Total Appointments', key: 'totalVisits', width: 18 },
+      { header: 'Last Visit Date', key: 'lastVisit', width: 16 },
+      { header: 'Registered On', key: 'registeredAt', width: 18 },
+    ];
+    applyHeaderStyle(sheet.getRow(1), 'FF1E40AF');
+
+    patients.forEach((p, idx) => {
+      const lastVisit = p.appointments?.[0]?.appointmentDate || 'N/A';
+      const row = sheet.addRow({
+        mrn: p.patientIdNumber || `MRN-${p.id.substring(0, 8).toUpperCase()}`,
+        name: p.fullName,
+        mobile: `+91 ${p.mobileNumber}`,
+        email: p.email || 'N/A',
+        age: p.age ?? 'N/A',
+        dob: p.dateOfBirth || 'N/A',
+        gender: p.gender || 'N/A',
+        blood: p.bloodGroup || 'N/A',
+        address: p.address || 'N/A',
+        emergency: p.emergencyContact || 'N/A',
+        totalVisits: p.appointments?.length || 0,
+        lastVisit,
+        registeredAt: new Date(p.createdAt).toLocaleDateString(),
+      });
+
+      if (idx % 2 === 1) {
+        row.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFEFF6FF' },
+        };
+      }
+    });
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const safeHospName = (hospital.name || 'Hospital').replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `MedPulse_${safeHospName}_Patients_${todayStr}.xlsx`;
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
   }
 }
 

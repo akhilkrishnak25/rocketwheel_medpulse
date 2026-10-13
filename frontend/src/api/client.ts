@@ -1,6 +1,19 @@
 export const API_BASE_URL = ((import.meta as any).env?.VITE_API_URL as string) || '/api';
 
 /**
+ * Returns the effective API base URL, properly resolving backend host on Render or fallback.
+ */
+export function getApiBaseUrl(): string {
+  if (API_BASE_URL.startsWith('http://') || API_BASE_URL.startsWith('https://')) {
+    return API_BASE_URL.replace(/\/$/, '');
+  }
+  if (typeof window !== 'undefined' && window.location.hostname.includes('.onrender.com')) {
+    return 'https://medipulse-backend-veca.onrender.com/api';
+  }
+  return API_BASE_URL.replace(/\/$/, '');
+}
+
+/**
  * Resolves media, profile photo, and document URLs so they route directly to backend storage.
  */
 export function getMediaUrl(url?: string | null): string {
@@ -44,7 +57,8 @@ export async function apiClient<T = any>(
     (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
   }
 
-  const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
   const response = await fetch(url, {
     ...options,

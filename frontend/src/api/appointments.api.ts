@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, getApiBaseUrl } from './client';
 import { Appointment, QueueStatus } from '../types';
 
 export interface CreateAppointmentDTO {
@@ -51,5 +51,28 @@ export const appointmentsApi = {
 
   verifyOp: (token: string) => api.get<any>(`/appointments/verify-op/${token}`),
 
-  getPdfUrl: (idOrOp: string) => `/api/appointments/${idOrOp}/pdf`,
+  getPdfUrl: (idOrOp: string) => `${getApiBaseUrl()}/appointments/${idOrOp}/pdf`,
+
+  downloadPdf: async (idOrOp: string, filename?: string) => {
+    const baseUrl = getApiBaseUrl();
+    const token = localStorage.getItem('rocketwheel_access_token') || localStorage.getItem('medipulse_access_token');
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch(`${baseUrl}/appointments/${idOrOp}/pdf`, { headers });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(errJson?.message || 'Failed to download Digital OP PDF');
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || `Digital_OP_${idOrOp}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  },
 };

@@ -556,5 +556,64 @@ export class AdminController {
       return errorResponse(res, error.message || 'Failed to update laboratory', 400, error.errors);
     }
   }
+
+  static async deleteLab(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const labId = req.params.labId as string;
+      const result = await AdminService.deleteLab(hospitalId, labId, req.user?.id);
+      return successResponse(res, result, 'Laboratory deleted successfully');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to delete laboratory', 400);
+    }
+  }
+
+  static async getHospitalLabRequests(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const { date } = req.query;
+      const requests = await AdminService.getHospitalLabRequests(hospitalId, date as string);
+      return successResponse(res, requests, 'Hospital lab requisitions retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch lab requisitions', 500);
+    }
+  }
+
+  static async exportAllDataToExcel(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      await AdminService.exportAllHospitalDataToExcel(hospitalId, res);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to export hospital data to Excel', 500);
+    }
+  }
+
+  static async exportAppointmentsExcel(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      await AdminService.exportAppointmentsToExcel(hospitalId, req.query as any, res);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to export appointments to Excel', 500);
+    }
+  }
+
+  static async exportPatientsExcel(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      await AdminService.exportPatientsToExcel(hospitalId, req.query as any, res);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to export patient records to Excel', 500);
+    }
+  }
 }
 

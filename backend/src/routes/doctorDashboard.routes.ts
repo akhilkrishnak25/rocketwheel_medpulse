@@ -42,4 +42,7 @@ router.delete('/leaves/:leaveId', DoctorDashboardController.cancelLeave);
 router.get('/support-staff', DoctorDashboardController.getHospitalSupportStaff);
 router.patch('/assigned-staff', DoctorDashboardController.updateAssignedStaff);
 
+// Full Doctor Data Excel Export
+router.get('/export/excel', DoctorDashboardController.exportAllDataToExcel);
+
 export default router;

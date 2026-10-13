@@ -170,8 +170,10 @@ export class LabController {
   static async getActiveLabs(req: Request, res: Response) {
     try {
       const { hospitalId, publicOnly } = req.query;
-      const isPublic = publicOnly === 'true' || !req.user || req.user.role === 'PATIENT';
-      const labs = await LabService.getActiveLabs(hospitalId as string, isPublic);
+      const isHospitalStaff = req.user && ['DOCTOR', 'HOSPITAL_ADMIN', 'HOSPITAL_SUB_ADMIN', 'SUPER_ADMIN'].includes(req.user.role);
+      const isPublic = publicOnly === 'true' || !isHospitalStaff;
+      const targetHospitalId = (hospitalId as string) || (isHospitalStaff ? req.user?.hospitalId : undefined);
+      const labs = await LabService.getActiveLabs(targetHospitalId, isPublic, req.user?.hospitalId);
       return successResponse(res, labs, 'Active laboratories retrieved');
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to fetch laboratories', 500);
@@ -181,7 +183,13 @@ export class LabController {
   static async getPublicTests(req: Request, res: Response) {
     try {
       const { labId, category, search } = req.query;
-      const tests = await LabService.getPublicLabTests(labId as string, category as string, search as string);
+      const isHospitalStaff = req.user && ['DOCTOR', 'HOSPITAL_ADMIN', 'HOSPITAL_SUB_ADMIN', 'SUPER_ADMIN'].includes(req.user.role);
+      const tests = await LabService.getPublicLabTests(
+        labId as string,
+        category as string,
+        search as string,
+        isHospitalStaff ? req.user?.hospitalId : undefined
+      );
       return successResponse(res, tests, 'Available lab tests retrieved');
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to fetch lab tests', 500);

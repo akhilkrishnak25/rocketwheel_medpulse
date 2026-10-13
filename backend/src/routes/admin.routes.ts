@@ -9,6 +9,7 @@ router.use(authenticate, hospitalAdminGuard);
 // Hospital Metrics & Appointments
 router.get('/metrics', AdminController.getMetrics);
 router.get('/appointments', AdminController.getAppointments);
+router.get('/appointments/export/excel', AdminController.exportAppointmentsExcel);
 router.patch('/appointments/:id/status', AdminController.updateAppointmentStatus);
 
 // Doctor Management & Onboarding
@@ -43,6 +44,7 @@ router.get('/doctors/pending', AdminController.getPendingDoctors);
 
 // Hospital Patient Records Management
 router.get('/patients', AdminController.getPatients);
+router.get('/patients/export/excel', AdminController.exportPatientsExcel);
 router.get('/patients/:patientId', AdminController.getPatientDetails);
 
 // Support Staff Management
@@ -64,5 +66,10 @@ router.patch('/notifications/:id/read', AdminController.markNotificationRead);
 router.get('/labs', AdminController.getLabs);
 router.patch('/labs/:labId/visibility', AdminController.updateLabVisibility);
 router.patch('/labs/:labId', AdminController.updateLab);
+router.delete('/labs/:labId', AdminController.deleteLab);
+router.get('/lab-requests', AdminController.getHospitalLabRequests);
+
+// Full Hospital Data Excel Export
+router.get('/export/excel', AdminController.exportAllDataToExcel);
 
 export default router;

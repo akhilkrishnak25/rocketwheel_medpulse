@@ -359,15 +359,26 @@ export class LabService {
   /**
    * Get all accredited/approved active laboratories with test counts
    */
-  static async getActiveLabs(hospitalId?: string, isPublicOnly: boolean = false) {
+  static async getActiveLabs(hospitalId?: string, isPublicOnly: boolean = false, userHospitalId?: string) {
     const where: any = {
       status: { in: ['APPROVED', 'ACTIVE'] },
     };
-    if (hospitalId) {
-      where.hospitalId = hospitalId;
-    }
+
     if (isPublicOnly) {
       where.visibility = 'PUBLIC';
+      if (hospitalId) {
+        where.hospitalId = hospitalId;
+      }
+    } else {
+      // Clinician / Hospital Admin request: can access public labs + private labs affiliated with their hospital
+      if (hospitalId) {
+        where.hospitalId = hospitalId;
+      } else if (userHospitalId) {
+        where.OR = [
+          { visibility: 'PUBLIC' },
+          { hospitalId: userHospitalId },
+        ];
+      }
     }
 
     const labs = await prisma.lab.findMany({
@@ -396,13 +407,21 @@ export class LabService {
 
   /**
    * Public search across all available tests from active/approved labs
+   * If userHospitalId is provided (e.g. Doctor requisition), includes tests from private labs of that hospital.
    */
-  static async getPublicLabTests(labId?: string, category?: string, search?: string) {
+  static async getPublicLabTests(labId?: string, category?: string, search?: string, userHospitalId?: string) {
     const where: any = {
       status: 'ACTIVE',
       lab: {
         status: { in: ['APPROVED', 'ACTIVE'] },
-        visibility: 'PUBLIC',
+        ...(userHospitalId
+          ? {
+              OR: [
+                { visibility: 'PUBLIC' },
+                { hospitalId: userHospitalId },
+              ],
+            }
+          : { visibility: 'PUBLIC' }),
       },
     };
 
@@ -487,13 +506,20 @@ export class LabService {
 
     const totalAmount = tests.reduce((sum, t) => sum + t.price, 0);
 
-    // Upsert / locate patient record
-    let patient = await prisma.patient.findFirst({
+    // Upsert / locate patient record using mobileNumber + fullName as identity key
+    const cleanMobile = mobileNumber.trim();
+    const cleanName = patientName.trim();
+
+    const candidatePatients = await prisma.patient.findMany({
       where: {
-        mobileNumber,
+        mobileNumber: cleanMobile,
         ...(lab.hospitalId ? { hospitalId: lab.hospitalId } : {}),
       },
     });
+
+    let patient = candidatePatients.find(
+      (p) => p.fullName.trim().toLowerCase() === cleanName.toLowerCase()
+    );
 
     if (!patient) {
       const patientIdNumber = `MRN-LAB-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
@@ -501,11 +527,22 @@ export class LabService {
         data: {
           hospitalId: lab.hospitalId || undefined,
           patientIdNumber,
-          fullName: patientName.trim(),
-          mobileNumber: mobileNumber.trim(),
+          fullName: cleanName,
+          mobileNumber: cleanMobile,
           email: email?.trim() || '',
           gender: gender || 'OTHER',
+          age: age || undefined,
           address: address?.trim() || null,
+        },
+      });
+    } else {
+      patient = await prisma.patient.update({
+        where: { id: patient.id },
+        data: {
+          email: email?.trim() || patient.email,
+          gender: gender || patient.gender,
+          age: age !== undefined ? age : patient.age,
+          address: address?.trim() || patient.address,
         },
       });
     }

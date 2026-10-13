@@ -348,5 +348,17 @@ export class DoctorDashboardController {
       return errorResponse(res, error.message || 'Failed to update assigned support staff', 400, error.errors);
     }
   }
+
+  static async exportAllDataToExcel(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const { status } = req.query;
+      await DoctorDashboardService.exportAllDoctorDataToExcel(doctorId, res, status as string);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to export doctor data to Excel', 500);
+    }
+  }
 }
 

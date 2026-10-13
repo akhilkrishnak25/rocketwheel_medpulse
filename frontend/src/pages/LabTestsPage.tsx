@@ -519,7 +519,8 @@ export const LabTestsPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => handleRemoveFromCart(t.id)}
-                            className="text-slate-400 hover:text-rose-600"
+                            className="p-1 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition-colors"
+                            title="Remove test from cart"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>

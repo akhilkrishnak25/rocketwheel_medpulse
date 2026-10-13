@@ -206,7 +206,7 @@ export const DoctorLayout: React.FC = () => {
             <button
               onClick={logout}
               title="Sign Out"
-              className="p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors"
+              className="p-2 rounded-xl text-rose-400 bg-rose-500/10 hover:bg-rose-500/25 hover:text-rose-300 transition-colors border border-rose-500/20"
             >
               <LogOut className="w-4 h-4" />
             </button>

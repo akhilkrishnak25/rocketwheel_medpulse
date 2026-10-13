@@ -47,6 +47,9 @@ import {
   MapPin,
   Phone,
   Info,
+  Loader2,
+  Trash2,
+  ListFilter,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { adminApi } from '../api/admin.api';
@@ -80,6 +83,10 @@ export const HospitalAdminDashboardPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>('');
+  const [opViewMode, setOpViewMode] = useState<'today' | 'all'>('today');
+  const [isExportingCompletedExcel, setIsExportingCompletedExcel] = useState(false);
+  const [labViewMode, setLabViewMode] = useState<'catalog' | 'requests'>('catalog');
+  const [labRequestDate, setLabRequestDate] = useState<string>('');
 
   // Hospital Admin Avatar Upload State (Requirement 20)
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
@@ -100,6 +107,21 @@ export const HospitalAdminDashboardPage: React.FC = () => {
   // Hospital Labs Management State (Requirement 6)
   const [editingLab, setEditingLab] = useState<any | null>(null);
   const [labSearch, setLabSearch] = useState('');
+
+  // Slip Download State & Handler
+  const [downloadingSlipId, setDownloadingSlipId] = useState<string | null>(null);
+
+  const handleDownloadOpSlip = async (appointmentId: string, opNumber?: string) => {
+    setDownloadingSlipId(appointmentId);
+    try {
+      await appointmentsApi.downloadPdf(appointmentId, `Digital_OP_${opNumber || appointmentId}.pdf`);
+      toast.success('Download Complete', 'Digital OP Slip PDF downloaded successfully.');
+    } catch (err: any) {
+      toast.error('Download Failed', err.message || 'Could not download PDF slip');
+    } finally {
+      setDownloadingSlipId(null);
+    }
+  };
 
   // Sync URL hash with activeTab (Requirement 17)
   useEffect(() => {
@@ -323,6 +345,117 @@ export const HospitalAdminDashboardPage: React.FC = () => {
   const [offlineFee, setOfflineFee] = useState<number>(500);
   const [offlineNotes, setOfflineNotes] = useState('');
   const [createdOfflineBooking, setCreatedOfflineBooking] = useState<any | null>(null);
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const [isExportingAppointmentsExcel, setIsExportingAppointmentsExcel] = useState(false);
+  const [isExportingPatientsExcel, setIsExportingPatientsExcel] = useState(false);
+
+  const handleExportExcel = async () => {
+    setIsExportingExcel(true);
+    try {
+      const blob = await adminApi.exportAllDataExcel();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      const safeHospName = (hospitalProfile?.name || user?.hospital?.name || 'Hospital').replace(/[^a-zA-Z0-9]/g, '_');
+      a.download = `MedPulse_${safeHospName}_AllData_${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+      toast.success('Excel Export Successful', 'All hospital records (Appointments, Doctors, Departments, Staff, Patients) exported to Excel (.xlsx)');
+    } catch (err: any) {
+      toast.error('Excel Export Failed', err.message || 'Could not export Excel file');
+    } finally {
+      setIsExportingExcel(false);
+    }
+  };
+
+  const handleExportAppointmentsExcel = async () => {
+    setIsExportingAppointmentsExcel(true);
+    try {
+      const effectiveDate = opViewMode === 'today' ? new Date().toISOString().split('T')[0] : (selectedDate || undefined);
+      const blob = await adminApi.exportAppointmentsExcel({
+        status: statusFilter !== 'ALL' ? statusFilter : undefined,
+        date: effectiveDate,
+        search: searchQuery || undefined,
+      });
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      const safeHospName = (hospitalProfile?.name || user?.hospital?.name || 'Hospital').replace(/[^a-zA-Z0-9]/g, '_');
+      const todayStr = new Date().toISOString().split('T')[0];
+      a.download = `MedPulse_${safeHospName}_Appointments_${todayStr}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+      toast.success(
+        'Appointments Export Successful',
+        'Hospital appointments list exported to Excel (.xlsx)'
+      );
+    } catch (err: any) {
+      toast.error('Appointments Export Failed', err.message || 'Could not export appointments Excel');
+    } finally {
+      setIsExportingAppointmentsExcel(false);
+    }
+  };
+
+  const handleExportCompletedAppointmentsExcel = async () => {
+    setIsExportingCompletedExcel(true);
+    try {
+      const effectiveDate = opViewMode === 'today' ? new Date().toISOString().split('T')[0] : (selectedDate || undefined);
+      const blob = await adminApi.exportAppointmentsExcel({
+        status: 'COMPLETED',
+        date: effectiveDate,
+        search: searchQuery || undefined,
+      });
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      const safeHospName = (hospitalProfile?.name || user?.hospital?.name || 'Hospital').replace(/[^a-zA-Z0-9]/g, '_');
+      const todayStr = new Date().toISOString().split('T')[0];
+      a.download = `MedPulse_${safeHospName}_Completed_Appointments_${todayStr}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+      toast.success(
+        'Completed Appointments Exported',
+        'Completed OPD consultations list exported to Excel (.xlsx)'
+      );
+    } catch (err: any) {
+      toast.error('Completed Appointments Export Failed', err.message || 'Could not export completed appointments');
+    } finally {
+      setIsExportingCompletedExcel(false);
+    }
+  };
+
+  const handleExportPatientsExcel = async () => {
+    setIsExportingPatientsExcel(true);
+    try {
+      const blob = await adminApi.exportPatientsExcel({
+        search: patientSearch || undefined,
+      });
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      const safeHospName = (hospitalProfile?.name || user?.hospital?.name || 'Hospital').replace(/[^a-zA-Z0-9]/g, '_');
+      const todayStr = new Date().toISOString().split('T')[0];
+      a.download = `MedPulse_${safeHospName}_Patients_${todayStr}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+      toast.success(
+        'Patients Export Successful',
+        'Hospital patient directory records exported to Excel (.xlsx)'
+      );
+    } catch (err: any) {
+      toast.error('Patients Export Failed', err.message || 'Could not export patient records Excel');
+    } finally {
+      setIsExportingPatientsExcel(false);
+    }
+  };
 
   // Patient Records States
   const [patientSearch, setPatientSearch] = useState('');
@@ -387,14 +520,17 @@ export const HospitalAdminDashboardPage: React.FC = () => {
     refetchInterval: 10000,
   });
 
+  const todayDateStr = new Date().toISOString().split('T')[0];
+  const effectiveAppointmentsDate = opViewMode === 'today' ? todayDateStr : (selectedDate || undefined);
+
   // Fetch appointments
   const { data: appointments, isLoading: appointmentsLoading } = useQuery({
-    queryKey: ['admin-appointments', statusFilter, searchQuery, selectedDate],
+    queryKey: ['admin-appointments', statusFilter, searchQuery, opViewMode, effectiveAppointmentsDate],
     queryFn: () =>
       adminApi.getAppointments({
         status: statusFilter,
         search: searchQuery || undefined,
-        date: selectedDate || undefined,
+        date: effectiveAppointmentsDate,
       }),
     refetchInterval: 10000,
   });
@@ -526,6 +662,24 @@ export const HospitalAdminDashboardPage: React.FC = () => {
     onError: (err: any) => {
       toast.error('Update Failed', err.message);
     },
+  });
+
+  const deleteLabMutation = useMutation({
+    mutationFn: (labId: string) => adminApi.deleteLab(labId),
+    onSuccess: () => {
+      toast.success('Laboratory Deleted', 'Laboratory record removed successfully');
+      queryClient.invalidateQueries({ queryKey: ['admin-labs'] });
+    },
+    onError: (err: any) => {
+      toast.error('Delete Failed', err?.response?.data?.message || err?.message || 'Could not delete laboratory');
+    },
+  });
+
+  // Doctor Laboratory Test Requests for this hospital (by Date)
+  const { data: adminLabRequests, isLoading: adminLabRequestsLoading, refetch: refetchAdminLabRequests } = useQuery({
+    queryKey: ['admin-lab-requests', labRequestDate],
+    queryFn: () => adminApi.getHospitalLabRequests(labRequestDate || undefined),
+    enabled: activeTab === 'labs' && canManageLabs && labViewMode === 'requests',
   });
 
   // Offline OP Booking Mutation
@@ -874,6 +1028,19 @@ export const HospitalAdminDashboardPage: React.FC = () => {
             Hospital Branding
           </Button>
 
+          {/* EXPORT ALL DATA TO EXCEL BUTTON */}
+          <Button
+            variant="outline"
+            onClick={handleExportExcel}
+            disabled={isExportingExcel}
+            className="border-emerald-300 text-emerald-800 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-400 font-bold text-xs flex items-center gap-1.5 shadow-sm"
+            size="sm"
+            title="Export all hospital data to Excel (.xlsx) including Appointments, Doctors, Departments, Staff, and Patients"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            {isExportingExcel ? 'Exporting...' : 'Export to Excel (.xlsx)'}
+          </Button>
+
           {/* OFFLINE WALK-IN BOOKING BUTTON */}
           {canManageAppointments && (
             <Button
@@ -900,7 +1067,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                   activeTab === 'appointments' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Appointments ({metrics?.todayAppointments || 0})
+                Appointments ({appointments ? appointments.length : (metrics?.totalAppointments ?? metrics?.todayAppointments ?? 0)})
               </button>
             )}
 
@@ -987,14 +1154,16 @@ export const HospitalAdminDashboardPage: React.FC = () => {
           type="button"
           onClick={() => {
             handleTabChange('appointments');
+            setOpViewMode('today');
+            setSelectedDate('');
             setStatusFilter('ALL');
           }}
           className={`min-w-[130px] sm:min-w-0 snap-start bg-white p-4 rounded-2xl border text-left shadow-sm space-y-1 shrink-0 sm:shrink transition-all hover:border-royal-400 hover:shadow-md cursor-pointer ${
-            activeTab === 'appointments' && statusFilter === 'ALL'
+            activeTab === 'appointments' && opViewMode === 'today' && statusFilter === 'ALL'
               ? 'border-royal-500 ring-2 ring-royal-200'
               : 'border-slate-200'
           }`}
-          title="Click to view all appointments"
+          title="Click to view today's appointments"
         >
           <span className="text-[10px] uppercase font-bold text-slate-400 block">Today's Total</span>
           <div className="text-2xl font-black text-slate-900">{metrics?.todayAppointments || 0}</div>
@@ -1032,7 +1201,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
         >
           <span className="text-[10px] uppercase font-bold text-slate-400 block">Waiting in OPD</span>
           <div className="text-2xl font-black text-amber-600">
-            {(appointments || []).filter((a) => a.status === 'WAITING').length}
+            {metrics?.waitingAppointments !== undefined ? metrics.waitingAppointments : (appointments || []).filter((a) => a.status === 'WAITING').length}
           </div>
         </button>
 
@@ -1096,6 +1265,39 @@ export const HospitalAdminDashboardPage: React.FC = () => {
           {/* Filters Bar */}
           <div className="p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-3 text-xs">
+              {/* Today's OPs vs All OPs View Switcher */}
+              <div className="flex items-center bg-slate-100 p-1 rounded-xl text-xs font-bold gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpViewMode('today');
+                    setSelectedDate('');
+                  }}
+                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                    opViewMode === 'today'
+                      ? 'bg-royal-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="View only today's scheduled OP appointments"
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>Today's OPs</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpViewMode('all')}
+                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                    opViewMode === 'all'
+                      ? 'bg-royal-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="View appointments across all dates"
+                >
+                  <ListFilter className="w-3.5 h-3.5" />
+                  <span>All OPs</span>
+                </button>
+              </div>
+
               {/* Status Filter */}
               <div className="flex items-center gap-1.5">
                 <span className="text-slate-500 font-semibold">Status:</span>
@@ -1119,23 +1321,78 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                 <span className="text-slate-500 font-semibold">Date:</span>
                 <input
                   type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
+                  value={opViewMode === 'today' ? todayDateStr : selectedDate}
+                  onChange={(e) => {
+                    setSelectedDate(e.target.value);
+                    if (e.target.value !== todayDateStr) {
+                      setOpViewMode('all');
+                    }
+                  }}
                   className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-800 text-xs font-medium"
                 />
+                {selectedDate ? (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDate('')}
+                    className="text-[11px] font-bold text-rose-600 hover:text-rose-800 bg-rose-50 border border-rose-200 hover:bg-rose-100 px-2 py-1 rounded transition-colors"
+                    title="Clear date filter to show all appointments"
+                  >
+                    Clear
+                  </button>
+                ) : opViewMode === 'all' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpViewMode('today');
+                      setSelectedDate('');
+                    }}
+                    className="text-[11px] font-bold text-royal-700 hover:text-royal-900 bg-royal-50 border border-royal-200 hover:bg-royal-100 px-2 py-1 rounded transition-colors"
+                    title="Filter today's appointments"
+                  >
+                    Today
+                  </button>
+                ) : null}
               </div>
             </div>
 
-            {/* Search Input */}
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs w-full sm:w-64">
-              <Search className="w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search patient, mobile, OP..."
-                className="w-full bg-transparent focus:outline-none text-slate-900 placeholder:text-slate-400"
-              />
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Search Input */}
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs w-full sm:w-60">
+                <Search className="w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search patient, mobile, OP..."
+                  className="w-full bg-transparent focus:outline-none text-slate-900 placeholder:text-slate-400"
+                />
+              </div>
+
+              {/* EXPORT COMPLETED APPOINTMENTS TO EXCEL BUTTON */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportCompletedAppointmentsExcel}
+                disabled={isExportingCompletedExcel}
+                className="border-teal-300 text-teal-800 bg-teal-50 hover:bg-teal-100 hover:border-teal-400 font-bold text-xs flex items-center gap-1.5 shadow-xs whitespace-nowrap"
+                title="Export completed appointments to Excel (.xlsx)"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-teal-600" />
+                {isExportingCompletedExcel ? 'Exporting...' : 'Export Completed OPs (.xlsx)'}
+              </Button>
+
+              {/* EXPORT APPOINTMENTS TO EXCEL BUTTON */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportAppointmentsExcel}
+                disabled={isExportingAppointmentsExcel}
+                className="border-emerald-300 text-emerald-800 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-400 font-bold text-xs flex items-center gap-1.5 shadow-xs whitespace-nowrap"
+                title="Export appointments to Excel (.xlsx)"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                {isExportingAppointmentsExcel ? 'Exporting...' : 'Export Appointments (.xlsx)'}
+              </Button>
             </div>
           </div>
 
@@ -1151,19 +1408,20 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                   <th className="px-5 py-3.5">OP Slip</th>
                   <th className="px-5 py-3.5">Payment</th>
                   <th className="px-5 py-3.5">Status</th>
-                  <th className="px-5 py-3.5 text-right">Workflow Actions</th>
+                  <th className="px-5 py-3.5">Follow-up Date</th>
+                  <th className="px-5 py-3.5 text-right whitespace-nowrap min-w-[210px]">Workflow Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {appointmentsLoading ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-10 text-slate-400">
+                    <td colSpan={9} className="text-center py-10 text-slate-400">
                       Loading appointments...
                     </td>
                   </tr>
                 ) : !appointments || appointments.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-12 text-slate-400">
+                    <td colSpan={9} className="text-center py-12 text-slate-400">
                       No appointments matching the specified filters.
                     </td>
                   </tr>
@@ -1189,16 +1447,23 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                       <td className="px-5 py-4">
                         {apt.digitalOp ? (
                           <div className="space-y-1">
-                            <span className="font-mono text-[11px] font-bold text-royal-800 bg-royal-50 px-2 py-0.5 rounded">
+                            <span className="font-mono text-[11px] font-bold text-royal-800 bg-royal-50 px-2 py-0.5 rounded border border-royal-200 block w-fit">
                               {apt.digitalOp.opNumber}
                             </span>
-                            <a
-                              href={appointmentsApi.getPdfUrl(apt.id)}
-                              download
-                              className="flex items-center gap-1 text-[11px] text-royal-600 hover:underline pt-0.5"
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadOpSlip(apt.id, apt.digitalOp?.opNumber)}
+                              disabled={downloadingSlipId === apt.id}
+                              className="flex items-center gap-1 text-[11px] text-royal-600 hover:text-royal-800 hover:underline pt-0.5 font-medium cursor-pointer"
+                              title="Download Digital OP Slip PDF"
                             >
-                              <Download className="w-3 h-3" /> PDF Slip
-                            </a>
+                              {downloadingSlipId === apt.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin text-royal-600" />
+                              ) : (
+                                <Download className="w-3 h-3 text-royal-600" />
+                              )}
+                              <span>{downloadingSlipId === apt.id ? 'Downloading...' : 'PDF Slip'}</span>
+                            </button>
                           </div>
                         ) : (
                           <span className="text-slate-400">Generating...</span>
@@ -1209,31 +1474,39 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                         <div className="text-[10px] text-emerald-600 font-semibold">PAID (Razorpay)</div>
                       </td>
                       <td className="px-5 py-4">{getStatusBadge(apt.status)}</td>
-                      <td className="px-5 py-4 text-right">
-                        <div className="inline-flex items-center gap-1">
+                      <td className="px-5 py-4">
+                        {apt.prescription?.followUpDate ? (
+                          <span className="inline-flex items-center gap-1 font-bold text-teal-800 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded text-xs whitespace-nowrap">
+                            <Calendar className="w-3 h-3 text-teal-600" />
+                            {apt.prescription.followUpDate}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 font-mono">—</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4 text-right whitespace-nowrap min-w-[210px]">
+                        <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
                           {apt.status === 'CONFIRMED' && (
                             <Button
-                              variant="outline"
                               size="sm"
-                              className="text-[10px] px-2 py-1 text-royal-700 bg-royal-50 border-royal-200 hover:bg-royal-100"
+                              className="text-xs px-2.5 py-1 text-royal-700 bg-royal-50 border border-royal-200 hover:bg-royal-100 font-bold rounded-lg shadow-2xs"
                               onClick={() =>
                                 updateStatusMutation.mutate({ id: apt.id, status: 'WAITING' })
                               }
                             >
-                              <UserCheck className="w-3 h-3 mr-1" /> Mark Arrived
+                              <UserCheck className="w-3.5 h-3.5 mr-1 text-royal-600" /> Mark Arrived
                             </Button>
                           )}
 
                           {apt.status === 'WAITING' && (
                             <Button
-                              variant="outline"
                               size="sm"
-                              className="text-[10px] px-2 py-1 text-purple-700 bg-purple-50 border-purple-200 hover:bg-purple-100"
+                              className="text-xs px-2.5 py-1 text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 font-bold rounded-lg shadow-2xs"
                               onClick={() =>
                                 updateStatusMutation.mutate({ id: apt.id, status: 'IN_CONSULTATION' })
                               }
                             >
-                              In Consultation
+                              <Stethoscope className="w-3.5 h-3.5 mr-1 text-purple-600" /> In Consultation
                             </Button>
                           )}
 
@@ -1241,28 +1514,39 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                             <Button
                               variant="success"
                               size="sm"
-                              className="text-[10px] px-2 py-1"
+                              className="text-xs px-2.5 py-1 font-bold rounded-lg shadow-2xs"
                               onClick={() =>
                                 updateStatusMutation.mutate({ id: apt.id, status: 'COMPLETED' })
                               }
                             >
-                              Complete
+                              <CheckCircle className="w-3.5 h-3.5 mr-1" /> Complete
                             </Button>
                           )}
 
                           {apt.status !== 'COMPLETED' && apt.status !== 'CANCELLED' && (
                             <Button
-                              variant="ghost"
                               size="sm"
-                              className="text-[10px] text-rose-600 hover:bg-rose-50 px-2 py-1"
+                              className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-300 hover:bg-rose-100 hover:border-rose-400 px-2.5 py-1 rounded-lg shadow-2xs"
                               onClick={() => {
-                                if (window.confirm('Cancel this appointment?')) {
+                                if (window.confirm(`Cancel appointment #${apt.tokenNumber} for ${apt.patient.fullName}?`)) {
                                   updateStatusMutation.mutate({ id: apt.id, status: 'CANCELLED' });
                                 }
                               }}
                             >
-                              Cancel
+                              <XCircle className="w-3.5 h-3.5 mr-1 text-rose-600" /> Cancel
                             </Button>
+                          )}
+
+                          {apt.status === 'COMPLETED' && (
+                            <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                              <CheckCircle className="w-3.5 h-3.5 text-emerald-600" /> Completed
+                            </span>
+                          )}
+
+                          {apt.status === 'CANCELLED' && (
+                            <span className="inline-flex items-center gap-1 text-xs font-bold text-rose-700 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200">
+                              <XCircle className="w-3.5 h-3.5 text-rose-600" /> Cancelled
+                            </span>
                           )}
                         </div>
                       </td>
@@ -1401,15 +1685,14 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                           <CheckCircle className="w-3.5 h-3.5 mr-1" /> Approve
                         </Button>
                         <Button
-                          variant="outline"
                           size="sm"
-                          className="text-xs text-rose-600 border-rose-200 hover:bg-rose-50 py-1.5"
+                          className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-300 hover:bg-rose-100 hover:border-rose-400 py-1.5 shadow-2xs"
                           onClick={() => {
                             setRejectingDoctor(pDoc);
                             setDoctorRejectReason('');
                           }}
                         >
-                          <X className="w-3.5 h-3.5 mr-1" /> Reject
+                          <X className="w-3.5 h-3.5 mr-1 text-rose-600" /> Reject
                         </Button>
                       </div>
                     </div>
@@ -1535,15 +1818,14 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                                 <CheckCircle className="w-3.5 h-3.5 mr-1" /> Approve
                               </Button>
                               <Button
-                                variant="outline"
                                 size="sm"
-                                className="text-xs text-rose-600 border-rose-200 hover:bg-rose-50"
+                                className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-300 hover:bg-rose-100 hover:border-rose-400 shadow-2xs"
                                 onClick={() => {
                                   setRejectingDoctor(doc);
                                   setDoctorRejectReason('');
                                 }}
                               >
-                                Reject
+                                <X className="w-3.5 h-3.5 mr-1 text-rose-600" /> Reject
                               </Button>
                             </>
                           ) : docStatus === 'ACTIVE' ? (
@@ -1638,15 +1920,30 @@ export const HospitalAdminDashboardPage: React.FC = () => {
               </p>
             </div>
 
-            <div className="relative min-w-[260px]">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search MRN, Name, or Mobile..."
-                value={patientSearch}
-                onChange={(e) => setPatientSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-royal-500 bg-white"
-              />
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="relative min-w-[240px]">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search MRN, Name, or Mobile..."
+                  value={patientSearch}
+                  onChange={(e) => setPatientSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-royal-500 bg-white"
+                />
+              </div>
+
+              {/* EXPORT PATIENTS TO EXCEL BUTTON */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportPatientsExcel}
+                disabled={isExportingPatientsExcel}
+                className="border-emerald-300 text-emerald-800 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-400 font-bold text-xs flex items-center gap-1.5 shadow-xs whitespace-nowrap shrink-0"
+                title="Export patient records to Excel (.xlsx)"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                {isExportingPatientsExcel ? 'Exporting...' : 'Export Patients (.xlsx)'}
+              </Button>
             </div>
           </div>
 
@@ -1809,11 +2106,10 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                             </Button>
                             <Button
                               size="sm"
-                              variant="outline"
-                              className="text-rose-600 hover:bg-rose-50 border-rose-200 text-xs"
+                              className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-300 hover:bg-rose-100 hover:border-rose-400 shadow-2xs"
                               onClick={() => rejectStaffMutation.mutate(staff.id)}
                             >
-                              <X className="w-3 h-3 mr-1" /> Reject
+                              <X className="w-3.5 h-3.5 mr-1 text-rose-600" /> Reject
                             </Button>
                           </>
                         )}
@@ -1935,211 +2231,408 @@ export const HospitalAdminDashboardPage: React.FC = () => {
         </Card>
       )}
 
-      {/* TAB 7: HOSPITAL DIAGNOSTIC LABORATORIES (Requirement 6) */}
+      {/* TAB 7: HOSPITAL DIAGNOSTIC LABORATORIES (Requirement 6 & Group 1) */}
       {activeTab === 'labs' && canManageLabs && (
         <Card className="rounded-2xl border-slate-200 shadow-sm space-y-4">
           <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 <FlaskConical className="w-5 h-5 text-purple-600" />
-                Hospital Associated Diagnostic Laboratories
+                Hospital Associated Diagnostic Laboratories & Requisitions
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Manage in-house and partner pathology laboratories, configure public vs private hospital-only booking visibility, and review test catalogs
+                Manage in-house and partner pathology laboratories, review doctor lab requisitions by date, and configure private vs public booking visibility
               </p>
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Search labs by name, city, phone..."
-                  value={labSearch}
-                  onChange={(e) => setLabSearch(e.target.value)}
-                  className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-purple-500 w-52 sm:w-64"
-                />
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => refetchLabs()}
-                className="text-xs shrink-0"
+            {/* Sub-tab view mode switcher */}
+            <div className="flex items-center bg-slate-100 p-1 rounded-xl text-xs font-bold gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => setLabViewMode('catalog')}
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                  labViewMode === 'catalog'
+                    ? 'bg-purple-700 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
               >
-                <RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh
-              </Button>
+                <FlaskConical className="w-3.5 h-3.5" />
+                <span>Lab Directory ({(hospitalLabs || []).length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setLabViewMode('requests')}
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                  labViewMode === 'requests'
+                    ? 'bg-purple-700 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Activity className="w-3.5 h-3.5" />
+                <span>Doctor Requisitions (by Date)</span>
+              </button>
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
-                <tr>
-                  <th className="px-5 py-3">Laboratory Details</th>
-                  <th className="px-5 py-3">Contact & Address</th>
-                  <th className="px-5 py-3">Affiliation / Status</th>
-                  <th className="px-5 py-3">Visibility Mode</th>
-                  <th className="px-5 py-3">Tests & Volume</th>
-                  <th className="px-5 py-3 text-right">Visibility & Controls</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
-                {labsLoading ? (
-                  <tr>
-                    <td colSpan={6} className="text-center py-10 text-slate-400">
-                      Loading hospital diagnostic laboratories...
-                    </td>
-                  </tr>
-                ) : (hospitalLabs || []).filter((l: any) => {
-                    if (!labSearch.trim()) return true;
-                    const q = labSearch.toLowerCase();
-                    return (
-                      l.name?.toLowerCase().includes(q) ||
-                      l.city?.toLowerCase().includes(q) ||
-                      l.phone?.includes(q) ||
-                      l.email?.toLowerCase().includes(q)
-                    );
-                  }).length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="text-center py-12 text-slate-400">
-                      <FlaskConical className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                      No diagnostic laboratories found matching your criteria.
-                    </td>
-                  </tr>
-                ) : (
-                  (hospitalLabs || [])
-                    .filter((l: any) => {
-                      if (!labSearch.trim()) return true;
-                      const q = labSearch.toLowerCase();
-                      return (
-                        l.name?.toLowerCase().includes(q) ||
-                        l.city?.toLowerCase().includes(q) ||
-                        l.phone?.includes(q) ||
-                        l.email?.toLowerCase().includes(q)
-                      );
-                    })
-                    .map((lab: any) => {
-                      const isPublic = (lab.visibility || 'PUBLIC') === 'PUBLIC';
-                      return (
-                        <tr key={lab.id} className="hover:bg-slate-50/80 transition-colors">
-                          <td className="px-5 py-4">
-                            <div className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                              {lab.name}
-                              {isPublic ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                                  <Globe className="w-3 h-3 text-emerald-600" /> Public Lab
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                                  <Lock className="w-3 h-3 text-amber-600" /> In-Hospital Only
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">
-                              ID: <span className="font-mono">{lab.id.slice(0, 8)}</span>
-                            </div>
-                          </td>
+          {labViewMode === 'catalog' ? (
+            <>
+              <div className="px-5 pt-1 pb-3 flex items-center justify-between gap-3">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search labs by name, city, phone..."
+                    value={labSearch}
+                    onChange={(e) => setLabSearch(e.target.value)}
+                    className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-purple-500 w-52 sm:w-64"
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refetchLabs()}
+                  className="text-xs shrink-0"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh
+                </Button>
+              </div>
 
-                          <td className="px-5 py-4">
-                            <div className="font-semibold text-slate-800">{lab.phone}</div>
-                            <div className="text-slate-500 font-mono text-[11px]">{lab.email}</div>
-                            <div className="text-slate-400 text-[11px] truncate max-w-xs">
-                              {lab.address ? `${lab.address}, ${lab.city}` : lab.city || 'Hospital Campus'}
-                            </div>
-                          </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="px-5 py-3">Laboratory Details</th>
+                      <th className="px-5 py-3">Contact & Address</th>
+                      <th className="px-5 py-3">Affiliation / Status</th>
+                      <th className="px-5 py-3">Visibility Mode</th>
+                      <th className="px-5 py-3">Tests & Volume</th>
+                      <th className="px-5 py-3 text-right">Visibility & Controls</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {labsLoading ? (
+                      <tr>
+                        <td colSpan={6} className="text-center py-10 text-slate-400">
+                          Loading hospital diagnostic laboratories...
+                        </td>
+                      </tr>
+                    ) : (hospitalLabs || []).filter((l: any) => {
+                        if (!labSearch.trim()) return true;
+                        const q = labSearch.toLowerCase();
+                        return (
+                          l.name?.toLowerCase().includes(q) ||
+                          l.city?.toLowerCase().includes(q) ||
+                          l.phone?.includes(q) ||
+                          l.email?.toLowerCase().includes(q)
+                        );
+                      }).length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="text-center py-12 text-slate-400">
+                          <FlaskConical className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                          No diagnostic laboratories found matching your criteria.
+                        </td>
+                      </tr>
+                    ) : (
+                      (hospitalLabs || [])
+                        .filter((l: any) => {
+                          if (!labSearch.trim()) return true;
+                          const q = labSearch.toLowerCase();
+                          return (
+                            l.name?.toLowerCase().includes(q) ||
+                            l.city?.toLowerCase().includes(q) ||
+                            l.phone?.includes(q) ||
+                            l.email?.toLowerCase().includes(q)
+                          );
+                        })
+                        .map((lab: any) => {
+                          const isPublic = (lab.visibility || 'PUBLIC') === 'PUBLIC';
+                          return (
+                            <tr key={lab.id} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="px-5 py-4">
+                                <div className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                                  {lab.name}
+                                  {isPublic ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                      <Globe className="w-3.5 h-3.5 text-emerald-600" /> Public Lab
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                                      <Lock className="w-3.5 h-3.5 text-amber-600" /> In-Hospital Only
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-slate-500 mt-0.5">
+                                  ID: <span className="font-mono">{lab.id.slice(0, 8)}</span>
+                                </div>
+                              </td>
 
-                          <td className="px-5 py-4">
-                            <Badge
-                              variant={lab.status === 'APPROVED' || lab.status === 'ACTIVE' ? 'success' : 'warning'}
-                              className="text-[10px]"
-                            >
-                              {lab.status || 'ACTIVE'}
-                            </Badge>
-                          </td>
+                              <td className="px-5 py-4">
+                                <div className="font-semibold text-slate-800">{lab.phone}</div>
+                                <div className="text-slate-500 font-mono text-[11px]">{lab.email}</div>
+                                <div className="text-slate-400 text-[11px] truncate max-w-xs">
+                                  {lab.address ? `${lab.address}, ${lab.city}` : lab.city || 'Hospital Campus'}
+                                </div>
+                              </td>
 
-                          <td className="px-5 py-4">
-                            {isPublic ? (
-                              <div className="space-y-0.5">
-                                <span className="font-bold text-emerald-700 flex items-center gap-1">
-                                  <Globe className="w-3.5 h-3.5 text-emerald-600" /> Public Catalog
-                                </span>
-                                <p className="text-[10px] text-slate-500 leading-tight">
-                                  Listed on patient portal for direct test bookings
-                                </p>
-                              </div>
-                            ) : (
-                              <div className="space-y-0.5">
-                                <span className="font-bold text-amber-700 flex items-center gap-1">
-                                  <Lock className="w-3.5 h-3.5 text-amber-600" /> Private Lab
-                                </span>
-                                <p className="text-[10px] text-slate-500 leading-tight">
-                                  Restricted to in-hospital doctor clinical requisitions
-                                </p>
-                              </div>
-                            )}
-                          </td>
+                              <td className="px-5 py-4">
+                                <Badge
+                                  variant={lab.status === 'APPROVED' || lab.status === 'ACTIVE' ? 'success' : 'warning'}
+                                  className="text-[10px]"
+                                >
+                                  {lab.status || 'ACTIVE'}
+                                </Badge>
+                              </td>
 
-                          <td className="px-5 py-4">
-                            <div className="font-bold text-purple-900">
-                              {lab._count?.tests || (lab.tests || []).length} Tests Listed
-                            </div>
-                            <div className="text-[11px] text-slate-500">
-                              {lab._count?.requests || 0} Requisitions Processed
-                            </div>
-                          </td>
-
-                          <td className="px-5 py-4 text-right">
-                            <div className="inline-flex items-center gap-2">
-                              {/* Visibility Toggle Button (Requirement 6) */}
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  updateLabVisibilityMutation.mutate({
-                                    labId: lab.id,
-                                    visibility: isPublic ? 'PRIVATE' : 'PUBLIC',
-                                  })
-                                }
-                                isLoading={updateLabVisibilityMutation.isPending}
-                                className={`text-xs font-bold ${
-                                  isPublic
-                                    ? 'border-amber-300 text-amber-700 hover:bg-amber-50'
-                                    : 'border-emerald-300 text-emerald-700 hover:bg-emerald-50'
-                                }`}
-                                title={
-                                  isPublic
-                                    ? 'Make this lab private so only hospital doctors can order tests'
-                                    : 'Make this lab public so patients can book tests directly'
-                                }
-                              >
+                              <td className="px-5 py-4">
                                 {isPublic ? (
-                                  <>
-                                    <Lock className="w-3.5 h-3.5 mr-1 text-amber-600" /> Make Private
-                                  </>
+                                  <div className="space-y-0.5">
+                                    <span className="font-bold text-emerald-700 flex items-center gap-1">
+                                      <Globe className="w-3.5 h-3.5 text-emerald-600" /> Public Catalog
+                                    </span>
+                                    <p className="text-[10px] text-slate-500 leading-tight">
+                                      Listed on patient portal for direct test bookings
+                                    </p>
+                                  </div>
                                 ) : (
-                                  <>
-                                    <Globe className="w-3.5 h-3.5 mr-1 text-emerald-600" /> Make Public
-                                  </>
+                                  <div className="space-y-0.5">
+                                    <span className="font-bold text-amber-700 flex items-center gap-1">
+                                      <Lock className="w-3.5 h-3.5 text-amber-600" /> Private Lab
+                                    </span>
+                                    <p className="text-[10px] text-slate-500 leading-tight">
+                                      Restricted to in-hospital doctor clinical requisitions
+                                    </p>
+                                  </div>
                                 )}
-                              </Button>
+                              </td>
 
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-xs text-purple-700 border-purple-200 hover:bg-purple-50"
-                                onClick={() => setEditingLab(lab)}
+                              <td className="px-5 py-4">
+                                <div className="font-bold text-purple-900">
+                                  {lab._count?.tests || (lab.tests || []).length} Tests Listed
+                                </div>
+                                <div className="text-[11px] text-slate-500">
+                                  {lab._count?.requests || 0} Requisitions Processed
+                                </div>
+                              </td>
+
+                              <td className="px-5 py-4 text-right">
+                                <div className="inline-flex items-center gap-2">
+                                  {/* Visibility Toggle Button */}
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() =>
+                                      updateLabVisibilityMutation.mutate({
+                                        labId: lab.id,
+                                        visibility: isPublic ? 'PRIVATE' : 'PUBLIC',
+                                      })
+                                    }
+                                    isLoading={updateLabVisibilityMutation.isPending}
+                                    className={`text-xs font-bold ${
+                                      isPublic
+                                        ? 'border-amber-300 text-amber-700 hover:bg-amber-50'
+                                        : 'border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                                    }`}
+                                    title={
+                                      isPublic
+                                        ? 'Make this lab private so only hospital doctors can order tests'
+                                        : 'Make this lab public so patients can book tests directly'
+                                    }
+                                  >
+                                    {isPublic ? (
+                                      <>
+                                        <Lock className="w-3.5 h-3.5 mr-1 text-amber-600" /> Make Private
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Globe className="w-3.5 h-3.5 mr-1 text-emerald-600" /> Make Public
+                                      </>
+                                    )}
+                                  </Button>
+
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-xs text-purple-700 border-purple-200 hover:bg-purple-50"
+                                    onClick={() => setEditingLab(lab)}
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5 mr-1" /> Edit Profile
+                                  </Button>
+
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
+                                    onClick={() => {
+                                      if (window.confirm(`Are you sure you want to delete laboratory "${lab.name}"? This action cannot be undone.`)) {
+                                        deleteLabMutation.mutate(lab.id);
+                                      }
+                                    }}
+                                    isLoading={deleteLabMutation.isPending}
+                                    title="Delete laboratory record"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5 mr-1 text-rose-600" /> Delete
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            /* DOCTOR LAB REQUISITIONS (ORGANIZED BY DATE) */
+            <>
+              <div className="px-5 pt-1 pb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-slate-500 font-semibold">Filter by Date:</span>
+                  <input
+                    type="date"
+                    value={labRequestDate}
+                    onChange={(e) => setLabRequestDate(e.target.value)}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-800 text-xs font-medium"
+                  />
+                  {labRequestDate ? (
+                    <button
+                      type="button"
+                      onClick={() => setLabRequestDate('')}
+                      className="text-[11px] font-bold text-rose-600 hover:text-rose-800 bg-rose-50 border border-rose-200 px-2 py-1 rounded"
+                    >
+                      Clear
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setLabRequestDate(new Date().toISOString().split('T')[0])}
+                      className="text-[11px] font-bold text-purple-700 hover:text-purple-900 bg-purple-50 border border-purple-200 px-2 py-1 rounded"
+                    >
+                      Today
+                    </button>
+                  )}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refetchAdminLabRequests()}
+                  className="text-xs shrink-0"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh Requisitions
+                </Button>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="px-5 py-3">Requisition #</th>
+                      <th className="px-5 py-3">Requested Date</th>
+                      <th className="px-5 py-3">Clinician / Doctor</th>
+                      <th className="px-5 py-3">Patient Details</th>
+                      <th className="px-5 py-3">Target Laboratory</th>
+                      <th className="px-5 py-3">Tests Ordered</th>
+                      <th className="px-5 py-3">Priority</th>
+                      <th className="px-5 py-3">Status</th>
+                      <th className="px-5 py-3">Findings / Results</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {adminLabRequestsLoading ? (
+                      <tr>
+                        <td colSpan={9} className="text-center py-10 text-slate-400">
+                          Loading laboratory requisitions...
+                        </td>
+                      </tr>
+                    ) : (adminLabRequests || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="text-center py-12 text-slate-400">
+                          <Activity className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                          No diagnostic laboratory requisitions found for the selected date criteria.
+                        </td>
+                      </tr>
+                    ) : (
+                      (adminLabRequests || []).map((req: any) => {
+                        const parsedTests = typeof req.tests === 'string' ? JSON.parse(req.tests || '[]') : req.tests || [];
+                        const reqDate = req.createdAt ? new Date(req.createdAt).toLocaleDateString() : (req.preferredDate || '—');
+                        const reqTime = req.createdAt ? new Date(req.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                        return (
+                          <tr key={req.id} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="px-5 py-4 font-mono font-bold text-purple-700">
+                              {req.requestNumber}
+                            </td>
+                            <td className="px-5 py-4">
+                              <div className="font-semibold text-slate-900">{reqDate}</div>
+                              {reqTime && <div className="text-[10px] text-slate-400">{reqTime}</div>}
+                            </td>
+                            <td className="px-5 py-4">
+                              <div className="font-bold text-slate-900">{req.doctor?.name ? `Dr. ${req.doctor.name}` : 'Hospital Doctor'}</div>
+                              <div className="text-[11px] text-royal-600">{req.doctor?.specialization || 'Clinical OP'}</div>
+                            </td>
+                            <td className="px-5 py-4">
+                              <div className="font-bold text-slate-900">{req.patient?.fullName}</div>
+                              <div className="text-[11px] text-slate-500">+91 {req.patient?.mobileNumber}</div>
+                              <div className="text-[10px] text-slate-400 font-mono">MRN: {req.patient?.patientIdNumber || 'N/A'}</div>
+                            </td>
+                            <td className="px-5 py-4">
+                              <div className="font-semibold text-slate-900">{req.lab?.name || 'General Pathology Lab'}</div>
+                              <div className="text-[10px] text-slate-500">{req.lab?.phone}</div>
+                            </td>
+                            <td className="px-5 py-4">
+                              <div className="space-y-0.5">
+                                {parsedTests.map((t: any, idx: number) => (
+                                  <div key={idx} className="font-medium text-slate-800">
+                                    • {t.name}
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="px-5 py-4">
+                              <Badge variant={req.priority === 'URGENT' ? 'danger' : 'outline'} className="text-[10px]">
+                                {req.priority}
+                              </Badge>
+                            </td>
+                            <td className="px-5 py-4">
+                              <Badge
+                                variant={
+                                  req.status === 'COMPLETED'
+                                    ? 'success'
+                                    : req.status === 'PROCESSING'
+                                    ? 'purple'
+                                    : req.status === 'CANCELLED'
+                                    ? 'danger'
+                                    : 'warning'
+                                }
+                                className="text-[10px]"
                               >
-                                <Edit2 className="w-3.5 h-3.5 mr-1" /> Edit Profile
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                )}
-              </tbody>
-            </table>
-          </div>
+                                {req.status}
+                              </Badge>
+                            </td>
+                            <td className="px-5 py-4">
+                              {req.report ? (
+                                <div className="space-y-1">
+                                  <div className="font-bold text-emerald-700 flex items-center gap-1">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                    Report Ready
+                                  </div>
+                                  <div className="text-[11px] text-slate-600 truncate max-w-xs">
+                                    {req.report.results}
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 italic">Awaiting specimen analysis</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </Card>
       )}
 
@@ -2882,7 +3375,28 @@ Dr. Vikram Verma,vikram.verma@hospital.org,Consultant Physician,MBBS MD,${c2},8,
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <div className="flex justify-end items-center gap-2 pt-2 border-t border-slate-100">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-royal-200 text-royal-700 hover:bg-royal-50 font-bold flex items-center gap-1.5"
+                  onClick={() =>
+                    handleDownloadOpSlip(
+                      createdOfflineBooking.id,
+                      createdOfflineBooking.digitalOp?.opNumber
+                    )
+                  }
+                  disabled={downloadingSlipId === createdOfflineBooking.id}
+                >
+                  {downloadingSlipId === createdOfflineBooking.id ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-royal-600" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5 text-royal-600" />
+                  )}
+                  {downloadingSlipId === createdOfflineBooking.id
+                    ? 'Downloading...'
+                    : 'Download OP Slip (PDF)'}
+                </Button>
                 <Button
                   size="sm"
                   className="bg-royal-600 hover:bg-royal-700 text-white font-bold"

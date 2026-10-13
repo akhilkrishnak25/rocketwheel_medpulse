@@ -371,6 +371,7 @@ export interface Notification {
 export interface AdminMetrics {
   todayAppointments: number;
   upcomingAppointments: number;
+  waitingAppointments?: number;
   completedAppointments: number;
   cancelledAppointments: number;
   noShowAppointments: number;

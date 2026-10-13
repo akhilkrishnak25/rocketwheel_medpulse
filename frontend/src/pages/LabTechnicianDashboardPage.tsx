@@ -722,7 +722,7 @@ export const LabTechnicianDashboardPage: React.FC = () => {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="text-rose-600 hover:bg-rose-50 text-xs"
+                          className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 hover:border-rose-300 shadow-xs"
                           onClick={() => {
                             if (window.confirm(`Delete ${t.name} from catalog?`)) {
                               deleteTestMutation.mutate(t.id);

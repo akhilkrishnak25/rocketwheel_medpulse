@@ -84,15 +84,20 @@ export class AppointmentService {
     }
 
     // Upsert / find patient scoped to this hospital (Hospital-isolated patient records)
-    let patient = await prisma.patient.findFirst({
+    // Patient Identity Key is the combination of mobile number AND legal name to prevent family members sharing a mobile from overwriting each other
+    const cleanMobile = patientData.mobileNumber.trim();
+    const cleanName = patientData.fullName.trim();
+
+    const candidatePatients = await prisma.patient.findMany({
       where: {
         hospitalId,
-        OR: [
-          { mobileNumber: patientData.mobileNumber },
-          ...(patientData.email ? [{ email: patientData.email }] : []),
-        ],
+        mobileNumber: cleanMobile,
       },
     });
+
+    let patient = candidatePatients.find(
+      (p) => p.fullName.trim().toLowerCase() === cleanName.toLowerCase()
+    );
 
     if (!patient) {
       const hospitalCode = doctor.hospital?.code || 'HOSP';
@@ -103,9 +108,9 @@ export class AppointmentService {
         data: {
           hospitalId,
           patientIdNumber,
-          fullName: patientData.fullName,
-          mobileNumber: patientData.mobileNumber,
-          email: patientData.email || '',
+          fullName: cleanName,
+          mobileNumber: cleanMobile,
+          email: patientData.email ? patientData.email.trim() : '',
           dateOfBirth: patientData.dateOfBirth,
           age: patientAge,
           gender: patientData.gender,
@@ -119,7 +124,8 @@ export class AppointmentService {
       patient = await prisma.patient.update({
         where: { id: patient.id },
         data: {
-          fullName: patientData.fullName,
+          fullName: cleanName,
+          email: patientData.email ? patientData.email.trim() : patient.email,
           dateOfBirth: patientData.dateOfBirth || patient.dateOfBirth,
           age: patientAge !== undefined && patientAge !== null ? patientAge : patient.age,
           gender: patientData.gender || patient.gender,
@@ -707,15 +713,20 @@ export class AppointmentService {
     }
 
     // Scoped patient lookup/create
-    let patient = await prisma.patient.findFirst({
+    // Combination of mobile number AND legal name is unique identity key
+    const cleanMobile = patientData.mobileNumber.trim();
+    const cleanName = patientData.fullName.trim();
+
+    const candidatePatients = await prisma.patient.findMany({
       where: {
         hospitalId,
-        OR: [
-          { mobileNumber: patientData.mobileNumber },
-          ...(patientData.email ? [{ email: patientData.email }] : []),
-        ],
+        mobileNumber: cleanMobile,
       },
     });
+
+    let patient = candidatePatients.find(
+      (p) => p.fullName.trim().toLowerCase() === cleanName.toLowerCase()
+    );
 
     if (!patient) {
       const hospitalCode = doctor.hospital?.code || 'HOSP';
@@ -735,9 +746,9 @@ export class AppointmentService {
         data: {
           hospitalId,
           patientIdNumber,
-          fullName: patientData.fullName,
-          mobileNumber: patientData.mobileNumber,
-          email: patientData.email || '',
+          fullName: cleanName,
+          mobileNumber: cleanMobile,
+          email: patientData.email ? patientData.email.trim() : '',
           dateOfBirth: patientData.dateOfBirth,
           age: patientAge,
           gender: patientData.gender,
@@ -759,7 +770,8 @@ export class AppointmentService {
       patient = await prisma.patient.update({
         where: { id: patient.id },
         data: {
-          fullName: patientData.fullName,
+          fullName: cleanName,
+          email: patientData.email ? patientData.email.trim() : patient.email,
           dateOfBirth: patientData.dateOfBirth || patient.dateOfBirth,
           age: patientAge !== undefined && patientAge !== null ? patientAge : patient.age,
           gender: patientData.gender || patient.gender,

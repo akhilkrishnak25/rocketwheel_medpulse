@@ -104,3 +104,19 @@ export const requirePermission = (permissionKey: string) => {
     return errorResponse(res, 'Forbidden: Insufficient privileges', 403);
   };
 };
+
+export const optionalAuthenticate = (req: Request, _res: Response, next: NextFunction) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = verifyAccessToken(token);
+    req.user = decoded;
+  } catch (error) {
+    // Proceed unauthenticated if token is invalid or expired
+  }
+  next();
+};

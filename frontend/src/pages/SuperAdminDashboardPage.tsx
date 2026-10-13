@@ -647,7 +647,7 @@ export const SuperAdminDashboardPage: React.FC = () => {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="text-[11px] px-2 py-1 text-rose-600 hover:bg-rose-50"
+                            className="text-[11px] px-2 py-1 text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 hover:border-rose-300 rounded-lg shadow-xs font-bold"
                             onClick={() => {
                               if (window.confirm(`Delete hospital "${h.name}" and remove from network?`)) {
                                 deleteHospitalMutation.mutate(h.id);

@@ -100,4 +100,26 @@ export const doctorDashboardApi = {
 
   updateAssignedStaff: (assignedStaffId: string | null) =>
     api.patch<any>('/doctor/assigned-staff', { assignedStaffId }),
+
+  // Export All Doctor Data to Excel (.xlsx)
+  exportAllDataExcel: async (params?: { status?: string }): Promise<Blob> => {
+    const token =
+      localStorage.getItem('rocketwheel_access_token') ||
+      localStorage.getItem('medipulse_access_token');
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const query = new URLSearchParams();
+    if (params?.status && params.status !== 'ALL') query.append('status', params.status);
+    const qs = query.toString() ? `?${query.toString()}` : '';
+
+    const res = await fetch(`${API_BASE_URL}/doctor/export/excel${qs}`, {
+      method: 'GET',
+      headers,
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to export doctor data to Excel (${res.status})`);
+    }
+    return res.blob();
+  },
 };

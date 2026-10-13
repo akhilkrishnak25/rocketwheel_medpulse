@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, API_BASE_URL, getApiBaseUrl } from './client';
 import { AdminMetrics, Appointment, Doctor, Notification } from '../types';
 
 export const adminApi = {
@@ -126,4 +126,78 @@ export const adminApi = {
     api.patch<any>(`/admin/labs/${labId}/visibility`, { visibility }),
   updateLab: (labId: string, data: any) =>
     api.patch<any>(`/admin/labs/${labId}`, data),
+  deleteLab: (labId: string) =>
+    api.delete<any>(`/admin/labs/${labId}`),
+  getHospitalLabRequests: (date?: string) =>
+    api.get<any[]>(`/admin/lab-requests${date ? `?date=${date}` : ''}`),
+
+  // Export All Hospital Data to Excel (.xlsx)
+  exportAllDataExcel: async (): Promise<Blob> => {
+    const token =
+      localStorage.getItem('rocketwheel_access_token') ||
+      localStorage.getItem('medipulse_access_token');
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch(`${getApiBaseUrl()}/admin/export/excel`, {
+      method: 'GET',
+      headers,
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to export hospital data to Excel (${res.status})`);
+    }
+    return res.blob();
+  },
+
+  // Export Appointments to Excel (.xlsx)
+  exportAppointmentsExcel: async (params?: {
+    status?: string;
+    date?: string;
+    search?: string;
+    doctorId?: string;
+  }): Promise<Blob> => {
+    const token =
+      localStorage.getItem('rocketwheel_access_token') ||
+      localStorage.getItem('medipulse_access_token');
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const query = new URLSearchParams();
+    if (params?.status && params.status !== 'ALL') query.append('status', params.status);
+    if (params?.date) query.append('date', params.date);
+    if (params?.search) query.append('search', params.search);
+    if (params?.doctorId) query.append('doctorId', params.doctorId);
+    const qs = query.toString() ? `?${query.toString()}` : '';
+
+    const res = await fetch(`${getApiBaseUrl()}/admin/appointments/export/excel${qs}`, {
+      method: 'GET',
+      headers,
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to export appointments to Excel (${res.status})`);
+    }
+    return res.blob();
+  },
+
+  // Export Patient Records to Excel (.xlsx)
+  exportPatientsExcel: async (params?: { search?: string }): Promise<Blob> => {
+    const token =
+      localStorage.getItem('rocketwheel_access_token') ||
+      localStorage.getItem('medipulse_access_token');
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const query = new URLSearchParams();
+    if (params?.search) query.append('search', params.search);
+    const qs = query.toString() ? `?${query.toString()}` : '';
+
+    const res = await fetch(`${getApiBaseUrl()}/admin/patients/export/excel${qs}`, {
+      method: 'GET',
+      headers,
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to export patient records to Excel (${res.status})`);
+    }
+    return res.blob();
+  },
 };

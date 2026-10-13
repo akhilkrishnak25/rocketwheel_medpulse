@@ -32,6 +32,8 @@ import {
   Printer,
   Calendar,
   CalendarDays,
+  RotateCcw,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { doctorDashboardApi } from '../api/doctor.api';
 import { labApi } from '../api/lab.api';
@@ -82,6 +84,7 @@ export const DoctorDashboardPage: React.FC = () => {
 
   // PDF Document Generation State (Requirement 13)
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
 
   // Template States (CRUD, Search, Bulk Upload)
   const [isSaveTemplateOpen, setIsSaveTemplateOpen] = useState(false);
@@ -130,9 +133,11 @@ export const DoctorDashboardPage: React.FC = () => {
   const [leaveEnd, setLeaveEnd] = useState('');
   const [leaveReason, setLeaveReason] = useState('');
 
-  // Date filtering for OP bookings (Doctor can view OPs booked for today, tomorrow, or next days)
-  const [selectedDateFilter, setSelectedDateFilter] = useState<'TODAY' | 'TOMORROW' | 'NEXT_DAYS' | 'CUSTOM'>('TODAY');
+  // Date filtering for OP bookings (Doctor can view OPs booked for today, tomorrow, next days, or completed)
+  const [selectedDateFilter, setSelectedDateFilter] = useState<'TODAY' | 'TOMORROW' | 'NEXT_DAYS' | 'COMPLETED' | 'CUSTOM'>('TODAY');
   const [customDate, setCustomDate] = useState<string>('');
+  const [doctorLabDateFilter, setDoctorLabDateFilter] = useState<string>('');
+  const [isExportingCompletedExcel, setIsExportingCompletedExcel] = useState(false);
 
   const effectiveDateParam =
     selectedDateFilter === 'CUSTOM'
@@ -659,6 +664,48 @@ export const DoctorDashboardPage: React.FC = () => {
     (a) => a.status === 'IN_CONSULTATION'
   );
 
+  const handleExportExcel = async () => {
+    setIsExportingExcel(true);
+    try {
+      const blob = await doctorDashboardApi.exportAllDataExcel();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      const safeDoctorName = (profile?.user?.name || user?.name || 'Doctor').replace(/[^a-zA-Z0-9]/g, '_');
+      a.download = `MedPulse_Doctor_${safeDoctorName}_AllData_${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+      toast.success('Excel Export Successful', 'All doctor records (OP Queue, Templates, Labs, Schedules, Leaves) exported to Excel (.xlsx)');
+    } catch (err: any) {
+      toast.error('Excel Export Failed', err.message || 'Could not export Excel file');
+    } finally {
+      setIsExportingExcel(false);
+    }
+  };
+
+  const handleExportCompletedExcel = async () => {
+    setIsExportingCompletedExcel(true);
+    try {
+      const blob = await doctorDashboardApi.exportAllDataExcel({ status: 'COMPLETED' });
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      const safeDoctorName = (profile?.user?.name || user?.name || 'Doctor').replace(/[^a-zA-Z0-9]/g, '_');
+      a.download = `MedPulse_Doctor_${safeDoctorName}_Completed_Consultations_${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+      toast.success('Completed Consultations Exported', 'Completed OPD consultations exported to Excel (.xlsx)');
+    } catch (err: any) {
+      toast.error('Export Failed', err.message || 'Could not export completed consultations');
+    } finally {
+      setIsExportingCompletedExcel(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       {/* Title & Actions - Navigation is cleanly hosted in Left Sidebar */}
@@ -684,13 +731,24 @@ export const DoctorDashboardPage: React.FC = () => {
             {activeTab === 'leaves' && "Submit leave requests and view upcoming duty off days"}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {activeTab === 'queue' && (
             <Button variant="outline" size="sm" onClick={() => refetch()} className="shrink-0 text-xs font-bold flex items-center gap-1.5 shadow-sm">
               <Users className="w-3.5 h-3.5 text-royal-600" />
               Refresh Queue ({(appointments || []).length})
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportExcel}
+            disabled={isExportingExcel}
+            className="shrink-0 text-xs font-bold flex items-center gap-1.5 shadow-sm border-emerald-300 text-emerald-800 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-400"
+            title="Export all doctor data to Excel (.xlsx) including Queue, Templates, Labs, Schedules, and Leaves"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+            {isExportingExcel ? 'Exporting...' : 'Export to Excel (.xlsx)'}
+          </Button>
         </div>
       </div>
 
@@ -750,9 +808,10 @@ export const DoctorDashboardPage: React.FC = () => {
                     size="sm"
                     onClick={() => handleAssignStaff('')}
                     disabled={assignSupportStaffMutation.isPending}
-                    className="text-xs text-slate-600 hover:text-rose-600 hover:bg-rose-50 border-slate-300"
+                    className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-300 hover:bg-rose-100 hover:border-rose-400 hover:text-rose-800 shadow-sm flex items-center gap-1.5"
                     title="Remove assignment and return to general nursing pool"
                   >
+                    <RotateCcw className="w-3.5 h-3.5 text-rose-600 shrink-0" />
                     Reset to Pool
                   </Button>
                 )}
@@ -893,11 +952,34 @@ export const DoctorDashboardPage: React.FC = () => {
                     </span>
                   )}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedDateFilter('COMPLETED')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                    selectedDateFilter === 'COMPLETED'
+                      ? 'bg-royal-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Completed OPs
+                </button>
               </div>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportCompletedExcel}
+              disabled={isExportingCompletedExcel}
+              className="text-xs text-teal-800 bg-teal-50 border-teal-300 hover:bg-teal-100 font-bold flex items-center gap-1.5 whitespace-nowrap shadow-xs"
+              title="Export completed consultations to Excel (.xlsx)"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-teal-600" />
+              {isExportingCompletedExcel ? 'Exporting...' : 'Export Completed (.xlsx)'}
+            </Button>
+
             <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs">
               <Calendar className="w-3.5 h-3.5 text-royal-600" />
               <span className="text-slate-500 font-medium">Select Date:</span>
@@ -931,6 +1013,7 @@ export const DoctorDashboardPage: React.FC = () => {
             {selectedDateFilter === 'TODAY' && `Today's OPD Queue (${(appointments || []).length} Total Booked)`}
             {selectedDateFilter === 'TOMORROW' && `Tomorrow's Booked OPs (${(appointments || []).length} Scheduled)`}
             {selectedDateFilter === 'NEXT_DAYS' && `Upcoming OP Bookings for Next Days (${(appointments || []).length} Scheduled)`}
+            {selectedDateFilter === 'COMPLETED' && `Completed OPD Consultations (${(appointments || []).length} Consulted)`}
             {selectedDateFilter === 'CUSTOM' && `Booked OPs for ${customDate} (${(appointments || []).length} Scheduled)`}
           </CardTitle>
 
@@ -945,6 +1028,10 @@ export const DoctorDashboardPage: React.FC = () => {
                   {(appointments || []).filter((a) => a.status === 'WAITING' || a.status === 'CONFIRMED').length} Waiting
                 </span>
               </>
+            ) : selectedDateFilter === 'COMPLETED' ? (
+              <Badge variant="success" className="text-[11px] font-bold">
+                Completed Records
+              </Badge>
             ) : (
               <Badge variant="purple" className="text-[11px] font-bold">
                 Upcoming Pre-Booked Tokens
@@ -965,23 +1052,26 @@ export const DoctorDashboardPage: React.FC = () => {
                 <th className="px-5 py-3.5">Slot Time</th>
                 <th className="px-5 py-3.5">OP Number</th>
                 <th className="px-5 py-3.5">Status</th>
+                <th className="px-5 py-3.5">Follow-up Date</th>
                 <th className="px-5 py-3.5 text-right">OPD Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {isLoading ? (
                 <tr>
-                  <td colSpan={selectedDateFilter !== 'TODAY' ? 7 : 6} className="text-center py-10 text-slate-400">
+                  <td colSpan={selectedDateFilter !== 'TODAY' ? 8 : 7} className="text-center py-10 text-slate-400">
                     Loading doctor queue...
                   </td>
                 </tr>
               ) : !appointments || appointments.length === 0 ? (
                 <tr>
-                  <td colSpan={selectedDateFilter !== 'TODAY' ? 7 : 6} className="text-center py-12 text-slate-400">
+                  <td colSpan={selectedDateFilter !== 'TODAY' ? 8 : 7} className="text-center py-12 text-slate-400">
                     {selectedDateFilter === 'TODAY'
                       ? 'No appointments booked for today.'
                       : selectedDateFilter === 'TOMORROW'
                       ? 'No appointments booked for tomorrow.'
+                      : selectedDateFilter === 'COMPLETED'
+                      ? 'No completed consultations found.'
                       : 'No upcoming appointments booked for selected period.'}
                   </td>
                 </tr>
@@ -1032,6 +1122,16 @@ export const DoctorDashboardPage: React.FC = () => {
                       )}
                       {apt.status === 'COMPLETED' && <Badge variant="success">COMPLETED</Badge>}
                       {apt.status === 'CANCELLED' && <Badge variant="danger">CANCELLED</Badge>}
+                    </td>
+                    <td className="px-5 py-4">
+                      {apt.prescription?.followUpDate ? (
+                        <span className="inline-flex items-center gap-1 font-bold text-teal-800 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded text-xs whitespace-nowrap">
+                          <Calendar className="w-3 h-3 text-teal-600" />
+                          {apt.prescription.followUpDate}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 font-mono">—</span>
+                      )}
                     </td>
                     <td className="px-5 py-4 text-right">
                       {apt.status === 'IN_CONSULTATION' && (
@@ -1242,8 +1342,10 @@ export const DoctorDashboardPage: React.FC = () => {
                     size="sm"
                     onClick={() => handleAssignStaff('')}
                     disabled={assignSupportStaffMutation.isPending}
-                    className="text-xs text-slate-600 hover:text-rose-600 hover:bg-rose-50 border-slate-300"
+                    className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-300 hover:bg-rose-100 hover:border-rose-400 hover:text-rose-800 shadow-sm flex items-center gap-1.5"
+                    title="Remove assignment and return to general nursing pool"
                   >
+                    <RotateCcw className="w-3.5 h-3.5 text-rose-600 shrink-0" />
                     Reset to Pool
                   </Button>
                 </div>
@@ -1472,14 +1574,14 @@ export const DoctorDashboardPage: React.FC = () => {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="text-rose-600 hover:bg-rose-50 text-xs"
+                          className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 hover:border-rose-300 shadow-xs"
                           onClick={() => {
                             if (window.confirm('Cancel this leave request?')) {
                               cancelLeaveMutation.mutate(leave.id);
                             }
                           }}
                         >
-                          <Trash2 className="w-3.5 h-3.5 mr-1" /> Cancel Leave
+                          <Trash2 className="w-3.5 h-3.5 mr-1 text-rose-600" /> Cancel Leave
                         </Button>
                       </td>
                     </tr>
@@ -1621,10 +1723,10 @@ export const DoctorDashboardPage: React.FC = () => {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="text-rose-600 hover:bg-rose-50 text-xs"
+                        className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 hover:border-rose-300 shadow-xs"
                         onClick={() => deleteTemplateMutation.mutate(tmpl.id)}
                       >
-                        <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
+                        <Trash2 className="w-3.5 h-3.5 mr-1 text-rose-600" /> Delete
                       </Button>
                     </div>
                   </div>
@@ -1648,9 +1750,37 @@ export const DoctorDashboardPage: React.FC = () => {
                 Track status of diagnostic requisitions sent to hospital laboratories and view completed findings
               </p>
             </div>
-            <Button variant="outline" size="sm" onClick={() => refetchLabRequests()} className="text-xs">
-              Refresh Tests
-            </Button>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="text-slate-500 font-semibold">Filter Date:</span>
+                <input
+                  type="date"
+                  value={doctorLabDateFilter}
+                  onChange={(e) => setDoctorLabDateFilter(e.target.value)}
+                  className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-slate-800 text-xs font-medium"
+                />
+                {doctorLabDateFilter ? (
+                  <button
+                    type="button"
+                    onClick={() => setDoctorLabDateFilter('')}
+                    className="text-[11px] font-bold text-rose-600 hover:text-rose-800 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded"
+                  >
+                    Clear
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setDoctorLabDateFilter(new Date().toISOString().split('T')[0])}
+                    className="text-[11px] font-bold text-purple-700 hover:text-purple-900 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded"
+                  >
+                    Today
+                  </button>
+                )}
+              </div>
+              <Button variant="outline" size="sm" onClick={() => refetchLabRequests()} className="text-xs">
+                Refresh Tests
+              </Button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -1658,6 +1788,7 @@ export const DoctorDashboardPage: React.FC = () => {
               <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
                 <tr>
                   <th className="px-5 py-3">Requisition #</th>
+                  <th className="px-5 py-3">Requested Date</th>
                   <th className="px-5 py-3">Patient</th>
                   <th className="px-5 py-3">Tests Ordered</th>
                   <th className="px-5 py-3">Priority</th>
@@ -1666,20 +1797,36 @@ export const DoctorDashboardPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
-                {(labRequests || []).length === 0 ? (
+                {(labRequests || []).filter((req: any) => {
+                  if (!doctorLabDateFilter) return true;
+                  const d = req.createdAt ? req.createdAt.slice(0, 10) : req.preferredDate;
+                  return d === doctorLabDateFilter;
+                }).length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-10 text-slate-400">
-                      No diagnostic lab requisitions ordered yet.
+                    <td colSpan={7} className="text-center py-10 text-slate-400">
+                      No diagnostic lab requisitions found for the selected period.
                     </td>
                   </tr>
                 ) : (
-                  (labRequests || []).map((req: any) => {
-                    const parsedTests = typeof req.tests === 'string' ? JSON.parse(req.tests) : req.tests;
-                    return (
-                      <tr key={req.id} className="hover:bg-slate-50">
-                        <td className="px-5 py-3.5 font-mono font-bold text-purple-700">
-                          {req.requestNumber}
-                        </td>
+                  (labRequests || [])
+                    .filter((req: any) => {
+                      if (!doctorLabDateFilter) return true;
+                      const d = req.createdAt ? req.createdAt.slice(0, 10) : req.preferredDate;
+                      return d === doctorLabDateFilter;
+                    })
+                    .map((req: any) => {
+                      const parsedTests = typeof req.tests === 'string' ? JSON.parse(req.tests) : req.tests;
+                      const reqDate = req.createdAt ? new Date(req.createdAt).toLocaleDateString() : (req.preferredDate || '—');
+                      const reqTime = req.createdAt ? new Date(req.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                      return (
+                        <tr key={req.id} className="hover:bg-slate-50">
+                          <td className="px-5 py-3.5 font-mono font-bold text-purple-700">
+                            {req.requestNumber}
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap">
+                            <div className="font-semibold text-slate-900">{reqDate}</div>
+                            {reqTime && <div className="text-[10px] text-slate-400">{reqTime}</div>}
+                          </td>
                         <td className="px-5 py-3.5">
                           <div className="font-bold text-slate-900">{req.patient?.fullName}</div>
                           <div className="text-[11px] text-slate-400 font-mono">
