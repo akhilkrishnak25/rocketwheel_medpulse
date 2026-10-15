@@ -22,6 +22,7 @@ import {
   FileSpreadsheet,
   AlertTriangle,
   Ban,
+  Copy,
   RefreshCw,
   Check,
   CheckCircle,
@@ -50,6 +51,7 @@ import {
   Loader2,
   Trash2,
   ListFilter,
+  Pill,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { adminApi } from '../api/admin.api';
@@ -78,8 +80,9 @@ export const HospitalAdminDashboardPage: React.FC = () => {
   const canManageStaff = !isSubAdmin || subPermissions.includes('VITALS_MANAGEMENT');
   const canManageSubAdmins = !isSubAdmin; // Only Hospital Admin can manage Sub-Admins
   const canManageLabs = !isSubAdmin || subPermissions.includes('LAB_MANAGEMENT');
+  const canManagePharmacies = !isSubAdmin || subPermissions.includes('PHARMACY_MANAGEMENT') || subPermissions.includes('OP_MANAGEMENT');
 
-  const [activeTab, setActiveTab] = useState<'appointments' | 'doctors' | 'patients' | 'staff' | 'subadmins' | 'notifications' | 'labs'>('appointments');
+  const [activeTab, setActiveTab] = useState<'appointments' | 'doctors' | 'patients' | 'staff' | 'subadmins' | 'notifications' | 'labs' | 'pharmacies'>('appointments');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>('');
@@ -87,6 +90,19 @@ export const HospitalAdminDashboardPage: React.FC = () => {
   const [isExportingCompletedExcel, setIsExportingCompletedExcel] = useState(false);
   const [labViewMode, setLabViewMode] = useState<'catalog' | 'requests'>('catalog');
   const [labRequestDate, setLabRequestDate] = useState<string>('');
+
+  // Hospital Labs Management & Approval State
+  const [editingLab, setEditingLab] = useState<any | null>(null);
+  const [labSearch, setLabSearch] = useState('');
+  const [labFilterStatus, setLabFilterStatus] = useState<string>('ALL');
+  const [rejectingLab, setRejectingLab] = useState<any | null>(null);
+  const [labRejectReason, setLabRejectReason] = useState<string>('');
+
+  // Hospital Pharmacies Management & Approval State
+  const [pharmacyFilter, setPharmacyFilter] = useState<string>('ALL');
+  const [pharmacySearch, setPharmacySearch] = useState<string>('');
+  const [rejectingPharmacy, setRejectingPharmacy] = useState<any | null>(null);
+  const [pharmacyRejectReason, setPharmacyRejectReason] = useState<string>('');
 
   // Hospital Admin Avatar Upload State (Requirement 20)
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
@@ -103,10 +119,6 @@ export const HospitalAdminDashboardPage: React.FC = () => {
   const [brandingAbout, setBrandingAbout] = useState('');
   const [brandingAddress, setBrandingAddress] = useState('');
   const [brandingCity, setBrandingCity] = useState('');
-
-  // Hospital Labs Management State (Requirement 6)
-  const [editingLab, setEditingLab] = useState<any | null>(null);
-  const [labSearch, setLabSearch] = useState('');
 
   // Slip Download State & Handler
   const [downloadingSlipId, setDownloadingSlipId] = useState<string | null>(null);
@@ -127,7 +139,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '').toLowerCase();
-      if (['appointments', 'doctors', 'patients', 'staff', 'subadmins', 'notifications', 'labs'].includes(hash)) {
+      if (['appointments', 'doctors', 'patients', 'staff', 'subadmins', 'notifications', 'labs', 'pharmacies'].includes(hash)) {
         setActiveTab(hash as any);
       }
     };
@@ -137,7 +149,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  const handleTabChange = (tab: 'appointments' | 'doctors' | 'patients' | 'staff' | 'subadmins' | 'notifications' | 'labs') => {
+  const handleTabChange = (tab: 'appointments' | 'doctors' | 'patients' | 'staff' | 'subadmins' | 'notifications' | 'labs' | 'pharmacies') => {
     setActiveTab(tab);
     window.location.hash = `#${tab}`;
   };
@@ -506,7 +518,13 @@ export const HospitalAdminDashboardPage: React.FC = () => {
     about: '',
   });
   const [doctorAccountEmail, setDoctorAccountEmail] = useState('');
+  const [doctorAccountPhone, setDoctorAccountPhone] = useState('');
   const [doctorAccountPassword, setDoctorAccountPassword] = useState('Password@123');
+  const [createdDoctorCredentials, setCreatedDoctorCredentials] = useState<{
+    name: string;
+    email: string;
+    password?: string;
+  } | null>(null);
 
   // New Department Form State
   const [newDeptName, setNewDeptName] = useState('');
@@ -675,6 +693,78 @@ export const HospitalAdminDashboardPage: React.FC = () => {
     },
   });
 
+  // Hospital Diagnostic Laboratories Approval & Rejection Mutations
+  const approveHospitalLabMutation = useMutation({
+    mutationFn: (labId: string) => adminApi.approveLab(labId),
+    onSuccess: () => {
+      toast.success('Hospital Laboratory Approved', 'Diagnostic laboratory verified and activated.');
+      queryClient.invalidateQueries({ queryKey: ['admin-labs'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-metrics'] });
+    },
+    onError: (err: any) => {
+      toast.error('Approval Failed', err?.response?.data?.message || err.message || 'Could not approve laboratory');
+    },
+  });
+
+  const rejectHospitalLabMutation = useMutation({
+    mutationFn: ({ labId, reason }: { labId: string; reason?: string }) =>
+      adminApi.rejectLab(labId, reason),
+    onSuccess: () => {
+      toast.info('Laboratory Rejected', 'Laboratory registration application has been rejected.');
+      setRejectingLab(null);
+      setLabRejectReason('');
+      queryClient.invalidateQueries({ queryKey: ['admin-labs'] });
+    },
+    onError: (err: any) => {
+      toast.error('Rejection Failed', err?.response?.data?.message || err.message || 'Could not reject laboratory');
+    },
+  });
+
+  // Fetch hospital pharmacies
+  const { data: hospitalPharmacies, isLoading: pharmaciesLoading, refetch: refetchPharmacies } = useQuery({
+    queryKey: ['admin-pharmacies'],
+    queryFn: () => adminApi.getPharmacies(),
+    enabled: (activeTab === 'pharmacies' || activeTab === 'notifications') && canManagePharmacies,
+    refetchInterval: 12000,
+  });
+
+  const approvePharmacyMutation = useMutation({
+    mutationFn: (pharmacyId: string) => adminApi.approvePharmacy(pharmacyId),
+    onSuccess: () => {
+      toast.success('Pharmacy Registration Approved', 'Dispensary and pharmacist staff account activated.');
+      queryClient.invalidateQueries({ queryKey: ['admin-pharmacies'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-metrics'] });
+    },
+    onError: (err: any) => {
+      toast.error('Approval Failed', err?.response?.data?.message || err.message || 'Could not approve pharmacy');
+    },
+  });
+
+  const rejectPharmacyMutation = useMutation({
+    mutationFn: ({ pharmacyId, reason }: { pharmacyId: string; reason?: string }) =>
+      adminApi.rejectPharmacy(pharmacyId, reason),
+    onSuccess: () => {
+      toast.info('Pharmacy Rejected', 'Pharmacy registration application has been rejected.');
+      setRejectingPharmacy(null);
+      setPharmacyRejectReason('');
+      queryClient.invalidateQueries({ queryKey: ['admin-pharmacies'] });
+    },
+    onError: (err: any) => {
+      toast.error('Rejection Failed', err?.response?.data?.message || err.message || 'Could not reject pharmacy');
+    },
+  });
+
+  const togglePharmacyStatusMutation = useMutation({
+    mutationFn: (pharmacyId: string) => adminApi.togglePharmacyStatus(pharmacyId),
+    onSuccess: () => {
+      toast.success('Pharmacy Status Updated', 'Pharmacy operational status changed successfully');
+      queryClient.invalidateQueries({ queryKey: ['admin-pharmacies'] });
+    },
+    onError: (err: any) => {
+      toast.error('Status Update Failed', err?.response?.data?.message || err.message);
+    },
+  });
+
   // Doctor Laboratory Test Requests for this hospital (by Date)
   const { data: adminLabRequests, isLoading: adminLabRequestsLoading, refetch: refetchAdminLabRequests } = useQuery({
     queryKey: ['admin-lab-requests', labRequestDate],
@@ -769,9 +859,16 @@ export const HospitalAdminDashboardPage: React.FC = () => {
   // Add doctor mutation
   const addDoctorMutation = useMutation({
     mutationFn: (data: any) => adminApi.addDoctor(data),
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       toast.success('Doctor registered successfully');
       setIsAddDoctorOpen(false);
+      if (data?.initialCredentials?.email) {
+        setCreatedDoctorCredentials({
+          name: data.name || newDocData.name,
+          email: data.initialCredentials.email,
+          password: data.initialCredentials.password,
+        });
+      }
       setNewDocData({
         name: '',
         departmentId: '',
@@ -786,7 +883,8 @@ export const HospitalAdminDashboardPage: React.FC = () => {
         about: '',
       });
       setDoctorAccountEmail('');
-      setDoctorAccountPassword('Password@123');
+      setDoctorAccountPhone('');
+      setDoctorAccountPassword(`Doc@${Math.floor(100000 + Math.random() * 900000)}`);
       queryClient.invalidateQueries({ queryKey: ['admin-doctors'] });
       queryClient.invalidateQueries({ queryKey: ['admin-metrics'] });
     },
@@ -1120,6 +1218,28 @@ export const HospitalAdminDashboardPage: React.FC = () => {
               >
                 <FlaskConical className="w-3.5 h-3.5 text-purple-600" />
                 Hospital Labs ({(hospitalLabs || []).length})
+                {(hospitalLabs || []).filter((l: any) => l.status === 'PENDING').length > 0 && (
+                  <span className="bg-amber-500 text-white text-[10px] font-extrabold px-1.5 py-0.2 rounded-full animate-pulse">
+                    {(hospitalLabs || []).filter((l: any) => l.status === 'PENDING').length}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {canManagePharmacies && (
+              <button
+                onClick={() => handleTabChange('pharmacies')}
+                className={`px-3.5 py-2 rounded-lg transition-colors shrink-0 flex items-center gap-1.5 ${
+                  activeTab === 'pharmacies' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Pill className="w-3.5 h-3.5 text-emerald-600" />
+                Pharmacies ({(hospitalPharmacies || []).length})
+                {(hospitalPharmacies || []).filter((p: any) => p.status === 'PENDING').length > 0 && (
+                  <span className="bg-amber-500 text-white text-[10px] font-extrabold px-1.5 py-0.2 rounded-full animate-pulse">
+                    {(hospitalPharmacies || []).filter((p: any) => p.status === 'PENDING').length}
+                  </span>
+                )}
               </button>
             )}
 
@@ -2282,17 +2402,71 @@ export const HospitalAdminDashboardPage: React.FC = () => {
 
           {labViewMode === 'catalog' ? (
             <>
-              <div className="px-5 pt-1 pb-3 flex items-center justify-between gap-3">
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Search labs by name, city, phone..."
-                    value={labSearch}
-                    onChange={(e) => setLabSearch(e.target.value)}
-                    className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-purple-500 w-52 sm:w-64"
-                  />
+              <div className="px-5 pt-1 pb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Status Filter Chips */}
+                  <div className="flex items-center bg-slate-100 p-1 rounded-xl text-xs font-semibold gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setLabFilterStatus('ALL')}
+                      className={`px-3 py-1.5 rounded-lg transition-all ${
+                        labFilterStatus === 'ALL'
+                          ? 'bg-white text-slate-900 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      All ({(hospitalLabs || []).length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLabFilterStatus('PENDING')}
+                      className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                        labFilterStatus === 'PENDING'
+                          ? 'bg-white text-amber-700 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Pending ({(hospitalLabs || []).filter((l: any) => l.status === 'PENDING').length})
+                      {(hospitalLabs || []).filter((l: any) => l.status === 'PENDING').length > 0 && (
+                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLabFilterStatus('APPROVED')}
+                      className={`px-3 py-1.5 rounded-lg transition-all ${
+                        labFilterStatus === 'APPROVED'
+                          ? 'bg-white text-emerald-700 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Approved ({(hospitalLabs || []).filter((l: any) => l.status === 'APPROVED' || l.status === 'ACTIVE').length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLabFilterStatus('REJECTED')}
+                      className={`px-3 py-1.5 rounded-lg transition-all ${
+                        labFilterStatus === 'REJECTED'
+                          ? 'bg-white text-rose-700 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Rejected ({(hospitalLabs || []).filter((l: any) => l.status === 'REJECTED').length})
+                    </button>
+                  </div>
+
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search labs by name, city, phone..."
+                      value={labSearch}
+                      onChange={(e) => setLabSearch(e.target.value)}
+                      className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-purple-500 w-52 sm:w-64"
+                    />
+                  </div>
                 </div>
+
                 <Button
                   variant="outline"
                   size="sm"
@@ -2308,11 +2482,11 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                   <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
                     <tr>
                       <th className="px-5 py-3">Laboratory Details</th>
-                      <th className="px-5 py-3">Contact & Address</th>
+                      <th className="px-5 py-3">Contact & Staff</th>
                       <th className="px-5 py-3">Affiliation / Status</th>
                       <th className="px-5 py-3">Visibility Mode</th>
                       <th className="px-5 py-3">Tests & Volume</th>
-                      <th className="px-5 py-3 text-right">Visibility & Controls</th>
+                      <th className="px-5 py-3 text-right whitespace-nowrap min-w-[200px]">Approval & Controls</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -2323,6 +2497,9 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                         </td>
                       </tr>
                     ) : (hospitalLabs || []).filter((l: any) => {
+                        if (labFilterStatus === 'PENDING' && l.status !== 'PENDING') return false;
+                        if (labFilterStatus === 'APPROVED' && l.status !== 'APPROVED' && l.status !== 'ACTIVE') return false;
+                        if (labFilterStatus === 'REJECTED' && l.status !== 'REJECTED') return false;
                         if (!labSearch.trim()) return true;
                         const q = labSearch.toLowerCase();
                         return (
@@ -2335,12 +2512,17 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                       <tr>
                         <td colSpan={6} className="text-center py-12 text-slate-400">
                           <FlaskConical className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                          No diagnostic laboratories found matching your criteria.
+                          {labFilterStatus === 'PENDING'
+                            ? 'No pending laboratory applications awaiting hospital admin approval.'
+                            : 'No diagnostic laboratories found matching your criteria.'}
                         </td>
                       </tr>
                     ) : (
                       (hospitalLabs || [])
                         .filter((l: any) => {
+                          if (labFilterStatus === 'PENDING' && l.status !== 'PENDING') return false;
+                          if (labFilterStatus === 'APPROVED' && l.status !== 'APPROVED' && l.status !== 'ACTIVE') return false;
+                          if (labFilterStatus === 'REJECTED' && l.status !== 'REJECTED') return false;
                           if (!labSearch.trim()) return true;
                           const q = labSearch.toLowerCase();
                           return (
@@ -2352,6 +2534,11 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                         })
                         .map((lab: any) => {
                           const isPublic = (lab.visibility || 'PUBLIC') === 'PUBLIC';
+                          const isPending = lab.status === 'PENDING';
+                          const isApproved = lab.status === 'APPROVED' || lab.status === 'ACTIVE';
+                          const isRejected = lab.status === 'REJECTED';
+                          const primaryTech = (lab.technicians || [])[0];
+
                           return (
                             <tr key={lab.id} className="hover:bg-slate-50/80 transition-colors">
                               <td className="px-5 py-4">
@@ -2368,7 +2555,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                                   )}
                                 </div>
                                 <div className="text-[11px] text-slate-500 mt-0.5">
-                                  ID: <span className="font-mono">{lab.id.slice(0, 8)}</span>
+                                  ID: <span className="font-mono">{lab.id.slice(0, 8)}</span> • License: <span className="font-mono">{lab.licenseNumber || 'Under Review'}</span>
                                 </div>
                               </td>
 
@@ -2378,15 +2565,31 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                                 <div className="text-slate-400 text-[11px] truncate max-w-xs">
                                   {lab.address ? `${lab.address}, ${lab.city}` : lab.city || 'Hospital Campus'}
                                 </div>
+                                {primaryTech && (
+                                  <div className="mt-1 text-[10px] text-purple-800 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                                    Tech: {primaryTech.user?.name || primaryTech.qualification || 'Certified Technician'}
+                                  </div>
+                                )}
                               </td>
 
                               <td className="px-5 py-4">
-                                <Badge
-                                  variant={lab.status === 'APPROVED' || lab.status === 'ACTIVE' ? 'success' : 'warning'}
-                                  className="text-[10px]"
-                                >
-                                  {lab.status || 'ACTIVE'}
-                                </Badge>
+                                {isPending ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-300 px-2.5 py-1 rounded-full">
+                                    <Clock className="w-3.5 h-3.5 text-amber-600" /> Pending Hospital Approval
+                                  </span>
+                                ) : isApproved ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 px-2.5 py-1 rounded-full">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Approved & Active
+                                  </span>
+                                ) : isRejected ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-800 bg-rose-50 border border-rose-300 px-2.5 py-1 rounded-full">
+                                    <X className="w-3.5 h-3.5 text-rose-600" /> Rejected
+                                  </span>
+                                ) : (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    {lab.status || 'ACTIVE'}
+                                  </Badge>
+                                )}
                               </td>
 
                               <td className="px-5 py-4">
@@ -2421,7 +2624,45 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                               </td>
 
                               <td className="px-5 py-4 text-right">
-                                <div className="inline-flex items-center gap-2">
+                                <div className="inline-flex items-center gap-2 justify-end flex-wrap">
+                                  {/* Lab Approval Actions */}
+                                  {isPending && (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => approveHospitalLabMutation.mutate(lab.id)}
+                                        isLoading={approveHospitalLabMutation.isPending}
+                                        className="text-xs font-bold text-emerald-800 bg-emerald-50 border-emerald-300 hover:bg-emerald-100 hover:border-emerald-400 shadow-2xs whitespace-nowrap"
+                                        title="Approve this laboratory for hospital operations"
+                                      >
+                                        <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600" /> Approve Lab
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => setRejectingLab(lab)}
+                                        className="text-xs font-bold text-rose-800 bg-rose-50 border-rose-300 hover:bg-rose-100 hover:border-rose-400 shadow-2xs whitespace-nowrap"
+                                        title="Reject laboratory registration application"
+                                      >
+                                        <X className="w-3.5 h-3.5 mr-1 text-rose-600" /> Reject Lab
+                                      </Button>
+                                    </>
+                                  )}
+
+                                  {isRejected && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => approveHospitalLabMutation.mutate(lab.id)}
+                                      isLoading={approveHospitalLabMutation.isPending}
+                                      className="text-xs font-bold text-emerald-800 bg-emerald-50 border-emerald-300 hover:bg-emerald-100 hover:border-emerald-400 shadow-2xs whitespace-nowrap"
+                                      title="Re-approve laboratory"
+                                    >
+                                      <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600" /> Re-Approve
+                                    </Button>
+                                  )}
+
                                   {/* Visibility Toggle Button */}
                                   <Button
                                     size="sm"
@@ -2435,8 +2676,8 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                                     isLoading={updateLabVisibilityMutation.isPending}
                                     className={`text-xs font-bold ${
                                       isPublic
-                                        ? 'border-amber-300 text-amber-700 hover:bg-amber-50'
-                                        : 'border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                                        ? 'border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100'
+                                        : 'border-emerald-300 text-emerald-800 bg-emerald-50 hover:bg-emerald-100'
                                     }`}
                                     title={
                                       isPublic
@@ -2458,16 +2699,16 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    className="text-xs text-purple-700 border-purple-200 hover:bg-purple-50"
+                                    className="text-xs font-bold text-purple-800 bg-purple-50 border-purple-300 hover:bg-purple-100"
                                     onClick={() => setEditingLab(lab)}
                                   >
-                                    <Edit2 className="w-3.5 h-3.5 mr-1" /> Edit Profile
+                                    <Edit2 className="w-3.5 h-3.5 mr-1 text-purple-600" /> Edit Profile
                                   </Button>
 
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    className="text-xs text-rose-700 border-rose-200 hover:bg-rose-50"
+                                    className="text-xs font-bold text-rose-800 bg-rose-50 border-rose-300 hover:bg-rose-100"
                                     onClick={() => {
                                       if (window.confirm(`Are you sure you want to delete laboratory "${lab.name}"? This action cannot be undone.`)) {
                                         deleteLabMutation.mutate(lab.id);
@@ -2639,6 +2880,324 @@ export const HospitalAdminDashboardPage: React.FC = () => {
               </div>
             </>
           )}
+        </Card>
+      )}
+
+      {/* TAB 8: HOSPITAL PHARMACIES & DISPENSING MANAGEMENT */}
+      {activeTab === 'pharmacies' && canManagePharmacies && (
+        <Card className="rounded-2xl border-slate-200 shadow-sm space-y-4">
+          <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Pill className="w-5 h-5 text-emerald-600" />
+                Hospital Pharmacies & Dispensing Outlets
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Review and approve hospital pharmacy registration requests, manage drug licenses, and oversee prescription fulfillment
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Status Filter Chips */}
+              <div className="flex items-center bg-slate-100 p-1 rounded-xl text-xs font-semibold gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPharmacyFilter('ALL')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                    pharmacyFilter === 'ALL'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  All ({(hospitalPharmacies || []).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPharmacyFilter('PENDING')}
+                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                    pharmacyFilter === 'PENDING'
+                      ? 'bg-white text-amber-700 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Pending ({(hospitalPharmacies || []).filter((p: any) => p.status === 'PENDING').length})
+                  {(hospitalPharmacies || []).filter((p: any) => p.status === 'PENDING').length > 0 && (
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPharmacyFilter('ACTIVE')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                    pharmacyFilter === 'ACTIVE'
+                      ? 'bg-white text-emerald-700 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Active ({(hospitalPharmacies || []).filter((p: any) => p.status === 'ACTIVE').length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPharmacyFilter('REJECTED')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                    pharmacyFilter === 'REJECTED'
+                      ? 'bg-white text-rose-700 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Rejected ({(hospitalPharmacies || []).filter((p: any) => p.status === 'REJECTED').length})
+                </button>
+              </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetchPharmacies()}
+                className="text-xs shrink-0"
+              >
+                <RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh
+              </Button>
+            </div>
+          </div>
+
+          {/* Search bar */}
+          <div className="px-5 pt-1 pb-3 flex items-center justify-between gap-3">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search pharmacy name, license, pharmacist, phone..."
+                value={pharmacySearch}
+                onChange={(e) => setPharmacySearch(e.target.value)}
+                className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500 w-64 sm:w-80"
+              />
+            </div>
+            {pharmacySearch && (
+              <button
+                type="button"
+                onClick={() => setPharmacySearch('')}
+                className="text-xs text-slate-500 hover:text-slate-700 underline"
+              >
+                Clear Search
+              </button>
+            )}
+            <div className="text-[11px] text-slate-400 font-medium">
+              {(hospitalPharmacies || []).length} registered hospital pharmacies
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
+                <tr>
+                  <th className="px-5 py-3.5">Pharmacy Name & Outlet</th>
+                  <th className="px-5 py-3.5">Drug License Number</th>
+                  <th className="px-5 py-3.5">In-Charge Pharmacist & Staff</th>
+                  <th className="px-5 py-3.5">Contact Details</th>
+                  <th className="px-5 py-3.5">Prescriptions Dispensed</th>
+                  <th className="px-5 py-3.5">Approval Status</th>
+                  <th className="px-5 py-3.5 text-right whitespace-nowrap min-w-[200px]">Governance Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-slate-700">
+                {pharmaciesLoading ? (
+                  <tr>
+                    <td colSpan={7} className="text-center py-10 text-slate-400">
+                      Loading hospital pharmacies...
+                    </td>
+                  </tr>
+                ) : (hospitalPharmacies || []).filter((p: any) => {
+                    if (pharmacyFilter !== 'ALL' && p.status !== pharmacyFilter) return false;
+                    if (!pharmacySearch.trim()) return true;
+                    const q = pharmacySearch.toLowerCase();
+                    const primaryStaff = (p.staff || [])[0];
+                    return (
+                      p.name?.toLowerCase().includes(q) ||
+                      p.licenseNumber?.toLowerCase().includes(q) ||
+                      p.phone?.includes(q) ||
+                      p.email?.toLowerCase().includes(q) ||
+                      primaryStaff?.user?.name?.toLowerCase().includes(q) ||
+                      primaryStaff?.user?.email?.toLowerCase().includes(q)
+                    );
+                  }).length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="text-center py-12 text-slate-400">
+                      <Pill className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      {pharmacySearch
+                        ? `No pharmacies matching "${pharmacySearch}"`
+                        : pharmacyFilter === 'PENDING'
+                        ? 'No pending pharmacy registration requests awaiting hospital admin approval.'
+                        : 'No pharmacies registered for this hospital.'}
+                    </td>
+                  </tr>
+                ) : (
+                  (hospitalPharmacies || [])
+                    .filter((p: any) => {
+                      if (pharmacyFilter !== 'ALL' && p.status !== pharmacyFilter) return false;
+                      if (!pharmacySearch.trim()) return true;
+                      const q = pharmacySearch.toLowerCase();
+                      const primaryStaff = (p.staff || [])[0];
+                      return (
+                        p.name?.toLowerCase().includes(q) ||
+                        p.licenseNumber?.toLowerCase().includes(q) ||
+                        p.phone?.includes(q) ||
+                        p.email?.toLowerCase().includes(q) ||
+                        primaryStaff?.user?.name?.toLowerCase().includes(q) ||
+                        primaryStaff?.user?.email?.toLowerCase().includes(q)
+                      );
+                    })
+                    .map((pharmacy: any) => {
+                      const isPending = pharmacy.status === 'PENDING';
+                      const isActive = pharmacy.status === 'ACTIVE';
+                      const isRejected = pharmacy.status === 'REJECTED';
+                      const isSuspended = pharmacy.status === 'SUSPENDED';
+                      const primaryStaff = (pharmacy.staff || [])[0];
+
+                      return (
+                        <tr key={pharmacy.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="px-5 py-4">
+                            <div className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                              {pharmacy.name}
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              ID: <span className="font-mono">{pharmacy.id.slice(0, 8)}</span> • Joined: {new Date(pharmacy.createdAt).toLocaleDateString()}
+                            </div>
+                            {pharmacy.address && (
+                              <div className="text-[10px] text-slate-400 mt-0.5 truncate max-w-xs">
+                                {pharmacy.address}
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="px-5 py-4 font-mono font-bold text-emerald-800 text-xs">
+                            {pharmacy.licenseNumber || 'Under Verification'}
+                          </td>
+
+                          <td className="px-5 py-4">
+                            {primaryStaff ? (
+                              <div>
+                                <div className="font-bold text-slate-900">
+                                  {primaryStaff.user?.name || 'Registered Pharmacist'}
+                                </div>
+                                <div className="text-[11px] text-slate-500 font-mono">
+                                  {primaryStaff.user?.email}
+                                </div>
+                                <div className="text-[10px] text-slate-400">
+                                  {primaryStaff.role || 'CHIEF_PHARMACIST'}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 italic">No staff profile</span>
+                            )}
+                          </td>
+
+                          <td className="px-5 py-4">
+                            <div className="font-semibold text-slate-800">{pharmacy.phone || '--'}</div>
+                            <div className="text-slate-500 font-mono text-[11px]">{pharmacy.email || '--'}</div>
+                          </td>
+
+                          <td className="px-5 py-4 font-bold text-slate-900">
+                            {pharmacy._count?.prescriptions || (pharmacy.prescriptions || []).length || 0} Prescriptions
+                          </td>
+
+                          <td className="px-5 py-4">
+                            {isPending ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-300 px-2.5 py-1 rounded-full">
+                                <Clock className="w-3.5 h-3.5 text-amber-600" />
+                                Pending Approval
+                              </span>
+                            ) : isActive ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 px-2.5 py-1 rounded-full">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                Active & Dispensing
+                              </span>
+                            ) : isRejected ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-800 bg-rose-50 border border-rose-300 px-2.5 py-1 rounded-full">
+                                <X className="w-3.5 h-3.5 text-rose-600" />
+                                Rejected
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-800 bg-slate-100 border border-slate-300 px-2.5 py-1 rounded-full">
+                                <Ban className="w-3.5 h-3.5 text-slate-600" />
+                                {pharmacy.status}
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="px-5 py-4 text-right">
+                            <div className="inline-flex items-center gap-2 justify-end flex-wrap">
+                              {isPending && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => approvePharmacyMutation.mutate(pharmacy.id)}
+                                    isLoading={approvePharmacyMutation.isPending}
+                                    className="text-xs font-bold text-emerald-800 bg-emerald-50 border-emerald-300 hover:bg-emerald-100 hover:border-emerald-400 shadow-2xs whitespace-nowrap"
+                                    title="Approve this pharmacy registration for your hospital"
+                                  >
+                                    <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600" /> Approve
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => setRejectingPharmacy(pharmacy)}
+                                    className="text-xs font-bold text-rose-800 bg-rose-50 border-rose-300 hover:bg-rose-100 hover:border-rose-400 shadow-2xs whitespace-nowrap"
+                                    title="Reject pharmacy registration application"
+                                  >
+                                    <X className="w-3.5 h-3.5 mr-1 text-rose-600" /> Reject
+                                  </Button>
+                                </>
+                              )}
+
+                              {isActive && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => togglePharmacyStatusMutation.mutate(pharmacy.id)}
+                                  isLoading={togglePharmacyStatusMutation.isPending}
+                                  className="text-xs font-bold text-amber-800 bg-amber-50 border-amber-300 hover:bg-amber-100 hover:border-amber-400 shadow-2xs"
+                                  title="Suspend pharmacy operations"
+                                >
+                                  <Ban className="w-3.5 h-3.5 mr-1 text-amber-600" /> Suspend
+                                </Button>
+                              )}
+
+                              {isSuspended && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => togglePharmacyStatusMutation.mutate(pharmacy.id)}
+                                  isLoading={togglePharmacyStatusMutation.isPending}
+                                  className="text-xs font-bold text-emerald-800 bg-emerald-50 border-emerald-300 hover:bg-emerald-100 hover:border-emerald-400 shadow-2xs"
+                                  title="Reactivate suspended pharmacy"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600" /> Reactivate
+                                </Button>
+                              )}
+
+                              {isRejected && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => approvePharmacyMutation.mutate(pharmacy.id)}
+                                  isLoading={approvePharmacyMutation.isPending}
+                                  className="text-xs font-bold text-emerald-800 bg-emerald-50 border-emerald-300 hover:bg-emerald-100 hover:border-emerald-400 shadow-2xs"
+                                  title="Re-approve pharmacy registration"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600" /> Re-Approve
+                                </Button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                )}
+              </tbody>
+            </table>
+          </div>
         </Card>
       )}
 
@@ -2855,7 +3414,15 @@ export const HospitalAdminDashboardPage: React.FC = () => {
             onSubmit={(e) => {
               e.preventDefault();
               if (!newDocData.name || !newDocData.departmentId || !newDocData.specialization || !newDocData.qualification) {
-                toast.error('Validation Error', 'Please complete all required fields.');
+                toast.error('Validation Error', 'Please complete all required doctor professional fields.');
+                return;
+              }
+              if (!doctorAccountEmail.trim()) {
+                toast.error('Doctor Email Required', 'Please provide the doctor official email address for account access.');
+                return;
+              }
+              if (!doctorAccountPhone.trim()) {
+                toast.error('Contact Phone Required', 'Please provide the doctor contact mobile number.');
                 return;
               }
               const payload: any = {
@@ -2866,13 +3433,10 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                   newDocData.about.trim().length >= 10
                     ? newDocData.about.trim()
                     : `Specialist in ${newDocData.specialization} providing outpatient consultations.`,
+                email: doctorAccountEmail.trim(),
+                phone: doctorAccountPhone.trim(),
+                password: doctorAccountPassword.trim() || undefined,
               };
-              if (doctorAccountEmail.trim()) {
-                payload.userAccount = {
-                  email: doctorAccountEmail.trim(),
-                  password: doctorAccountPassword || 'Password@123',
-                };
-              }
               addDoctorMutation.mutate(payload);
             }}
             className="space-y-4 text-xs"
@@ -3026,21 +3590,75 @@ export const HospitalAdminDashboardPage: React.FC = () => {
               />
             </div>
 
-            {/* Associated Doctor Account Email */}
-            <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-200/80 space-y-1.5 text-xs">
-              <span className="font-bold text-royal-900 block">
-                Doctor Portal Account Link (Self-Registered Email)
-              </span>
+            {/* Doctor Account Login & Direct Access Credentials */}
+            <div className="p-4 bg-royal-50/70 rounded-2xl border border-royal-200 space-y-3 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-royal-950 text-xs flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-royal-600" />
+                  Doctor Account Login & Initial Credentials
+                </span>
+                <span className="text-[10px] font-semibold text-royal-700 bg-royal-100 px-2 py-0.5 rounded-full">
+                  Direct OPD Activation
+                </span>
+              </div>
               <p className="text-slate-600 text-[11px]">
-                Enter the official email if the doctor already self-registered their portal account. Doctors maintain their own secure login passwords independently.
+                An accredited doctor portal account will be created directly under your hospital. Initial login credentials will be displayed immediately upon creation so you can securely share them with the doctor.
               </p>
-              <input
-                type="email"
-                value={doctorAccountEmail}
-                onChange={(e) => setDoctorAccountEmail(e.target.value)}
-                placeholder="doctor.email@hospital.org"
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-royal-500"
-              />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Doctor Official Email <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="email"
+                    value={doctorAccountEmail}
+                    onChange={(e) => setDoctorAccountEmail(e.target.value)}
+                    placeholder="doctor.name@hospital.org"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-royal-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Doctor Contact Phone <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    value={doctorAccountPhone}
+                    onChange={(e) => setDoctorAccountPhone(e.target.value)}
+                    placeholder="9876543210"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-royal-500"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-semibold text-slate-700">
+                    Initial Temporary Password
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setDoctorAccountPassword(`Doc@${Math.floor(100000 + Math.random() * 900000)}`)}
+                    className="text-[11px] font-bold text-royal-700 hover:text-royal-900 bg-white border border-royal-200 px-2 py-0.5 rounded-lg shadow-sm"
+                  >
+                    Auto-Generate Password
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={doctorAccountPassword}
+                  onChange={(e) => setDoctorAccountPassword(e.target.value)}
+                  placeholder="Min 6 characters (e.g. Doc@849201)"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono bg-white focus:outline-none focus:ring-2 focus:ring-royal-500"
+                />
+                <span className="text-[10px] text-slate-500 block mt-1">
+                  Doctors can change their password at any time in their dedicated Edit Profile section.
+                </span>
+              </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
@@ -3052,6 +3670,118 @@ export const HospitalAdminDashboardPage: React.FC = () => {
               </Button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* INITIAL CREDENTIALS MODAL AFTER CREATION */}
+      {createdDoctorCredentials && (
+        <Modal
+          isOpen={!!createdDoctorCredentials}
+          onClose={() => setCreatedDoctorCredentials(null)}
+          title="Doctor Account Created - Initial Login Credentials"
+          maxWidth="md"
+        >
+          <div className="space-y-4 text-xs">
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 flex items-start gap-2.5">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-sm text-emerald-950">Doctor Successfully Registered!</p>
+                <p className="text-emerald-800 text-[11px] mt-0.5">
+                  The doctor profile and login account have been activated under your hospital. Share these initial credentials with <strong>{createdDoctorCredentials.name}</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Doctor Login Email
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={createdDoctorCredentials.email}
+                    className="flex-1 px-3 py-2 rounded-xl border border-slate-200 bg-white font-mono text-xs text-slate-800 select-all"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0 bg-white border border-slate-300 text-slate-800 hover:bg-slate-50 font-semibold"
+                    onClick={() => {
+                      navigator.clipboard.writeText(createdDoctorCredentials.email);
+                      toast.success('Email Copied', 'Doctor email copied to clipboard.');
+                    }}
+                  >
+                    <Copy className="w-3.5 h-3.5 mr-1" />
+                    Copy
+                  </Button>
+                </div>
+              </div>
+
+              {createdDoctorCredentials.password && (
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    Initial Temporary Password
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={createdDoctorCredentials.password}
+                      className="flex-1 px-3 py-2 rounded-xl border border-slate-200 bg-white font-mono text-xs font-bold text-royal-700 select-all"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 bg-white border border-slate-300 text-slate-800 hover:bg-slate-50 font-semibold"
+                      onClick={() => {
+                        navigator.clipboard.writeText(createdDoctorCredentials.password!);
+                        toast.success('Password Copied', 'Initial password copied to clipboard.');
+                      }}
+                    >
+                      <Copy className="w-3.5 h-3.5 mr-1" />
+                      Copy
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-[11px] flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>
+                  <strong>Security notice:</strong> For doctor privacy, this temporary password will never be displayed in plain text again. Doctor can change it at any time in their Edit Profile settings.
+                </span>
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center pt-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="bg-white border border-slate-300 text-slate-800 hover:bg-slate-50 font-semibold"
+                onClick={() => {
+                  const credText = `RocketWheel MedPulse Doctor Login\nDoctor: ${createdDoctorCredentials.name}\nEmail: ${createdDoctorCredentials.email}\nTemporary Password: ${createdDoctorCredentials.password || 'N/A'}\nStaff Login Portal: ${window.location.origin}/staff/login`;
+                  navigator.clipboard.writeText(credText);
+                  toast.success('All Credentials Copied', 'Complete login instructions copied to clipboard.');
+                }}
+              >
+                <Copy className="w-3.5 h-3.5 mr-1 text-royal-600" />
+                Copy All Credentials
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="bg-royal-600 hover:bg-royal-700 text-white font-bold px-5"
+                onClick={() => setCreatedDoctorCredentials(null)}
+              >
+                Done
+              </Button>
+            </div>
+          </div>
         </Modal>
       )}
 
@@ -4182,6 +4912,130 @@ Dr. Vikram Verma,vikram.verma@hospital.org,Consultant Physician,MBBS MD,${c2},8,
                 className="bg-royal-600 hover:bg-royal-700 text-white font-bold px-5"
               >
                 Save Hospital Profile
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* REJECT HOSPITAL LAB MODAL */}
+      {rejectingLab && (
+        <Modal
+          isOpen={!!rejectingLab}
+          onClose={() => {
+            setRejectingLab(null);
+            setLabRejectReason('');
+          }}
+          title={`Reject Diagnostic Laboratory: ${rejectingLab.name}`}
+          maxWidth="md"
+        >
+          <div className="space-y-4 text-xs">
+            <p className="text-slate-600">
+              Are you sure you want to reject the laboratory application for{' '}
+              <strong className="text-slate-900">{rejectingLab.name}</strong>? You can provide a reason below for the audit trail and technician notification.
+            </p>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Reason for Rejection (Optional)
+              </label>
+              <textarea
+                rows={3}
+                value={labRejectReason}
+                onChange={(e) => setLabRejectReason(e.target.value)}
+                placeholder="e.g. Incomplete diagnostic certification, licensing documentation required..."
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none text-xs"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setRejectingLab(null);
+                  setLabRejectReason('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  rejectHospitalLabMutation.mutate({
+                    labId: rejectingLab.id,
+                    reason: labRejectReason.trim() || undefined,
+                  })
+                }
+                isLoading={rejectHospitalLabMutation.isPending}
+                className="text-xs font-bold text-rose-800 bg-rose-50 border-rose-300 hover:bg-rose-100 hover:border-rose-400 shadow-2xs"
+              >
+                <X className="w-3.5 h-3.5 mr-1 text-rose-600" /> Confirm Rejection
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* REJECT PHARMACY MODAL */}
+      {rejectingPharmacy && (
+        <Modal
+          isOpen={!!rejectingPharmacy}
+          onClose={() => {
+            setRejectingPharmacy(null);
+            setPharmacyRejectReason('');
+          }}
+          title={`Reject Pharmacy Registration: ${rejectingPharmacy.name}`}
+          maxWidth="md"
+        >
+          <div className="space-y-4 text-xs">
+            <p className="text-slate-600">
+              Are you sure you want to reject the hospital pharmacy registration for{' '}
+              <strong className="text-slate-900">{rejectingPharmacy.name}</strong>?
+            </p>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">
+                Reason for Rejection (Optional)
+              </label>
+              <textarea
+                rows={3}
+                value={pharmacyRejectReason}
+                onChange={(e) => setPharmacyRejectReason(e.target.value)}
+                placeholder="e.g. Drug license verification mismatch, invalid state pharmacy council registration..."
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none text-xs"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setRejectingPharmacy(null);
+                  setPharmacyRejectReason('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  rejectPharmacyMutation.mutate({
+                    pharmacyId: rejectingPharmacy.id,
+                    reason: pharmacyRejectReason.trim() || undefined,
+                  })
+                }
+                isLoading={rejectPharmacyMutation.isPending}
+                className="text-xs font-bold text-rose-800 bg-rose-50 border-rose-300 hover:bg-rose-100 hover:border-rose-400 shadow-2xs"
+              >
+                <X className="w-3.5 h-3.5 mr-1 text-rose-600" /> Confirm Rejection
               </Button>
             </div>
           </div>

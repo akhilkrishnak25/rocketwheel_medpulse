@@ -512,9 +512,25 @@ export class SuperAdminService {
   // -------------------------------------------------------------
   // LAB ACCREDITATION & APPROVAL MANAGEMENT
   // -------------------------------------------------------------
-  static async getAllLabs(status?: string) {
+  static async getAllLabs(status?: string, type?: string) {
+    const where: any = {};
+    if (status) {
+      where.status = status;
+    }
+    if (type) {
+      where.type = type;
+    }
+    // When Super Admin queries pending labs for accreditation approval,
+    // only return private / independent labs (hospital-associated labs are approved by their hospital admin)
+    if (status === 'PENDING' && !type) {
+      where.OR = [
+        { type: 'INDEPENDENT' },
+        { hospitalId: null },
+      ];
+    }
+
     return prisma.lab.findMany({
-      where: status ? { status: status as any } : undefined,
+      where,
       include: {
         hospital: { select: { id: true, name: true, code: true } },
         technicians: {
@@ -536,6 +552,10 @@ export class SuperAdminService {
       include: { technicians: true },
     });
     if (!lab) throw new Error('Laboratory not found');
+
+    if (lab.type === 'HOSPITAL' && lab.hospitalId) {
+      throw new Error('This laboratory is affiliated with a hospital. Hospital-associated laboratories must be approved by the respective Hospital Administrator, not Super Admin.');
+    }
 
     return prisma.$transaction(async (tx) => {
       const updatedLab = await tx.lab.update({
@@ -573,6 +593,10 @@ export class SuperAdminService {
   static async rejectLab(labId: string, requestingUserId?: string) {
     const lab = await prisma.lab.findUnique({ where: { id: labId } });
     if (!lab) throw new Error('Laboratory not found');
+
+    if (lab.type === 'HOSPITAL' && lab.hospitalId) {
+      throw new Error('This laboratory is affiliated with a hospital. Hospital-associated laboratories must be managed by the respective Hospital Administrator.');
+    }
 
     return prisma.$transaction(async (tx) => {
       const updatedLab = await tx.lab.update({

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import ExcelJS from 'exceljs';
 import { Response } from 'express';
+import bcrypt from 'bcryptjs';
 import prisma from '../config/prisma';
 import { AuditService } from '../utils/audit';
 import { NotificationService } from './notification.service';
@@ -102,6 +103,9 @@ export class DoctorDashboardService {
     return prisma.doctor.findUnique({
       where: { id: doctorId },
       include: {
+        user: {
+          select: { id: true, name: true, email: true, phone: true, avatarUrl: true, role: true, status: true },
+        },
         hospital: {
           select: { id: true, name: true, city: true, phone: true, emergencyContact: true, logoUrl: true },
         },
@@ -119,23 +123,73 @@ export class DoctorDashboardService {
   }
 
   static async updateDoctorProfile(doctorId: string, data: any, requestingUserId?: string) {
-    const existing = await prisma.doctor.findUnique({ where: { id: doctorId } });
+    const existing = await prisma.doctor.findUnique({
+      where: { id: doctorId },
+      include: { user: true },
+    });
     if (!existing) throw new Error('Doctor not found');
 
-    const updated = await prisma.doctor.update({
-      where: { id: doctorId },
-      data: {
-        about: data.about !== undefined ? data.about : existing.about,
-        languages: data.languages !== undefined ? data.languages : existing.languages,
-        workingDays: data.workingDays !== undefined ? data.workingDays : existing.workingDays,
-        workingHoursStart: data.workingHoursStart !== undefined ? data.workingHoursStart : existing.workingHoursStart,
-        workingHoursEnd: data.workingHoursEnd !== undefined ? data.workingHoursEnd : existing.workingHoursEnd,
-        breakStart: data.breakStart !== undefined ? data.breakStart : existing.breakStart,
-        breakEnd: data.breakEnd !== undefined ? data.breakEnd : existing.breakEnd,
-        photoUrl: data.photoUrl !== undefined ? data.photoUrl : existing.photoUrl,
-        consultationFee: data.consultationFee !== undefined ? Number(data.consultationFee) : existing.consultationFee,
-      },
-      include: { department: true, hospital: true },
+    if (requestingUserId && existing.userId && existing.userId !== requestingUserId) {
+      throw new Error('Unauthorized: You can only edit your own doctor profile');
+    }
+
+    if (data.email && existing.user && data.email.toLowerCase().trim() !== existing.user.email.toLowerCase().trim()) {
+      const emailInUse = await prisma.user.findUnique({
+        where: { email: data.email.toLowerCase().trim() },
+      });
+      if (emailInUse && emailInUse.id !== existing.userId) {
+        throw new Error('Email is already in use by another account');
+      }
+    }
+
+    let passwordHash: string | undefined;
+    if (data.password && typeof data.password === 'string' && data.password.trim().length >= 6) {
+      passwordHash = await bcrypt.hash(data.password.trim(), 10);
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if (existing.userId) {
+        const userUpdateData: any = {};
+        if (data.name !== undefined && data.name.trim()) userUpdateData.name = data.name.trim();
+        if (data.phone !== undefined) userUpdateData.phone = data.phone ? data.phone.trim() : null;
+        if (data.email !== undefined && data.email.trim()) userUpdateData.email = data.email.toLowerCase().trim();
+        if (data.photoUrl !== undefined) userUpdateData.avatarUrl = data.photoUrl ? data.photoUrl.trim() : null;
+        if (passwordHash) userUpdateData.passwordHash = passwordHash;
+
+        if (Object.keys(userUpdateData).length > 0) {
+          await tx.user.update({
+            where: { id: existing.userId },
+            data: userUpdateData,
+          });
+        }
+      }
+
+      return tx.doctor.update({
+        where: { id: doctorId },
+        data: {
+          name: data.name !== undefined ? data.name.trim() : existing.name,
+          photoUrl: data.photoUrl !== undefined ? (data.photoUrl ? data.photoUrl.trim() : null) : existing.photoUrl,
+          qualification: data.qualification !== undefined ? data.qualification.trim() : existing.qualification,
+          specialization: data.specialization !== undefined ? data.specialization.trim() : existing.specialization,
+          experienceYears: data.experienceYears !== undefined ? Number(data.experienceYears) : existing.experienceYears,
+          consultationFee: data.consultationFee !== undefined ? Number(data.consultationFee) : existing.consultationFee,
+          languages: data.languages !== undefined ? (Array.isArray(data.languages) ? data.languages.join(', ') : String(data.languages)) : existing.languages,
+          about: data.about !== undefined ? data.about.trim() : existing.about,
+          workingDays: data.workingDays !== undefined ? (Array.isArray(data.workingDays) ? data.workingDays.join(', ') : String(data.workingDays)) : existing.workingDays,
+          workingHoursStart: data.workingHoursStart !== undefined ? data.workingHoursStart : existing.workingHoursStart,
+          workingHoursEnd: data.workingHoursEnd !== undefined ? data.workingHoursEnd : existing.workingHoursEnd,
+          slotDurationMinutes: data.slotDurationMinutes !== undefined ? Number(data.slotDurationMinutes) : existing.slotDurationMinutes,
+          breakStart: data.breakStart !== undefined ? data.breakStart : existing.breakStart,
+          breakEnd: data.breakEnd !== undefined ? data.breakEnd : existing.breakEnd,
+        },
+        include: {
+          user: {
+            select: { id: true, name: true, email: true, phone: true, avatarUrl: true, role: true, status: true },
+          },
+          department: true,
+          hospital: true,
+        },
+      });
     });
 
     await AuditService.log({
@@ -143,7 +197,12 @@ export class DoctorDashboardService {
       action: 'UPDATE_DOCTOR_OWN_PROFILE',
       entity: 'Doctor',
       entityId: doctorId,
-      details: data,
+      details: {
+        name: updated.name,
+        email: updated.user?.email,
+        qualification: updated.qualification,
+        specialization: updated.specialization,
+      },
     });
 
     return updated;

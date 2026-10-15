@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import prisma from '../config/prisma';
 import { generateTokens, verifyRefreshToken } from '../utils/jwt';
 import { successResponse, errorResponse } from '../utils/response';
+import { NotificationService } from '../services/notification.service';
 import {
   loginSchema,
   refreshTokenSchema,
@@ -115,7 +116,27 @@ export class AuthController {
       // Enforce lab status
       if (user.role === 'LAB_TECHNICIAN' && user.labTechnician) {
         if (user.labTechnician.lab.status === 'PENDING') {
-          return errorResponse(res, 'Your laboratory account is awaiting approval by the administrator.', 403);
+          const approver = user.labTechnician.lab.hospitalId ? 'hospital administrator' : 'platform super administrator';
+          return errorResponse(res, `Your laboratory account is awaiting approval by the ${approver}.`, 403);
+        }
+        if (user.labTechnician.lab.status === 'REJECTED') {
+          return errorResponse(res, 'Your laboratory registration was not approved.', 403);
+        }
+        if (user.labTechnician.lab.status === 'SUSPENDED') {
+          return errorResponse(res, 'Your laboratory account has been suspended.', 403);
+        }
+      }
+
+      // Enforce pharmacy staff status
+      if (user.role === 'PHARMACY_STAFF' && user.pharmacyStaff) {
+        if (user.pharmacyStaff.status === 'PENDING' || user.pharmacyStaff.pharmacy?.status === 'PENDING') {
+          return errorResponse(res, 'Your pharmacy registration is awaiting approval by the hospital administration.', 403);
+        }
+        if (user.pharmacyStaff.status === 'REJECTED' || user.pharmacyStaff.pharmacy?.status === 'REJECTED') {
+          return errorResponse(res, 'Your pharmacy registration was not approved by hospital administration.', 403);
+        }
+        if (user.pharmacyStaff.status === 'SUSPENDED' || user.pharmacyStaff.pharmacy?.status === 'SUSPENDED') {
+          return errorResponse(res, 'Your pharmacy account has been suspended by hospital administration.', 403);
         }
       }
 
@@ -907,15 +928,30 @@ export class AuthController {
         return { lab, user, technician };
       });
 
+      if (hospitalId) {
+        await NotificationService.createNotification({
+          hospitalId,
+          recipientType: 'HOSPITAL_ADMIN',
+          title: 'New Diagnostic Laboratory Registered',
+          message: `Diagnostic Laboratory "${name}" has registered and is awaiting approval by the hospital administration.`,
+          type: 'LAB_REGISTRATION',
+          metadata: { labId: result.lab.id, labName: name },
+        });
+      }
+
+      const pendingMsg = hospitalId
+        ? 'Hospital diagnostic laboratory registered successfully! Registration is pending hospital administrator approval.'
+        : 'Independent diagnostic laboratory registered successfully! Registration is pending platform super administrator accreditation.';
+
       return successResponse(
         res,
         {
           labId: result.lab.id,
           labName: result.lab.name,
           status: 'PENDING',
-          message: 'Laboratory registered successfully! Registration is pending administrator approval.',
+          message: pendingMsg,
         },
-        'Laboratory registered successfully! Registration is pending administrator approval.',
+        pendingMsg,
         201
       );
     } catch (error: any) {
@@ -1022,7 +1058,7 @@ export class AuthController {
             phone,
             address,
             licenseNumber,
-            status: 'ACTIVE',
+            status: 'PENDING',
           },
         });
 
@@ -1033,8 +1069,8 @@ export class AuthController {
             phone,
             passwordHash,
             role: 'PHARMACY_STAFF',
-            status: 'ACTIVE',
-            isActive: true,
+            status: 'PENDING',
+            isActive: false,
           },
         });
 
@@ -1044,7 +1080,7 @@ export class AuthController {
             pharmacyId: pharmacy.id,
             hospitalId: hospitalId || null,
             roleTitle: 'Chief Pharmacist',
-            status: 'ACTIVE',
+            status: 'PENDING',
           },
         });
 
@@ -1063,15 +1099,26 @@ export class AuthController {
         return { pharmacy, user, staff };
       });
 
+      if (hospitalId) {
+        await NotificationService.createNotification({
+          hospitalId,
+          recipientType: 'HOSPITAL_ADMIN',
+          title: 'New Pharmacy Registration',
+          message: `Pharmacy "${name}" (Pharmacist: ${staffName}) has registered and is awaiting approval by the hospital administration.`,
+          type: 'PHARMACY_REGISTRATION',
+          metadata: { pharmacyId: result.pharmacy.id, pharmacyName: name },
+        });
+      }
+
       return successResponse(
         res,
         {
           pharmacyId: result.pharmacy.id,
           name: result.pharmacy.name,
-          status: 'ACTIVE',
-          message: 'Pharmacy registered successfully! You can now log in.',
+          status: 'PENDING',
+          message: 'Pharmacy registration submitted successfully! Awaiting approval from hospital administration.',
         },
-        'Pharmacy registered successfully!',
+        'Pharmacy registration submitted successfully! Awaiting approval from hospital administration.',
         201
       );
     } catch (error: any) {

@@ -122,6 +122,8 @@ export const adminApi = {
 
   // Hospital Diagnostic Laboratories Management (Requirement 6)
   getLabs: () => api.get<any[]>('/admin/labs'),
+  approveLab: (labId: string) => api.patch<any>(`/admin/labs/${labId}/approve`, {}),
+  rejectLab: (labId: string, reason?: string) => api.patch<any>(`/admin/labs/${labId}/reject`, { reason }),
   updateLabVisibility: (labId: string, visibility: 'PUBLIC' | 'PRIVATE') =>
     api.patch<any>(`/admin/labs/${labId}/visibility`, { visibility }),
   updateLab: (labId: string, data: any) =>
@@ -130,6 +132,12 @@ export const adminApi = {
     api.delete<any>(`/admin/labs/${labId}`),
   getHospitalLabRequests: (date?: string) =>
     api.get<any[]>(`/admin/lab-requests${date ? `?date=${date}` : ''}`),
+
+  // Hospital Pharmacies Management
+  getPharmacies: () => api.get<any[]>('/admin/pharmacies'),
+  approvePharmacy: (id: string) => api.patch<any>(`/admin/pharmacies/${id}/approve`, {}),
+  rejectPharmacy: (id: string, reason?: string) => api.patch<any>(`/admin/pharmacies/${id}/reject`, { reason }),
+  togglePharmacyStatus: (id: string) => api.patch<any>(`/admin/pharmacies/${id}/status`, {}),
 
   // Export All Hospital Data to Excel (.xlsx)
   exportAllDataExcel: async (): Promise<Blob> => {

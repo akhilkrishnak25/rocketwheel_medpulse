@@ -224,8 +224,32 @@ export const createDoctorSchema = z.object({
     .object({
       email: z.string().email(),
       password: z.string().min(6),
+      phone: z.string().optional(),
     })
     .optional(),
+  email: z.string().email().optional(),
+  password: z.string().min(6).optional(),
+  phone: z.string().optional(),
+});
+
+export const doctorOwnProfileUpdateSchema = z.object({
+  name: z.string().min(2, 'Doctor name must be at least 2 characters').optional(),
+  phone: z.string().optional().nullable(),
+  email: z.string().email('Invalid email address').optional(),
+  password: z.string().min(6, 'Password must be at least 6 characters').optional().nullable().or(z.literal('')),
+  qualification: z.string().min(2, 'Qualification is required').optional(),
+  specialization: z.string().min(2, 'Specialization is required').optional(),
+  experienceYears: z.coerce.number().int().min(0).optional(),
+  consultationFee: z.coerce.number().min(0).optional(),
+  languages: z.string().optional(),
+  about: z.string().optional(),
+  workingDays: z.string().optional(),
+  workingHoursStart: z.string().regex(/^\d{2}:\d{2}$/, 'Format must be HH:MM').optional(),
+  workingHoursEnd: z.string().regex(/^\d{2}:\d{2}$/, 'Format must be HH:MM').optional(),
+  slotDurationMinutes: z.coerce.number().int().min(5).max(120).optional(),
+  breakStart: z.string().optional().nullable(),
+  breakEnd: z.string().optional().nullable(),
+  photoUrl: z.string().optional().nullable().or(z.literal('')),
 });
 
 export const updateDoctorSchema = z.object({

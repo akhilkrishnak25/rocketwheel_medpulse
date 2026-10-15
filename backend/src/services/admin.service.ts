@@ -216,15 +216,48 @@ export class AdminService {
   }
 
   static async addDoctor(hospitalId: string, doctorData: any, requestingUserId?: string) {
-    return prisma.$transaction(async (tx) => {
-      let userId: string | null = null;
+    const doctorEmail = (doctorData.email || doctorData.userAccount?.email || doctorData.doctorEmail)?.toLowerCase().trim();
 
-      // Associate with existing doctor account if doctorEmail is provided
-      const doctorEmail = (doctorData.doctorEmail || doctorData.userAccount?.email)?.toLowerCase();
+    const result = await prisma.$transaction(async (tx) => {
+      // Validate hospital exists
+      const hospital = await tx.hospital.findUnique({ where: { id: hospitalId } });
+      if (!hospital) throw new Error('Hospital not found');
+
+      // Validate department exists
+      const department = await tx.department.findUnique({ where: { id: doctorData.departmentId } });
+      if (!department) throw new Error('Selected clinical department not found');
+
+      let userId: string | null = null;
+      let rawPassword: string | null = null;
+
       if (doctorEmail) {
         const existingUser = await tx.user.findUnique({ where: { email: doctorEmail } });
-        if (existingUser && existingUser.role === 'DOCTOR') {
+        if (existingUser) {
+          if (existingUser.role !== 'DOCTOR') {
+            throw new Error(`An account with email "${doctorEmail}" already exists with role ${existingUser.role}.`);
+          }
+          const existingDoc = await tx.doctor.findFirst({ where: { userId: existingUser.id } });
+          if (existingDoc) {
+            throw new Error(`Doctor with email "${doctorEmail}" is already registered under a hospital.`);
+          }
           userId = existingUser.id;
+        } else {
+          // Provision new doctor user account with initial temporary credentials
+          const initialPassword = doctorData.password || doctorData.userAccount?.password || `Doc@${Math.floor(100000 + Math.random() * 900000)}`;
+          const passwordHash = await bcrypt.hash(initialPassword, 10);
+          const newUser = await tx.user.create({
+            data: {
+              name: doctorData.name,
+              email: doctorEmail,
+              phone: doctorData.phone || doctorData.userAccount?.phone || null,
+              passwordHash,
+              role: 'DOCTOR',
+              status: 'ACTIVE',
+              isActive: true,
+            },
+          });
+          userId = newUser.id;
+          rawPassword = initialPassword;
         }
       }
 
@@ -240,15 +273,17 @@ export class AdminService {
           experienceYears: Number(doctorData.experienceYears || 5),
           consultationFee: Number(doctorData.consultationFee || 500),
           languages: doctorData.languages || 'English, Hindi',
-          about: doctorData.about,
+          about: doctorData.about || `Specialist in ${doctorData.specialization} providing outpatient consultations.`,
           workingDays: doctorData.workingDays || 'Mon,Tue,Wed,Thu,Fri,Sat',
           workingHoursStart: doctorData.workingHoursStart || '09:00',
           workingHoursEnd: doctorData.workingHoursEnd || '17:00',
           slotDurationMinutes: Number(doctorData.slotDurationMinutes || 30),
           breakStart: doctorData.breakStart || '13:00',
           breakEnd: doctorData.breakEnd || '14:00',
+          status: 'ACTIVE',
+          isActive: true,
         },
-        include: { department: true },
+        include: { department: true, hospital: true },
       });
 
       // Automatically initialize weekly schedules for working days (Mon-Sat: 1-6)
@@ -265,16 +300,24 @@ export class AdminService {
         });
       }
 
-      await AuditService.log({
-        userId: requestingUserId,
-        action: 'ADD_DOCTOR',
-        entity: 'Doctor',
-        entityId: doctor.id,
-        details: { hospitalId, doctorName: doctor.name },
-      });
-
-      return doctor;
+      return {
+        ...doctor,
+        initialCredentials: doctorEmail && rawPassword ? {
+          email: doctorEmail,
+          password: rawPassword,
+        } : undefined,
+      };
     });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'ADD_DOCTOR',
+      entity: 'Doctor',
+      entityId: result.id,
+      details: { hospitalId, doctorName: result.name, email: doctorEmail },
+    });
+
+    return result;
   }
 
   static async updateDoctor(hospitalId: string, doctorId: string, data: any, requestingUserId?: string) {
@@ -1165,11 +1208,16 @@ export class AdminService {
     const labs = await prisma.lab.findMany({
       where: { hospitalId },
       include: {
+        technicians: {
+          include: {
+            user: { select: { id: true, name: true, email: true, phone: true, status: true, lastLoginAt: true } },
+          },
+        },
         _count: {
           select: { tests: true, testRequests: true },
         },
       },
-      orderBy: { name: 'asc' },
+      orderBy: { createdAt: 'desc' },
     });
 
     return labs.map((l) => ({
@@ -1276,6 +1324,272 @@ export class AdminService {
     });
 
     return { success: true, message: `Laboratory "${lab.name}" deleted successfully.` };
+  }
+
+  static async approveHospitalLab(hospitalId: string, labId: string, requestingUserId?: string) {
+    const lab = await prisma.lab.findFirst({
+      where: { id: labId, hospitalId },
+      include: { technicians: true },
+    });
+    if (!lab) throw new Error('Laboratory not found or does not belong to your hospital');
+
+    const updatedLab = await prisma.$transaction(async (tx) => {
+      const updated = await tx.lab.update({
+        where: { id: labId },
+        data: { status: 'APPROVED' },
+      });
+
+      for (const tech of lab.technicians) {
+        await tx.labTechnician.update({
+          where: { id: tech.id },
+          data: { status: 'ACTIVE' },
+        });
+
+        await tx.user.update({
+          where: { id: tech.userId },
+          data: { status: 'ACTIVE', isActive: true },
+        });
+      }
+
+      return updated;
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'APPROVE_HOSPITAL_LAB',
+      entity: 'Lab',
+      entityId: labId,
+      details: { name: lab.name, hospitalId },
+    });
+
+    for (const tech of lab.technicians) {
+      await NotificationService.createNotification({
+        hospitalId,
+        recipientType: 'LAB_TECHNICIAN',
+        recipientId: tech.userId,
+        title: 'Laboratory Approved',
+        message: `Your hospital diagnostic laboratory "${lab.name}" has been approved by the hospital administration. You can now access your technician dashboard.`,
+        type: 'REGISTRATION_APPROVED',
+        metadata: { labId },
+      });
+    }
+
+    return updatedLab;
+  }
+
+  static async rejectHospitalLab(hospitalId: string, labId: string, reason?: string, requestingUserId?: string) {
+    const lab = await prisma.lab.findFirst({
+      where: { id: labId, hospitalId },
+      include: { technicians: true },
+    });
+    if (!lab) throw new Error('Laboratory not found or does not belong to your hospital');
+
+    const updatedLab = await prisma.$transaction(async (tx) => {
+      const updated = await tx.lab.update({
+        where: { id: labId },
+        data: { status: 'REJECTED' },
+      });
+
+      for (const tech of lab.technicians) {
+        await tx.labTechnician.update({
+          where: { id: tech.id },
+          data: { status: 'REJECTED' },
+        });
+
+        await tx.user.update({
+          where: { id: tech.userId },
+          data: { status: 'REJECTED', isActive: false },
+        });
+      }
+
+      return updated;
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'REJECT_HOSPITAL_LAB',
+      entity: 'Lab',
+      entityId: labId,
+      details: { name: lab.name, hospitalId, reason },
+    });
+
+    for (const tech of lab.technicians) {
+      await NotificationService.createNotification({
+        hospitalId,
+        recipientType: 'LAB_TECHNICIAN',
+        recipientId: tech.userId,
+        title: 'Laboratory Registration Rejected',
+        message: `Your hospital laboratory registration application was rejected by hospital administration.${reason ? ' Reason: ' + reason : ''}`,
+        type: 'REGISTRATION_REJECTED',
+        metadata: { labId, reason },
+      });
+    }
+
+    return updatedLab;
+  }
+
+  // -------------------------------------------------------------
+  // HOSPITAL PHARMACIES & DISPENSING COUNTERS MANAGEMENT
+  // -------------------------------------------------------------
+  static async getHospitalPharmacies(hospitalId: string) {
+    return prisma.pharmacy.findMany({
+      where: { hospitalId },
+      include: {
+        staff: {
+          include: {
+            user: { select: { id: true, name: true, email: true, phone: true, status: true, lastLoginAt: true } },
+          },
+        },
+        _count: {
+          select: { prescriptions: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  static async approvePharmacy(hospitalId: string, pharmacyId: string, requestingUserId?: string) {
+    const pharmacy = await prisma.pharmacy.findFirst({
+      where: { id: pharmacyId, hospitalId },
+      include: { staff: true },
+    });
+    if (!pharmacy) throw new Error('Pharmacy not found or does not belong to your hospital');
+
+    const updatedPharmacy = await prisma.$transaction(async (tx) => {
+      const updated = await tx.pharmacy.update({
+        where: { id: pharmacyId },
+        data: { status: 'ACTIVE' },
+      });
+
+      for (const s of pharmacy.staff) {
+        await tx.pharmacyStaff.update({
+          where: { id: s.id },
+          data: { status: 'ACTIVE' },
+        });
+
+        await tx.user.update({
+          where: { id: s.userId },
+          data: { status: 'ACTIVE', isActive: true },
+        });
+      }
+
+      return updated;
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'APPROVE_PHARMACY',
+      entity: 'Pharmacy',
+      entityId: pharmacyId,
+      details: { name: pharmacy.name, hospitalId },
+    });
+
+    for (const s of pharmacy.staff) {
+      await NotificationService.createNotification({
+        hospitalId,
+        recipientType: 'PHARMACY_STAFF',
+        recipientId: s.userId,
+        title: 'Pharmacy Registration Approved',
+        message: `Your pharmacy "${pharmacy.name}" has been approved by the hospital administration. You can now log in and manage prescription fulfillment.`,
+        type: 'REGISTRATION_APPROVED',
+        metadata: { pharmacyId },
+      });
+    }
+
+    return updatedPharmacy;
+  }
+
+  static async rejectPharmacy(hospitalId: string, pharmacyId: string, reason?: string, requestingUserId?: string) {
+    const pharmacy = await prisma.pharmacy.findFirst({
+      where: { id: pharmacyId, hospitalId },
+      include: { staff: true },
+    });
+    if (!pharmacy) throw new Error('Pharmacy not found or does not belong to your hospital');
+
+    const updatedPharmacy = await prisma.$transaction(async (tx) => {
+      const updated = await tx.pharmacy.update({
+        where: { id: pharmacyId },
+        data: { status: 'REJECTED' },
+      });
+
+      for (const s of pharmacy.staff) {
+        await tx.pharmacyStaff.update({
+          where: { id: s.id },
+          data: { status: 'REJECTED' },
+        });
+
+        await tx.user.update({
+          where: { id: s.userId },
+          data: { status: 'REJECTED', isActive: false },
+        });
+      }
+
+      return updated;
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'REJECT_PHARMACY',
+      entity: 'Pharmacy',
+      entityId: pharmacyId,
+      details: { name: pharmacy.name, hospitalId, reason },
+    });
+
+    for (const s of pharmacy.staff) {
+      await NotificationService.createNotification({
+        hospitalId,
+        recipientType: 'PHARMACY_STAFF',
+        recipientId: s.userId,
+        title: 'Pharmacy Registration Rejected',
+        message: `Your pharmacy registration application was rejected by hospital administration.${reason ? ' Reason: ' + reason : ''}`,
+        type: 'REGISTRATION_REJECTED',
+        metadata: { pharmacyId, reason },
+      });
+    }
+
+    return updatedPharmacy;
+  }
+
+  static async togglePharmacyStatus(hospitalId: string, pharmacyId: string, requestingUserId?: string) {
+    const pharmacy = await prisma.pharmacy.findFirst({
+      where: { id: pharmacyId, hospitalId },
+      include: { staff: true },
+    });
+    if (!pharmacy) throw new Error('Pharmacy not found or does not belong to your hospital');
+
+    const nextStatus = pharmacy.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
+    const nextIsActive = nextStatus === 'ACTIVE';
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const updated = await tx.pharmacy.update({
+        where: { id: pharmacyId },
+        data: { status: nextStatus },
+      });
+
+      for (const s of pharmacy.staff) {
+        await tx.pharmacyStaff.update({
+          where: { id: s.id },
+          data: { status: nextStatus },
+        });
+
+        await tx.user.update({
+          where: { id: s.userId },
+          data: { status: nextStatus, isActive: nextIsActive },
+        });
+      }
+
+      return updated;
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'TOGGLE_PHARMACY_STATUS',
+      entity: 'Pharmacy',
+      entityId: pharmacyId,
+      details: { previous: pharmacy.status, current: nextStatus, name: pharmacy.name },
+    });
+
+    return updated;
   }
 
   static async getHospitalLabRequests(hospitalId: string, date?: string) {

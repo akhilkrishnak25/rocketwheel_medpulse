@@ -46,6 +46,7 @@ import { Modal } from '../components/ui/Modal';
 import { useToast } from '../components/ui/Toast';
 import { InlineSpinner } from '../components/ui/Loading';
 import { Appointment } from '../types';
+import { DoctorEditProfileSection } from '../components/DoctorEditProfileSection';
 
 interface MedicineItem {
   name: string;
@@ -63,12 +64,12 @@ export const DoctorDashboardPage: React.FC = () => {
   const [activeAppointment, setActiveAppointment] = useState<Appointment | null>(null);
   const [isConsultModalOpen, setIsConsultModalOpen] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'queue' | 'templates' | 'labs' | 'roster' | 'leaves'>('queue');
+  const [activeTab, setActiveTab] = useState<'queue' | 'templates' | 'labs' | 'roster' | 'leaves' | 'profile'>('queue');
 
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '').toLowerCase();
-      if (['queue', 'templates', 'labs', 'roster', 'leaves'].includes(hash)) {
+      if (['queue', 'templates', 'labs', 'roster', 'leaves', 'profile'].includes(hash)) {
         setActiveTab(hash as any);
       }
     };
@@ -718,6 +719,7 @@ export const DoctorDashboardPage: React.FC = () => {
               {activeTab === 'labs' && "Diagnostic Laboratory Requisitions"}
               {activeTab === 'roster' && "Doctor Practice Roster & Timings"}
               {activeTab === 'leaves' && "Doctor Leave & Absence Calendar"}
+              {activeTab === 'profile' && "Doctor Profile & Registration Details"}
             </h1>
             <Badge variant="success" className="text-[11px] font-bold">
               OPD Active
@@ -729,6 +731,7 @@ export const DoctorDashboardPage: React.FC = () => {
             {activeTab === 'labs' && "Track patient laboratory investigation requests, statuses, and completed reports"}
             {activeTab === 'roster' && "Configure OPD consultation schedules, slot durations, and hospital practice hours"}
             {activeTab === 'leaves' && "Submit leave requests and view upcoming duty off days"}
+            {activeTab === 'profile' && "Update your personal, contact, clinical credentials, consultation settings, and account password"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1896,6 +1899,16 @@ export const DoctorDashboardPage: React.FC = () => {
             </table>
           </div>
         </Card>
+      )}
+
+      {/* TAB: DOCTOR EDIT PROFILE */}
+      {activeTab === 'profile' && (
+        <DoctorEditProfileSection
+          profile={profile}
+          user={user}
+          refetchProfile={refetchProfile}
+          updateUser={updateUser}
+        />
       )}
 
       {/* APPLY LEAVE MODAL */}

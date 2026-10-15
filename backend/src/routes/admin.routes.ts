@@ -64,10 +64,18 @@ router.patch('/notifications/:id/read', AdminController.markNotificationRead);
 
 // Hospital Diagnostic Laboratories & Visibility
 router.get('/labs', AdminController.getLabs);
+router.patch('/labs/:labId/approve', AdminController.approveLab);
+router.patch('/labs/:labId/reject', AdminController.rejectLab);
 router.patch('/labs/:labId/visibility', AdminController.updateLabVisibility);
 router.patch('/labs/:labId', AdminController.updateLab);
 router.delete('/labs/:labId', AdminController.deleteLab);
 router.get('/lab-requests', AdminController.getHospitalLabRequests);
+
+// Hospital Pharmacies Management
+router.get('/pharmacies', AdminController.getPharmacies);
+router.patch('/pharmacies/:id/approve', AdminController.approvePharmacy);
+router.patch('/pharmacies/:id/reject', AdminController.rejectPharmacy);
+router.patch('/pharmacies/:id/status', AdminController.togglePharmacyStatus);
 
 // Full Hospital Data Excel Export
 router.get('/export/excel', AdminController.exportAllDataToExcel);

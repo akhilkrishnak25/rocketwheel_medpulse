@@ -570,6 +570,88 @@ export class AdminController {
     }
   }
 
+  static async approveLab(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const labId = req.params.labId as string;
+      const approved = await AdminService.approveHospitalLab(hospitalId, labId, req.user?.id);
+      return successResponse(res, approved, 'Hospital diagnostic laboratory approved and activated');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to approve laboratory', 400);
+    }
+  }
+
+  static async rejectLab(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const labId = req.params.labId as string;
+      const { reason } = req.body;
+      const rejected = await AdminService.rejectHospitalLab(hospitalId, labId, reason, req.user?.id);
+      return successResponse(res, rejected, 'Hospital diagnostic laboratory application rejected');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to reject laboratory', 400);
+    }
+  }
+
+  // -------------------------------------------------------------
+  // HOSPITAL PHARMACIES & DISPENSING COUNTERS MANAGEMENT
+  // -------------------------------------------------------------
+  static async getPharmacies(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const pharmacies = await AdminService.getHospitalPharmacies(hospitalId);
+      return successResponse(res, pharmacies, 'Hospital pharmacies retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch pharmacies', 500);
+    }
+  }
+
+  static async approvePharmacy(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const id = req.params.id as string;
+      const approved = await AdminService.approvePharmacy(hospitalId, id, req.user?.id);
+      return successResponse(res, approved, 'Pharmacy registration approved and activated');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to approve pharmacy', 400);
+    }
+  }
+
+  static async rejectPharmacy(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const id = req.params.id as string;
+      const { reason } = req.body;
+      const rejected = await AdminService.rejectPharmacy(hospitalId, id, reason, req.user?.id);
+      return successResponse(res, rejected, 'Pharmacy registration application rejected');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to reject pharmacy', 400);
+    }
+  }
+
+  static async togglePharmacyStatus(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const id = req.params.id as string;
+      const updated = await AdminService.togglePharmacyStatus(hospitalId, id, req.user?.id);
+      return successResponse(res, updated, `Pharmacy status updated to ${updated.status}`);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to update pharmacy status', 400);
+    }
+  }
+
   static async getHospitalLabRequests(req: Request, res: Response) {
     try {
       const hospitalId = req.user?.hospitalId;

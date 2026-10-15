@@ -8,6 +8,7 @@ import {
   prescriptionTemplateSchema,
   createLabRequestSchema,
   updateDoctorAssignedStaffSchema,
+  doctorOwnProfileUpdateSchema,
 } from '../validators/schemas';
 
 export class DoctorDashboardController {
@@ -48,7 +49,8 @@ export class DoctorDashboardController {
         return errorResponse(res, 'Doctor account not linked to this session', 400);
       }
 
-      const updated = await DoctorDashboardService.updateDoctorProfile(doctorId, req.body, req.user?.id);
+      const validated = doctorOwnProfileUpdateSchema.parse(req.body);
+      const updated = await DoctorDashboardService.updateDoctorProfile(doctorId, validated, req.user?.id);
       return successResponse(res, updated, 'Doctor profile updated successfully');
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to update profile', 400);

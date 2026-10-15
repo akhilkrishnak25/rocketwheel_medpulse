@@ -180,7 +180,7 @@ export const SuperAdminDashboardPage: React.FC = () => {
   });
 
   const labsList: any[] = allLabsData || [];
-  const pendingLabsCount = labsList.filter((l: any) => l.status === 'PENDING').length;
+  const pendingLabsCount = labsList.filter((l: any) => l.status === 'PENDING' && (l.type === 'INDEPENDENT' || !l.hospitalId)).length;
   const approvedLabsCount = labsList.filter((l: any) => l.status === 'APPROVED' || l.status === 'ACTIVE').length;
   const rejectedLabsCount = labsList.filter((l: any) => l.status === 'REJECTED').length;
 
@@ -1566,24 +1566,30 @@ export const SuperAdminDashboardPage: React.FC = () => {
                         </td>
                         <td className="px-5 py-3.5 text-right space-x-2">
                           {isPending && (
-                            <>
-                              <Button
-                                size="sm"
-                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
-                                onClick={() => approveLabMutation.mutate(lab.id)}
-                                isLoading={approveLabMutation.isPending}
-                              >
-                                <Check className="w-3.5 h-3.5 mr-1" /> Approve
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-rose-600 hover:bg-rose-50 border-rose-200 text-xs"
-                                onClick={() => setRejectingLab(lab)}
-                              >
-                                <X className="w-3.5 h-3.5 mr-1" /> Reject
-                              </Button>
-                            </>
+                            lab.type === 'HOSPITAL' || lab.hospitalId ? (
+                              <span className="inline-block text-[11px] font-semibold text-royal-700 bg-royal-50 border border-royal-200 px-2.5 py-1 rounded-lg">
+                                Hospital Admin Approval Required
+                              </span>
+                            ) : (
+                              <>
+                                <Button
+                                  size="sm"
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                                  onClick={() => approveLabMutation.mutate(lab.id)}
+                                  isLoading={approveLabMutation.isPending}
+                                >
+                                  <Check className="w-3.5 h-3.5 mr-1" /> Approve
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-rose-700 bg-rose-50 hover:bg-rose-100 border-rose-300 font-bold text-xs"
+                                  onClick={() => setRejectingLab(lab)}
+                                >
+                                  <X className="w-3.5 h-3.5 mr-1 text-rose-600" /> Reject
+                                </Button>
+                              </>
+                            )
                           )}
                           {isApproved && (
                             <Button

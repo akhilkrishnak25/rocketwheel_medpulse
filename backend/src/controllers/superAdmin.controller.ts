@@ -174,8 +174,8 @@ export class SuperAdminController {
   // -------------------------------------------------------------
   static async getAllLabs(req: Request, res: Response) {
     try {
-      const { status } = req.query;
-      const labs = await SuperAdminService.getAllLabs(status as string);
+      const { status, type } = req.query;
+      const labs = await SuperAdminService.getAllLabs(status as string, type as string);
       return successResponse(res, labs, 'All diagnostic laboratories retrieved');
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to fetch laboratories', 500);

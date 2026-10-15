@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Menu,
   Stethoscope,
+  UserCog,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/Button';
@@ -26,7 +27,7 @@ export const DoctorLayout: React.FC = () => {
   useEffect(() => {
     const syncTab = () => {
       const hash = window.location.hash.replace('#', '').toLowerCase();
-      if (['queue', 'templates', 'labs', 'roster', 'leaves'].includes(hash)) {
+      if (['queue', 'templates', 'labs', 'roster', 'leaves', 'profile'].includes(hash)) {
         setCurrentTab(hash);
       } else {
         setCurrentTab('queue');
@@ -101,6 +102,12 @@ export const DoctorLayout: React.FC = () => {
       label: 'Leave Management',
       icon: Calendar,
       color: 'text-rose-400',
+    },
+    {
+      id: 'profile',
+      label: 'Edit Profile',
+      icon: UserCog,
+      color: 'text-sky-400',
     },
   ];
 
