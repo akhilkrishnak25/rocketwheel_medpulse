@@ -34,6 +34,7 @@ export const adminApi = {
   rejectDoctor: (doctorId: string, reason?: string) => api.patch<Doctor>(`/admin/doctors/${doctorId}/reject`, { reason }),
 
   toggleDoctorStatus: (doctorId: string) => api.patch<Doctor>(`/admin/doctors/${doctorId}/status`, {}),
+  deleteDoctor: (doctorId: string) => api.delete<{ message: string; softDeleted?: boolean }>(`/admin/doctors/${doctorId}`),
 
   bulkImportDoctors: (data: { csvData?: string; rows?: any[]; commit?: boolean }) =>
     api.post<any>('/admin/doctors/bulk-import', data),

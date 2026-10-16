@@ -18,9 +18,15 @@ export class AuditService {
           ? JSON.stringify(params.details)
           : (params.details as string) || null;
 
+      let validUserId = params.userId || null;
+      if (validUserId) {
+        const userExists = await prisma.user.findUnique({ where: { id: validUserId }, select: { id: true } });
+        if (!userExists) validUserId = null;
+      }
+
       return await prisma.auditLog.create({
         data: {
-          userId: params.userId || null,
+          userId: validUserId,
           action: params.action,
           entity: params.entity,
           entityId: params.entityId || null,

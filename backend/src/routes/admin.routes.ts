@@ -20,6 +20,7 @@ router.patch('/doctors/:doctorId', AdminController.updateDoctor);
 router.patch('/doctors/:doctorId/approve', AdminController.approveDoctor);
 router.patch('/doctors/:doctorId/reject', AdminController.rejectDoctor);
 router.patch('/doctors/:doctorId/status', AdminController.toggleDoctorStatus);
+router.delete('/doctors/:doctorId', AdminController.deleteDoctor);
 
 // Doctor Schedules & Leaves
 router.get('/doctors/:doctorId/schedules', AdminController.getDoctorSchedules);

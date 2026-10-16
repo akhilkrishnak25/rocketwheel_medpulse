@@ -46,7 +46,7 @@ export class AdminService {
         where: { hospitalId, status: 'NO_SHOW' },
       }),
       prisma.doctor.count({
-        where: { hospitalId, isActive: true },
+        where: { hospitalId, isActive: true, status: { not: 'DELETED' } },
       }),
       prisma.appointment.count({
         where: { hospitalId },
@@ -202,7 +202,7 @@ export class AdminService {
 
   static async getDoctors(hospitalId: string) {
     return prisma.doctor.findMany({
-      where: { hospitalId },
+      where: { hospitalId, status: { not: 'DELETED' } },
       include: {
         department: true,
         schedules: { orderBy: { dayOfWeek: 'asc' } },
@@ -492,6 +492,104 @@ export class AdminService {
     });
 
     return updated;
+  }
+
+  static async deleteDoctor(hospitalId: string, doctorId: string, requestingUserId?: string) {
+    const doctor = await prisma.doctor.findFirst({
+      where: { id: doctorId, hospitalId },
+      include: {
+        user: true,
+        _count: {
+          select: {
+            appointments: true,
+            prescriptions: true,
+          },
+        },
+      },
+    });
+
+    if (!doctor) {
+      throw new Error('Doctor not found in this hospital');
+    }
+
+    const hasHistory = (doctor._count.appointments || 0) > 0 || (doctor._count.prescriptions || 0) > 0;
+
+    if (hasHistory) {
+      // Safe soft deletion preserving historical clinical records and foreign keys
+      await prisma.$transaction(
+        async (tx) => {
+          await tx.doctor.update({
+            where: { id: doctorId },
+            data: {
+              status: 'DELETED',
+              isActive: false,
+            },
+          });
+
+          if (doctor.userId) {
+            await tx.user.update({
+              where: { id: doctor.userId },
+              data: {
+                status: 'DEACTIVATED',
+                isActive: false,
+              },
+            });
+          }
+
+          // Delete unbooked future appointment slots
+          await tx.appointmentSlot.deleteMany({
+            where: { doctorId, isBooked: false },
+          });
+
+          // Disable recurring schedules
+          await tx.doctorSchedule.updateMany({
+            where: { doctorId },
+            data: { isAvailable: false },
+          });
+        },
+        { timeout: 20000, maxWait: 15000 }
+      );
+    } else {
+      // Doctor has zero consultations or appointments: clean deletion
+      await prisma.$transaction(
+        async (tx) => {
+          await tx.doctorSchedule.deleteMany({ where: { doctorId } });
+          await tx.doctorLeave.deleteMany({ where: { doctorId } });
+          await tx.appointmentSlot.deleteMany({ where: { doctorId } });
+          await tx.review.deleteMany({ where: { doctorId } });
+          await tx.prescriptionTemplate.deleteMany({ where: { doctorId } });
+          await tx.doctor.delete({ where: { id: doctorId } });
+
+          if (doctor.userId) {
+            await tx.user.delete({ where: { id: doctor.userId } }).catch(async () => {
+              await tx.user.update({
+                where: { id: doctor.userId! },
+                data: { status: 'DEACTIVATED', isActive: false },
+              });
+            });
+          }
+        },
+        { timeout: 20000, maxWait: 15000 }
+      );
+    }
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'DELETE_DOCTOR',
+      entity: 'Doctor',
+      entityId: doctorId,
+      details: {
+        doctorName: doctor.name,
+        hospitalId,
+        softDeleted: hasHistory,
+      },
+    });
+
+    return {
+      success: true,
+      message: `Dr. ${doctor.name} has been removed successfully.`,
+      softDeleted: hasHistory,
+    };
   }
 
   static async bulkImportDoctors(hospitalId: string, rawInput: string | any[], commit: boolean = false, requestingUserId?: string) {
@@ -1654,7 +1752,7 @@ export class AdminService {
         orderBy: [{ appointmentDate: 'desc' }, { tokenNumber: 'asc' }],
       }),
       prisma.doctor.findMany({
-        where: { hospitalId },
+        where: { hospitalId, status: { not: 'DELETED' } },
         include: {
           department: true,
           user: { select: { name: true, email: true, phone: true } },

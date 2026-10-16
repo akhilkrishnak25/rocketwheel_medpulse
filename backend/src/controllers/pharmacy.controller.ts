@@ -43,4 +43,54 @@ export class PharmacyController {
       return errorResponse(res, error.message || 'Failed to update prescription status', 400);
     }
   }
+
+  static async replaceMedicine(req: Request, res: Response) {
+    try {
+      const pharmacyId = req.user?.pharmacyId;
+      const prescriptionId = req.params.prescriptionId as string;
+      const { medicineIndex, originalName, replacement, reason, doctorApproved } = req.body;
+
+      if (medicineIndex === undefined || !replacement?.name || !reason) {
+        return errorResponse(
+          res,
+          'Medicine index, replacement medicine name, and substitution reason are required',
+          400
+        );
+      }
+
+      const updated = await PharmacyService.replaceMedicine(
+        prescriptionId,
+        pharmacyId,
+        {
+          medicineIndex: Number(medicineIndex),
+          originalName,
+          replacement,
+          reason,
+          doctorApproved,
+        },
+        req.user?.userId || req.user?.id || 'pharmacy-staff',
+        req.user?.email || 'Pharmacy Staff'
+      );
+
+      return successResponse(res, updated, 'Unavailable medicine substituted successfully');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to substitute medicine', 400);
+    }
+  }
+
+  static async downloadPrescriptionPdf(req: Request, res: Response) {
+    try {
+      const prescriptionId = req.params.prescriptionId as string;
+      const pdfBuffer = await PharmacyService.generatePrescriptionPdf(prescriptionId);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="Revised-Prescription-${prescriptionId.slice(0, 8)}.pdf"`
+      );
+      return res.send(pdfBuffer);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to generate revised prescription PDF', 500);
+    }
+  }
 }

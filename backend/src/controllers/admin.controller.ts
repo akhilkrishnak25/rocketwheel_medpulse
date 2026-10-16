@@ -161,6 +161,19 @@ export class AdminController {
     }
   }
 
+  static async deleteDoctor(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated with this admin account', 400);
+
+      const doctorId = req.params.doctorId as string;
+      const result = await AdminService.deleteDoctor(hospitalId, doctorId, req.user?.userId);
+      return successResponse(res, result, result.message);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to delete doctor', 400);
+    }
+  }
+
   static async bulkImportDoctors(req: Request, res: Response) {
     try {
       const hospitalId = req.user?.hospitalId;

@@ -493,6 +493,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
   const [isAddDoctorOpen, setIsAddDoctorOpen] = useState(false);
   const [isAddDeptOpen, setIsAddDeptOpen] = useState(false);
   const [editingDoctor, setEditingDoctor] = useState<Doctor | null>(null);
+  const [doctorToDelete, setDoctorToDelete] = useState<Doctor | null>(null);
 
   // Doctor approval, status & bulk import states
   const [doctorFilterStatus, setDoctorFilterStatus] = useState<string>('ALL');
@@ -963,6 +964,20 @@ export const HospitalAdminDashboardPage: React.FC = () => {
     },
     onError: (err: any) => {
       toast.error('Failed to update doctor status', err.message);
+    },
+  });
+
+  // Delete doctor mutation
+  const deleteDoctorMutation = useMutation({
+    mutationFn: (doctorId: string) => adminApi.deleteDoctor(doctorId),
+    onSuccess: (data: any) => {
+      toast.success('Doctor Removed', data?.message || 'Doctor account removed from active records.');
+      setDoctorToDelete(null);
+      queryClient.invalidateQueries({ queryKey: ['admin-doctors'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-metrics'] });
+    },
+    onError: (err: any) => {
+      toast.error('Failed to Delete Doctor', err.message);
     },
   });
 
@@ -1979,6 +1994,15 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                             </Button>
                           )}
                         </div>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full text-xs font-bold text-rose-700 bg-rose-50 border border-rose-300 hover:bg-rose-100 hover:border-rose-400 shadow-2xs"
+                          onClick={() => setDoctorToDelete(doc)}
+                        >
+                          <Trash2 className="w-3.5 h-3.5 mr-1 text-rose-600" /> Delete Doctor
+                        </Button>
                       </div>
                     </div>
                   );
@@ -3396,6 +3420,66 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                 }}
               >
                 Save Changes
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* DELETE DOCTOR CONFIRMATION MODAL */}
+      {doctorToDelete && (
+        <Modal
+          isOpen={!!doctorToDelete}
+          onClose={() => !deleteDoctorMutation.isPending && setDoctorToDelete(null)}
+          title={`Delete Doctor - Dr. ${doctorToDelete.name}`}
+          maxWidth="md"
+        >
+          <div className="space-y-4 text-xs">
+            <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 space-y-2">
+              <div className="flex items-center gap-2 font-black text-rose-800 text-sm">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                Permanent Deletion / Deactivation Warning
+              </div>
+              <p className="text-rose-700 text-xs leading-relaxed">
+                Are you sure you want to delete <strong>Dr. {doctorToDelete.name}</strong> from your hospital?
+              </p>
+              <div className="text-[11px] text-rose-600 space-y-1 bg-white/70 p-2.5 rounded-lg border border-rose-200">
+                <div>• Doctor login account will be immediately deactivated and cannot access the portal.</div>
+                <div>• All future unbooked appointment slots and working schedules will be disabled.</div>
+                <div>• Historical patient consultations, digital OP slips, and prescriptions are preserved for medical audit and regulatory integrity.</div>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+              <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Doctor Profile Summary</div>
+              <div className="font-black text-slate-800 text-sm">Dr. {doctorToDelete.name}</div>
+              <div className="text-slate-600 text-xs">
+                {doctorToDelete.specialization} • {doctorToDelete.qualification}
+              </div>
+              <div className="text-slate-500 text-[11px] font-mono">
+                Consultation Fee: ₹{doctorToDelete.consultationFee} • Experience: {doctorToDelete.experienceYears} Years
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="text-slate-700 bg-white border-slate-300 hover:bg-slate-50 font-bold text-xs"
+                onClick={() => setDoctorToDelete(null)}
+                disabled={deleteDoctorMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs"
+                onClick={() => deleteDoctorMutation.mutate(doctorToDelete.id)}
+                disabled={deleteDoctorMutation.isPending}
+              >
+                {deleteDoctorMutation.isPending ? 'Deleting Doctor...' : 'Confirm Delete Doctor'}
               </Button>
             </div>
           </div>

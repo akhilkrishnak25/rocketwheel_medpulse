@@ -68,6 +68,9 @@ export class AuthController {
       if (user.status === 'SUSPENDED') {
         return errorResponse(res, 'Your account has been suspended. Contact your hospital administrator or support.', 403);
       }
+      if (user.status === 'DEACTIVATED') {
+        return errorResponse(res, 'This account has been deactivated.', 403);
+      }
       if (user.status === 'INVITED') {
         return errorResponse(res, 'Please complete your account activation using the link sent to your email.', 403);
       }
@@ -92,6 +95,9 @@ export class AuthController {
 
       // Enforce doctor profile lifecycle status
       if (user.role === 'DOCTOR' && user.doctor) {
+        if (user.doctor.status === 'DELETED') {
+          return errorResponse(res, 'This doctor profile has been removed by the hospital administration.', 403);
+        }
         if (user.doctor.status === 'SUSPENDED') {
           return errorResponse(res, 'Your doctor profile has been suspended by the hospital administration.', 403);
         }

@@ -263,6 +263,9 @@ export interface ClinicalConsultationPdfData {
     frequency?: string;
     duration?: string;
     instructions?: string;
+    isSubstituted?: boolean;
+    originalMedicine?: string;
+    substitutionReason?: string;
   }>;
   labRequests?: Array<{
     name: string;
@@ -355,7 +358,12 @@ export const generateClinicalConsultationPdf = async (data: ClinicalConsultation
 
       // Section: Prescription / Medicines
       if (data.medicines && data.medicines.length > 0) {
+        const hasSubstituted = data.medicines.some((m) => m.isSubstituted);
         doc.fillColor('#0f172a').fontSize(10).font('Helvetica-Bold').text('PRESCRIPTION (Rx):', 40, curY);
+        if (hasSubstituted) {
+          doc.fillColor('#b45309').fontSize(7.5).font('Helvetica-Bold')
+             .text('• REVISED PRESCRIPTION (Includes authorized pharmacy substitutions)', 180, curY + 2, { align: 'right', width: 375 });
+        }
         curY += 14;
 
         // Table Header
@@ -371,15 +379,22 @@ export const generateClinicalConsultationPdf = async (data: ClinicalConsultation
 
         data.medicines.forEach((med, idx) => {
           const rowBg = idx % 2 === 0 ? '#f8fafc' : '#ffffff';
-          doc.rect(40, curY, 515, 20).fill(rowBg);
+          const isSub = Boolean(med.isSubstituted);
+          const rowHeight = isSub ? 30 : 20;
+          doc.rect(40, curY, 515, rowHeight).fill(rowBg);
           doc.fillColor('#334155').fontSize(8).font('Helvetica');
           doc.text(String(idx + 1), 46, curY + 5, { width: 20 });
           doc.font('Helvetica-Bold').text(med.name, 68, curY + 5, { width: 175 }).font('Helvetica');
+          if (isSub) {
+            doc.fillColor('#b45309').fontSize(6.5).font('Helvetica-Bold')
+               .text(`[Substituted for: ${med.originalMedicine || 'Unavailable'} - ${med.substitutionReason || 'Clinically equivalent'}]`, 68, curY + 16, { width: 175 });
+          }
+          doc.fillColor('#334155').fontSize(8).font('Helvetica');
           doc.text(med.dosage || '1 dose', 245, curY + 5, { width: 65 });
           doc.text(med.frequency || '1-0-1', 312, curY + 5, { width: 75 });
           doc.text(med.duration || '5 days', 390, curY + 5, { width: 60 });
           doc.text(med.instructions || 'After food', 452, curY + 5, { width: 100 });
-          curY += 21;
+          curY += rowHeight + 1;
         });
         curY += 10;
       }
