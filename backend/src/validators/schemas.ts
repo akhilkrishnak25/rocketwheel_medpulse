@@ -303,6 +303,7 @@ export const completeConsultationSchema = z.object({
         frequency: z.string().min(1, 'Frequency is required'),
         duration: z.string().min(1, 'Duration is required'),
         instructions: z.string().optional(),
+        priority: z.coerce.number().int().positive().optional().nullable(),
       })
     )
     .optional()
@@ -474,6 +475,7 @@ export const prescriptionTemplateSchema = z.object({
         frequency: z.string().optional().default('As directed'),
         duration: z.string().optional().default('5 days'),
         instructions: z.string().optional().nullable(),
+        priority: z.coerce.number().int().positive().optional().nullable(),
       })
     )
     .optional()

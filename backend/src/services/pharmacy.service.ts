@@ -3,6 +3,7 @@ import { AuditService } from '../utils/audit';
 import { NotificationService } from './notification.service';
 import { generateClinicalConsultationPdf } from '../utils/pdf';
 import { resolveConsultationVitals, formatBP } from '../utils/vitals';
+import { sortMedicinesByPriority } from '../utils/medicines';
 
 export class PharmacyService {
   static async getPrescriptions(pharmacyId?: string, hospitalId?: string, status?: string) {
@@ -67,7 +68,7 @@ export class PharmacyService {
     return prescriptions.map((p) => ({
       ...p,
       vitals: resolveConsultationVitals(p),
-      medicinesList: JSON.parse(p.medicines || '[]'),
+      medicinesList: sortMedicinesByPriority(JSON.parse(p.medicines || '[]')),
     }));
   }
 
@@ -183,6 +184,7 @@ export class PharmacyService {
 
     const substitutedItem = {
       name: data.replacement.name.trim(),
+      priority: targetMed.priority,
       dosage: data.replacement.dosage?.trim() || targetMed.dosage || '1 dose',
       frequency: data.replacement.frequency?.trim() || targetMed.frequency || '1-0-1',
       duration: data.replacement.duration?.trim() || targetMed.duration || '5 days',
@@ -202,6 +204,7 @@ export class PharmacyService {
     };
 
     medicinesList[idx] = substitutedItem;
+    medicinesList = sortMedicinesByPriority(medicinesList);
 
     const updateData: any = {
       medicines: JSON.stringify(medicinesList),
@@ -297,7 +300,7 @@ export class PharmacyService {
 
     let parsedMedicines: any[] = [];
     try {
-      parsedMedicines = JSON.parse(rx.medicines || '[]');
+      parsedMedicines = sortMedicinesByPriority(JSON.parse(rx.medicines || '[]'));
     } catch {
       parsedMedicines = [];
     }

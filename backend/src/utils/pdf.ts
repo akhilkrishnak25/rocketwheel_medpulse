@@ -10,6 +10,7 @@ import {
   calculateBMI,
   formatRespiratoryRate,
 } from './vitals';
+import { sortMedicinesByPriority } from './medicines';
 
 export interface DigitalOpPdfData {
   opNumber: string;
@@ -278,6 +279,7 @@ export interface ClinicalConsultationPdfData {
     frequency?: string;
     duration?: string;
     instructions?: string;
+    priority?: number | string | null;
     isSubstituted?: boolean;
     originalMedicine?: string;
     substitutionReason?: string;
@@ -581,7 +583,8 @@ export const generateClinicalConsultationPdf = async (data: ClinicalConsultation
       };
 
       if (data.medicines && data.medicines.length > 0) {
-        const hasSubstituted = data.medicines.some((m) => m.isSubstituted);
+        const sortedMedicines = sortMedicinesByPriority(data.medicines);
+        const hasSubstituted = sortedMedicines.some((m) => m.isSubstituted);
         checkPageBreak(45);
 
         doc.fillColor('#0f172a').fontSize(9.5).font('Helvetica-Bold').text('PRESCRIPTION (Rx):', 40, curY);
@@ -593,7 +596,7 @@ export const generateClinicalConsultationPdf = async (data: ClinicalConsultation
 
         renderRxTableHeader();
 
-        data.medicines.forEach((med, idx) => {
+        sortedMedicines.forEach((med, idx) => {
           const isSub = Boolean(med.isSubstituted);
           const subNote = isSub
             ? `[Substituted for: ${med.originalMedicine || 'Original Medicine'}${med.substitutionReason ? ` - ${med.substitutionReason}` : ''}]`

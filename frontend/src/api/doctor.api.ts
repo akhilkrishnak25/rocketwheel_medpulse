@@ -18,6 +18,7 @@ export const doctorDashboardApi = {
         frequency: string;
         duration: string;
         instructions?: string;
+        priority?: number;
       }>;
       instructions?: string;
       followUpDate?: string;

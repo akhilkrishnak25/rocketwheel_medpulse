@@ -27,6 +27,7 @@ import { Modal } from '../components/ui/Modal';
 import { useToast } from '../components/ui/Toast';
 import { Prescription } from '../types';
 import { RocketWheelLogo } from '../components/common/RocketWheelLogo';
+import { sortMedicinesByPriority } from '../utils/medicines';
 
 export const PharmacyDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
@@ -272,7 +273,8 @@ export const PharmacyDashboardPage: React.FC = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {filteredPrescriptions.map((rx: any) => {
-              const meds = typeof rx.medicines === 'string' ? JSON.parse(rx.medicines) : rx.medicines;
+              const rawMeds = typeof rx.medicines === 'string' ? JSON.parse(rx.medicines) : rx.medicines || [];
+              const meds = sortMedicinesByPriority(rawMeds);
               const patient = rx.patient || rx.appointment?.patient;
               const doctor = rx.doctor || rx.appointment?.doctor;
               const status = rx.pharmacyStatus || 'SENT';
@@ -361,7 +363,7 @@ export const PharmacyDashboardPage: React.FC = () => {
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-bold text-slate-600 block uppercase tracking-wide">
-                          Prescribed Medications & Dispensing Check:
+                          Prescribed Medications (Sorted by Priority):
                         </span>
                         {hasSubstitutions && (
                           <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300">
@@ -386,6 +388,11 @@ export const PharmacyDashboardPage: React.FC = () => {
                                 <div className="space-y-0.5 flex-1">
                                   <div className="flex items-center gap-1.5 flex-wrap">
                                     <span className="font-bold text-slate-900 text-xs">{m.name}</span>
+                                    {typeof m.priority === 'number' && m.priority > 0 && (
+                                      <span className="px-1.5 py-0.5 rounded bg-royal-100 text-royal-800 font-bold text-[9px] border border-royal-200">
+                                        Priority #{m.priority}
+                                      </span>
+                                    )}
                                     {isSub && (
                                       <span className="px-1.5 py-0.5 rounded bg-amber-200/80 text-amber-900 font-bold text-[9px] uppercase tracking-wider border border-amber-400">
                                         Substituted
@@ -434,8 +441,15 @@ export const PharmacyDashboardPage: React.FC = () => {
                                     size="sm"
                                     className="shrink-0 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-300 hover:bg-amber-100 shadow-2xs py-1 px-2 h-auto"
                                     onClick={() => {
+                                      const rawIndex = rawMeds.findIndex(
+                                        (rm: any) =>
+                                          rm.name === m.name &&
+                                          rm.dosage === m.dosage &&
+                                          rm.priority === m.priority
+                                      );
+                                      const targetIdx = rawIndex !== -1 ? rawIndex : i;
                                       setSubstitutingRx(rx);
-                                      setSubstitutingMedicineIndex(i);
+                                      setSubstitutingMedicineIndex(targetIdx);
                                       setSubstitutingMedicine(m);
                                       setReplacementName(m.isSubstituted ? m.name : '');
                                       setReplacementDosage(m.dosage || '1 tablet');

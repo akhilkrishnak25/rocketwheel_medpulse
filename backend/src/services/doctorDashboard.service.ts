@@ -7,6 +7,7 @@ import { AuditService } from '../utils/audit';
 import { NotificationService } from './notification.service';
 import { generateClinicalConsultationPdf } from '../utils/pdf';
 import { formatBP, formatSystolicDiastolicBP, resolveConsultationVitals } from '../utils/vitals';
+import { sortMedicinesByPriority } from '../utils/medicines';
 
 export class DoctorDashboardService {
   static async getDoctorAppointments(doctorId: string, date?: string) {
@@ -375,7 +376,14 @@ export class DoctorDashboardService {
     appointmentId: string,
     data: {
       diagnosis: string;
-      medicines: Array<{ name: string; dosage: string; frequency: string; duration: string; instructions?: string }>;
+      medicines: Array<{
+        name: string;
+        dosage: string;
+        frequency: string;
+        duration: string;
+        instructions?: string;
+        priority?: number | null;
+      }>;
       instructions?: string;
       followUpDate?: string | null;
       symptoms?: string;
@@ -406,6 +414,13 @@ export class DoctorDashboardService {
         }
       : {};
 
+    const sortedMedicines = sortMedicinesByPriority(
+      (data.medicines || []).map((m, idx) => ({
+        ...m,
+        priority: typeof m.priority === 'number' && m.priority > 0 ? Math.floor(m.priority) : idx + 1,
+      }))
+    );
+
     const result = await prisma.$transaction(async (tx) => {
       // 1. Update appointment status to COMPLETED
       const updatedApt = await tx.appointment.update({
@@ -431,7 +446,7 @@ export class DoctorDashboardService {
         update: {
           diagnosis: data.diagnosis,
           examination: examinationText,
-          medicines: JSON.stringify(data.medicines || []),
+          medicines: JSON.stringify(sortedMedicines),
           instructions: data.instructions,
           followUpDate: data.followUpDate,
           patientId: apt.patientId,
@@ -447,7 +462,7 @@ export class DoctorDashboardService {
           hospitalId: apt.hospitalId,
           diagnosis: data.diagnosis,
           examination: examinationText,
-          medicines: JSON.stringify(data.medicines || []),
+          medicines: JSON.stringify(sortedMedicines),
           instructions: data.instructions,
           followUpDate: data.followUpDate,
           pharmacyId: targetPharmacyId,
@@ -571,7 +586,7 @@ export class DoctorDashboardService {
       },
       templates: templates.map((t) => ({
         ...t,
-        medicinesList: JSON.parse(t.medicines || '[]'),
+        medicinesList: sortMedicinesByPriority(JSON.parse(t.medicines || '[]')),
       })),
     };
   }
@@ -879,7 +894,7 @@ export class DoctorDashboardService {
     let parsedMedicines: any[] = [];
     if (apt.prescription?.medicines) {
       try {
-        parsedMedicines = JSON.parse(apt.prescription.medicines);
+        parsedMedicines = sortMedicinesByPriority(JSON.parse(apt.prescription.medicines));
       } catch {
         parsedMedicines = [];
       }

@@ -191,7 +191,17 @@ export interface Prescription {
   examination?: string;
   vitals?: any;
   medicines: string; // JSON string
-  medicinesList?: Array<{ name: string; dosage: string; frequency: string; duration: string; instructions?: string }>;
+  medicinesList?: Array<{
+    name: string;
+    dosage: string;
+    frequency: string;
+    duration: string;
+    instructions?: string;
+    priority?: number;
+    isSubstituted?: boolean;
+    originalMedicine?: string;
+    substitutionReason?: string;
+  }>;
   instructions?: string;
   followUpDate?: string;
   pharmacyStatus?: 'NONE' | 'SENT' | 'ACCEPTED' | 'PROCESSING' | 'COMPLETED';
@@ -228,7 +238,14 @@ export interface PrescriptionTemplate {
   diseaseName: string;
   diagnosis?: string;
   medicines: string;
-  medicinesList?: Array<{ name: string; dosage: string; frequency: string; duration: string; instructions?: string }>;
+  medicinesList?: Array<{
+    name: string;
+    dosage: string;
+    frequency: string;
+    duration: string;
+    instructions?: string;
+    priority?: number;
+  }>;
   instructions?: string;
   createdAt: string;
 }

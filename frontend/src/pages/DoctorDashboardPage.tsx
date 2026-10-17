@@ -57,13 +57,19 @@ import {
   formatHeight,
   calculateBMI,
 } from '../utils/vitals';
+import { sortMedicinesByPriority } from '../utils/medicines';
 
 interface MedicineItem {
+  _id?: string;
   name: string;
   dosage: string;
   frequency: string;
   duration: string;
   instructions: string;
+  priority?: number;
+  isSubstituted?: boolean;
+  originalMedicine?: string;
+  substitutionReason?: string;
 }
 
 export const DoctorDashboardPage: React.FC = () => {
@@ -131,11 +137,13 @@ export const DoctorDashboardPage: React.FC = () => {
   });
   const [medicines, setMedicines] = useState<MedicineItem[]>([
     {
+      _id: 'med_init_1',
       name: '',
       dosage: '1 tablet',
       frequency: 'TDS (Thrice daily)',
       duration: '5 days',
       instructions: 'After food',
+      priority: 1,
     },
   ]);
 
@@ -281,16 +289,18 @@ export const DoctorDashboardPage: React.FC = () => {
     setVitals({ bp: '', pulse: '', temperature: '', weight: '', spo2: '' });
     setMedicines([
       {
+        _id: `med_reset_${Date.now()}`,
         name: '',
         dosage: '1 tablet',
         frequency: 'TDS (Thrice daily)',
         duration: '5 days',
         instructions: 'After food',
+        priority: 1,
       },
     ]);
   }, [activeAppointment?.id]);
 
-  // Automatically pre-populate vitals and chief complaints when consultDetails are loaded
+  // Automatically pre-populate vitals, chief complaints, and existing prescription medicines when consultDetails are loaded
   useEffect(() => {
     if (!consultDetails) return;
 
@@ -299,6 +309,34 @@ export const DoctorDashboardPage: React.FC = () => {
     }
     if (consultDetails.examination) {
       setExamination(consultDetails.examination);
+    }
+
+    // Pre-populate existing prescription if reopened
+    if (consultDetails.appointment?.prescription) {
+      const rx = consultDetails.appointment.prescription;
+      if (rx.diagnosis) setDiagnosis(rx.diagnosis);
+      if (rx.instructions) setClinicalNotes(rx.instructions);
+      if (rx.followUpDate) setFollowUpDate(rx.followUpDate);
+      if (rx.medicines) {
+        try {
+          const parsed = JSON.parse(rx.medicines);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const restoredMeds: MedicineItem[] = parsed.map((m: any, idx: number) => ({
+              _id: `med_restored_${idx}_${Date.now()}`,
+              name: m.name || '',
+              dosage: m.dosage || '1 tablet',
+              frequency: m.frequency || 'TDS (Thrice daily)',
+              duration: m.duration || '5 days',
+              instructions: m.instructions || 'After food',
+              priority: typeof m.priority === 'number' && m.priority > 0 ? m.priority : idx + 1,
+              isSubstituted: Boolean(m.isSubstituted),
+              originalMedicine: m.originalMedicine,
+              substitutionReason: m.substitutionReason,
+            }));
+            setMedicines(sortMedicinesByPriority(restoredMeds));
+          }
+        } catch {}
+      }
     }
 
     const v = consultDetails.vitals || consultDetails.currentVitals;
@@ -534,11 +572,13 @@ export const DoctorDashboardPage: React.FC = () => {
     });
     setMedicines([
       {
+        _id: `med_init_${Date.now()}`,
         name: '',
         dosage: '1 tablet',
         frequency: 'TDS (Thrice daily)',
         duration: '5 days',
         instructions: 'After food',
+        priority: 1,
       },
     ]);
   };
@@ -644,26 +684,82 @@ export const DoctorDashboardPage: React.FC = () => {
   };
 
   const addMedicine = () => {
-    setMedicines([
-      ...medicines,
-      {
-        name: '',
-        dosage: '1 tablet',
-        frequency: 'BD (Twice daily)',
-        duration: '5 days',
-        instructions: 'After meals',
-      },
-    ]);
+    const existingPriorities = medicines
+      .map((m) => (typeof m.priority === 'number' && m.priority > 0 ? m.priority : 0))
+      .filter((p) => p > 0);
+    const nextPriority = existingPriorities.length > 0 ? Math.max(...existingPriorities) + 1 : medicines.length + 1;
+
+    const newMed: MedicineItem = {
+      _id: `med_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      name: '',
+      dosage: '1 tablet',
+      frequency: 'BD (Twice daily)',
+      duration: '5 days',
+      instructions: 'After meals',
+      priority: nextPriority,
+    };
+    setMedicines(sortMedicinesByPriority([...medicines, newMed]));
   };
 
-  const removeMedicine = (index: number) => {
-    setMedicines(medicines.filter((_, i) => i !== index));
+  const removeMedicine = (idOrIndex: string | number) => {
+    setMedicines((prev) => {
+      const filtered = typeof idOrIndex === 'string'
+        ? prev.filter((m) => m._id !== idOrIndex)
+        : prev.filter((_, i) => i !== idOrIndex);
+      return filtered.length > 0 ? filtered : [
+        {
+          _id: `med_fallback_${Date.now()}`,
+          name: '',
+          dosage: '1 tablet',
+          frequency: 'TDS (Thrice daily)',
+          duration: '5 days',
+          instructions: 'After food',
+          priority: 1,
+        },
+      ];
+    });
   };
 
-  const updateMedicine = (index: number, field: keyof MedicineItem, val: string) => {
-    const next = [...medicines];
-    next[index][field] = val;
-    setMedicines(next);
+  const handleMedicinePriorityChange = (medId: string, rawVal: string) => {
+    if (rawVal === '') {
+      setMedicines((prev) =>
+        prev.map((m) => (m._id === medId ? { ...m, priority: '' as any } : m))
+      );
+      return;
+    }
+    const parsed = parseInt(rawVal, 10);
+    if (isNaN(parsed) || parsed < 1) {
+      return;
+    }
+    setMedicines((prev) => {
+      const updated = prev.map((m) => (m._id === medId ? { ...m, priority: parsed } : m));
+      return sortMedicinesByPriority(updated);
+    });
+  };
+
+  const handleMedicinePriorityBlur = (medId: string) => {
+    setMedicines((prev) => {
+      const updated = prev.map((m, idx) => {
+        if (m._id === medId) {
+          const validPriority =
+            typeof m.priority === 'number' && !isNaN(m.priority) && m.priority > 0
+              ? m.priority
+              : idx + 1;
+          return { ...m, priority: validPriority };
+        }
+        return m;
+      });
+      return sortMedicinesByPriority(updated);
+    });
+  };
+
+  const updateMedicine = (idOrIndex: string | number, field: keyof MedicineItem, val: string) => {
+    setMedicines((prev) =>
+      prev.map((m, idx) => {
+        const matches = typeof idOrIndex === 'string' ? m._id === idOrIndex : idx === idOrIndex;
+        return matches ? { ...m, [field]: val } : m;
+      })
+    );
   };
 
   const handleOpenConsultModal = (apt: Appointment) => {
@@ -2223,7 +2319,16 @@ export const DoctorDashboardPage: React.FC = () => {
                       if (t.diagnosis) setDiagnosis(t.diagnosis);
                       const parsedMeds = typeof t.medicines === 'string' ? JSON.parse(t.medicines) : t.medicines;
                       if (Array.isArray(parsedMeds) && parsedMeds.length > 0) {
-                        setMedicines(parsedMeds);
+                        const templateMeds: MedicineItem[] = parsedMeds.map((m: any, idx: number) => ({
+                          _id: `med_tmpl_${idx}_${Date.now()}`,
+                          name: m.name || '',
+                          dosage: m.dosage || '1 tablet',
+                          frequency: m.frequency || 'TDS (Thrice daily)',
+                          duration: m.duration || '5 days',
+                          instructions: m.instructions || 'After food',
+                          priority: typeof m.priority === 'number' && m.priority > 0 ? m.priority : idx + 1,
+                        }));
+                        setMedicines(sortMedicinesByPriority(templateMeds));
                       }
                       if (t.instructions) setClinicalNotes(t.instructions);
                       toast.success('Template Loaded', `Applied preset prescription for ${t.diseaseName}`);
@@ -2286,70 +2391,108 @@ export const DoctorDashboardPage: React.FC = () => {
             {/* Prescription Medicines Builder */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <label className="font-bold text-slate-800 flex items-center gap-1.5">
-                  <Pill className="w-4 h-4 text-pink-500" />
-                  Prescribed Medicines
-                </label>
+                <div className="flex items-center gap-2">
+                  <label className="font-bold text-slate-800 flex items-center gap-1.5">
+                    <Pill className="w-4 h-4 text-pink-500" />
+                    Prescribed Medicines
+                  </label>
+                  <span className="text-[11px] text-royal-700 bg-royal-50 font-semibold px-2 py-0.5 rounded-full border border-royal-200">
+                    Auto-sorted by Priority (Ascending)
+                  </span>
+                </div>
                 <Button variant="outline" size="sm" onClick={addMedicine} className="text-xs">
                   <Plus className="w-3 h-3 mr-1" /> Add Medicine
                 </Button>
               </div>
 
-              {medicines.map((med, idx) => (
-                <div
-                  key={idx}
-                  className="grid grid-cols-1 sm:grid-cols-5 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200 items-end"
-                >
-                  <div className="sm:col-span-2">
-                    <span className="text-[10px] text-slate-400 block">Medicine & Strength</span>
-                    <input
-                      type="text"
-                      value={med.name}
-                      onChange={(e) => updateMedicine(idx, 'name', e.target.value)}
-                      placeholder="e.g. Tab Amoxicillin 500mg"
-                      className="w-full text-xs p-1.5 rounded border border-slate-200 bg-white"
-                    />
+              {medicines.map((med, idx) => {
+                const medKey = med._id || `med_${idx}`;
+                return (
+                  <div
+                    key={medKey}
+                    className="grid grid-cols-1 sm:grid-cols-12 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200 items-end hover:border-royal-300 transition-colors"
+                  >
+                    {/* Priority Number Input */}
+                    <div className="sm:col-span-2">
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="text-[10px] font-bold text-royal-900 block">Priority #</span>
+                        <span className="text-[9px] text-slate-400 font-mono">#{idx + 1}</span>
+                      </div>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={med.priority ?? idx + 1}
+                        onChange={(e) => handleMedicinePriorityChange(medKey, e.target.value)}
+                        onBlur={() => handleMedicinePriorityBlur(medKey)}
+                        title="Numeric priority for sorting (1 = first, 2 = second, etc.)"
+                        placeholder={`${idx + 1}`}
+                        className="w-full text-xs font-bold text-center p-1.5 rounded-lg border border-royal-300 bg-white text-royal-900 focus:ring-1 focus:ring-royal-500 shadow-2xs"
+                      />
+                    </div>
+
+                    {/* Medicine Name & Strength */}
+                    <div className="sm:col-span-4">
+                      <span className="text-[10px] text-slate-400 block mb-0.5">Medicine & Strength</span>
+                      <input
+                        type="text"
+                        value={med.name}
+                        onChange={(e) => updateMedicine(medKey, 'name', e.target.value)}
+                        placeholder="e.g. Tab Amoxicillin 500mg"
+                        className="w-full text-xs p-1.5 rounded-lg border border-slate-200 bg-white"
+                      />
+                    </div>
+
+                    {/* Frequency */}
+                    <div className="sm:col-span-2">
+                      <span className="text-[10px] text-slate-400 block mb-0.5">Frequency</span>
+                      <input
+                        type="text"
+                        value={med.frequency}
+                        onChange={(e) => updateMedicine(medKey, 'frequency', e.target.value)}
+                        placeholder="e.g. BD (Twice daily)"
+                        className="w-full text-xs p-1.5 rounded-lg border border-slate-200 bg-white"
+                      />
+                    </div>
+
+                    {/* Duration */}
+                    <div className="sm:col-span-2">
+                      <span className="text-[10px] text-slate-400 block mb-0.5">Duration</span>
+                      <input
+                        type="text"
+                        value={med.duration}
+                        onChange={(e) => updateMedicine(medKey, 'duration', e.target.value)}
+                        placeholder="e.g. 5 days"
+                        className="w-full text-xs p-1.5 rounded-lg border border-slate-200 bg-white"
+                      />
+                    </div>
+
+                    {/* Instructions & Remove */}
+                    <div className="sm:col-span-2 flex items-center gap-1">
+                      <div className="flex-1">
+                        <span className="text-[10px] text-slate-400 block mb-0.5">Instructions</span>
+                        <input
+                          type="text"
+                          value={med.instructions}
+                          onChange={(e) => updateMedicine(medKey, 'instructions', e.target.value)}
+                          placeholder="After food"
+                          className="w-full text-xs p-1.5 rounded-lg border border-slate-200 bg-white"
+                        />
+                      </div>
+                      {medicines.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeMedicine(medKey)}
+                          className="text-rose-500 hover:text-rose-700 p-1.5 hover:bg-rose-50 rounded-lg transition-colors"
+                          title="Remove medicine"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">Frequency</span>
-                    <input
-                      type="text"
-                      value={med.frequency}
-                      onChange={(e) => updateMedicine(idx, 'frequency', e.target.value)}
-                      placeholder="e.g. BD (Twice daily)"
-                      className="w-full text-xs p-1.5 rounded border border-slate-200 bg-white"
-                    />
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">Duration</span>
-                    <input
-                      type="text"
-                      value={med.duration}
-                      onChange={(e) => updateMedicine(idx, 'duration', e.target.value)}
-                      placeholder="e.g. 5 days"
-                      className="w-full text-xs p-1.5 rounded border border-slate-200 bg-white"
-                    />
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="text"
-                      value={med.instructions}
-                      onChange={(e) => updateMedicine(idx, 'instructions', e.target.value)}
-                      placeholder="After food"
-                      className="w-full text-xs p-1.5 rounded border border-slate-200 bg-white"
-                    />
-                    {medicines.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeMedicine(idx)}
-                        className="text-rose-500 hover:text-rose-700 p-1"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Clinical Notes & Follow-up */}
@@ -2442,6 +2585,19 @@ export const DoctorDashboardPage: React.FC = () => {
                       return;
                     }
 
+                    const validMedicines = sortMedicinesByPriority(
+                      medicines
+                        .filter((m) => m.name.trim())
+                        .map((m, idx) => ({
+                          name: m.name.trim(),
+                          dosage: m.dosage.trim() || '1 tablet',
+                          frequency: m.frequency.trim() || 'TDS (Thrice daily)',
+                          duration: m.duration.trim() || '5 days',
+                          instructions: m.instructions.trim() || 'After food',
+                          priority: typeof m.priority === 'number' && m.priority > 0 ? m.priority : idx + 1,
+                        }))
+                    );
+
                     completeMutation.mutate({
                       appointmentId: activeAppointment.id,
                       payload: {
@@ -2452,7 +2608,7 @@ export const DoctorDashboardPage: React.FC = () => {
                         clinicalNotes: clinicalNotes.trim() || undefined,
                         followUpDate: followUpDate.trim() || undefined,
                         vitals,
-                        medicines,
+                        medicines: validMedicines,
                         sendToPharmacy,
                       },
                     });

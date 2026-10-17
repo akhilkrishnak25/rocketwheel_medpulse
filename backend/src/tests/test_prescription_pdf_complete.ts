@@ -16,6 +16,7 @@ import {
 import { generateClinicalConsultationPdf } from '../utils/pdf';
 import { DoctorDashboardService } from '../services/doctorDashboard.service';
 import { PharmacyService } from '../services/pharmacy.service';
+import { sortMedicinesByPriority, parsePriority } from '../utils/medicines';
 
 /**
  * Extracts all text from PDF, including FlateDecode compressed streams, TJ arrays, and Tj tokens
@@ -145,6 +146,69 @@ async function runTests() {
   assert(calculateBMI(65, 170) === '22.5 kg/m²', 'calculateBMI(65, 170) -> "22.5 kg/m²"');
 
   // --------------------------------------------------------------------
+  // TEST SUITE 1B: Medicine Priority Number and Automatic Sorting
+  // --------------------------------------------------------------------
+  console.log('\n--- Test Suite 1B: Medicine Priority Number & Automatic Sorting ---');
+
+  // Test 1B.1: User requirement example
+  // Input: Medicine C (Priority 3), Medicine A (Priority 1), Medicine B (Priority 2)
+  // Output: Medicine A -> Medicine B -> Medicine C
+  const userExampleMeds = [
+    { name: 'Medicine C', priority: 3, dosage: '1 tab' },
+    { name: 'Medicine A', priority: 1, dosage: '1 tab' },
+    { name: 'Medicine B', priority: 2, dosage: '1 tab' },
+  ];
+  const sortedUserExample = sortMedicinesByPriority(userExampleMeds);
+  assert(
+    sortedUserExample[0].name === 'Medicine A' &&
+      sortedUserExample[1].name === 'Medicine B' &&
+      sortedUserExample[2].name === 'Medicine C',
+    'User Example: Medicine C (P3), A (P1), B (P2) -> sorted strictly as A -> B -> C'
+  );
+
+  // Test 1B.2: Preserving original relative order for duplicate priority numbers (stable sort)
+  const duplicatePriorityMeds = [
+    { id: 1, name: 'Med Alpha', priority: 2 },
+    { id: 2, name: 'Med Beta', priority: 1 },
+    { id: 3, name: 'Med Gamma', priority: 2 },
+    { id: 4, name: 'Med Delta', priority: 1 },
+  ];
+  const sortedDuplicates = sortMedicinesByPriority(duplicatePriorityMeds);
+  assert(
+    sortedDuplicates[0].name === 'Med Beta' &&
+      sortedDuplicates[1].name === 'Med Delta' &&
+      sortedDuplicates[2].name === 'Med Alpha' &&
+      sortedDuplicates[3].name === 'Med Gamma',
+    'Stable sort: duplicate priority numbers preserve original relative order (Beta before Delta, Alpha before Gamma)'
+  );
+
+  // Test 1B.3: Priority validation: positive integers only
+  assert(parsePriority(1) === 1, 'parsePriority(1) -> 1');
+  assert(parsePriority(5) === 5, 'parsePriority(5) -> 5');
+  assert(parsePriority('3') === 3, 'parsePriority("3") -> 3');
+  assert(parsePriority(0) === 999999, 'parsePriority(0) -> 999999 (invalid non-positive rejected)');
+  assert(parsePriority(-2) === 999999, 'parsePriority(-2) -> 999999 (negative rejected)');
+  assert(parsePriority(null) === 999999, 'parsePriority(null) -> 999999 (missing rejected)');
+  assert(parsePriority(undefined) === 999999, 'parsePriority(undefined) -> 999999 (undefined rejected)');
+  assert(parsePriority('abc') === 999999, 'parsePriority("abc") -> 999999 (non-numeric rejected)');
+
+  // Test 1B.4: Unprioritized medicines placed after prioritized medicines
+  const mixedMeds = [
+    { name: 'Unprioritized 1', dosage: '1 tab' },
+    { name: 'Prioritized 2', priority: 2, dosage: '1 tab' },
+    { name: 'Prioritized 1', priority: 1, dosage: '1 tab' },
+    { name: 'Unprioritized 2', dosage: '1 tab' },
+  ];
+  const sortedMixed = sortMedicinesByPriority(mixedMeds);
+  assert(
+    sortedMixed[0].name === 'Prioritized 1' &&
+      sortedMixed[1].name === 'Prioritized 2' &&
+      sortedMixed[2].name === 'Unprioritized 1' &&
+      sortedMixed[3].name === 'Unprioritized 2',
+    'Unprioritized items placed at end in stable order after prioritized medicines'
+  );
+
+  // --------------------------------------------------------------------
   // TEST SUITE 2: Robust Vitals Resolution (Triage vs Doctor Entry)
   // --------------------------------------------------------------------
   console.log('\n--- Test Suite 2: Robust Vitals Resolution ---');
@@ -242,10 +306,19 @@ async function runTests() {
       { name: 'Random Blood Sugar (RBS)', status: 'COMPLETED', category: 'Biochemistry' },
       { name: 'Chest X-Ray PA View', status: 'IN_PROGRESS', category: 'Radiology' },
     ],
-    // Section 6: PRESCRIPTION (Rx)
+    // Section 6: PRESCRIPTION (Rx) - Intentionally declared out of priority order to test automatic sorting
     medicines: [
       {
+        name: 'Syp Kep D 10ml',
+        priority: 3,
+        dosage: '10 ml',
+        frequency: 'TID (Thrice daily)',
+        duration: '5 days',
+        instructions: 'After meals',
+      },
+      {
         name: 'erox cv 625',
+        priority: 1,
         dosage: '1 tablet',
         frequency: 'BD (Twice daily)',
         duration: '3 days',
@@ -256,20 +329,15 @@ async function runTests() {
       },
       {
         name: 'T Vonalong 20mg',
+        priority: 2,
         dosage: '1 tablet',
         frequency: 'OD (Once daily)',
         duration: '5 days',
         instructions: 'Before meals',
       },
       {
-        name: 'Syp Kep D 10ml',
-        dosage: '10 ml',
-        frequency: 'TID (Thrice daily)',
-        duration: '5 days',
-        instructions: 'After meals',
-      },
-      {
         name: 'Nurokind GOLD sachets',
+        priority: 4,
         dosage: '1 sachet',
         frequency: 'BD (Twice daily)',
         duration: '5 days',
@@ -302,6 +370,17 @@ async function runTests() {
   assert(!pdfText.includes('%Ë'), 'PDF does not contain broken Unicode "%Ë" before PENDING');
   assert(pdfText.includes('PENDING'), 'PDF contains clean PENDING investigation status');
   assert(pdfText.includes('COMPLETED'), 'PDF contains clean COMPLETED investigation status');
+
+  // Verify Section 6: Automatic sorting by priority in generated PDF
+  const eroxPos = pdfText.indexOf('erox cv 625');
+  const vonalongPos = pdfText.indexOf('T Vonalong 20mg');
+  const kepDPos = pdfText.indexOf('Syp Kep D 10ml');
+  const nurokindPos = pdfText.indexOf('Nurokind GOLD');
+  assert(
+    eroxPos !== -1 && vonalongPos !== -1 && kepDPos !== -1 && nurokindPos !== -1 &&
+      eroxPos < vonalongPos && vonalongPos < kepDPos && kepDPos < nurokindPos,
+    'PDF Rx table automatically sorts medicines in ascending priority order (P1 -> P2 -> P3 -> P4)'
+  );
 
   // Verify Section 6: Revised Prescription indicator and substitution note
   assert(pdfText.includes('REVISED PRESCRIPTION'), 'PDF contains REVISED PRESCRIPTION badge');
@@ -422,21 +501,14 @@ async function runTests() {
       assert(targetRx.vitals.bp.includes('mmHg'), `Pharmacy API vitals BP includes "mmHg" (${targetRx.vitals.bp})`);
     }
 
-    // 4. Test medicine replacement in pharmacy keeps vitals intact
-    let medsList: any[] = [];
-    try {
-      medsList = JSON.parse(sampleApt.prescription.medicines || '[]');
-    } catch {}
-
-    if (medsList.length === 0) {
-      medsList = [
-        { name: 'Original Amox 500mg', dosage: '1 tab', frequency: 'BD', duration: '5 days', instructions: 'After meals' },
-      ];
-      await prisma.prescription.update({
-        where: { id: sampleApt.prescription.id },
-        data: { medicines: JSON.stringify(medsList) },
-      });
-    }
+    // 4. Test medicine replacement in pharmacy retains original priority (Requirement 8) and keeps vitals intact
+    const medsList = [
+      { name: 'Original Amox 500mg', priority: 2, dosage: '1 tab', frequency: 'BD', duration: '5 days', instructions: 'After meals' },
+    ];
+    await prisma.prescription.update({
+      where: { id: sampleApt.prescription.id },
+      data: { medicines: JSON.stringify(medsList) },
+    });
 
     await PharmacyService.replaceMedicine(
       sampleApt.prescription.id,
@@ -455,6 +527,16 @@ async function runTests() {
       },
       'test-staff-id',
       'Senior Pharmacist Test'
+    );
+
+    // Verify database record retains priority
+    const updatedRxRecord = await prisma.prescription.findUnique({
+      where: { id: sampleApt.prescription.id },
+    });
+    const parsedUpdatedMeds = JSON.parse(updatedRxRecord?.medicines || '[]');
+    assert(
+      parsedUpdatedMeds[0]?.priority === 2,
+      'Pharmacy medicine substitution strictly retains original priority number (Requirement 8)'
     );
 
     // Re-generate revised prescription PDF
