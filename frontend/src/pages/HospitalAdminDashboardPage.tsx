@@ -64,6 +64,7 @@ import { Modal } from '../components/ui/Modal';
 import { useToast } from '../components/ui/Toast';
 import { InlineSpinner } from '../components/ui/Loading';
 import { Appointment, Doctor } from '../types';
+import { formatBP, formatSystolicDiastolicBP } from '../utils/vitals';
 
 export const HospitalAdminDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
@@ -4524,7 +4525,7 @@ Dr. Vikram Verma,vikram.verma@hospital.org,Consultant Physician,MBBS MD,${c2},8,
                           </span>
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-slate-800 pt-1">
-                          <div>BP: <strong className="font-bold">{v.bloodPressure || `${v.bpSystolic}/${v.bpDiastolic}`}</strong></div>
+                          <div>BP: <strong className="font-bold">{formatBP(v.bloodPressure) || formatSystolicDiastolicBP(v.bpSystolic, v.bpDiastolic) || 'N/A'}</strong></div>
                           <div>Pulse: <strong className="font-bold">{v.pulseRate} bpm</strong></div>
                           <div>Temp: <strong className="font-bold">{v.temperature}°F</strong></div>
                           <div>SpO₂: <strong className="font-bold">{v.spo2}%</strong></div>

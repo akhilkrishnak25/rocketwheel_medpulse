@@ -47,6 +47,16 @@ import { useToast } from '../components/ui/Toast';
 import { InlineSpinner } from '../components/ui/Loading';
 import { Appointment } from '../types';
 import { DoctorEditProfileSection } from '../components/DoctorEditProfileSection';
+import {
+  formatBP,
+  formatSystolicDiastolicBP,
+  formatPulse,
+  formatTemperature,
+  formatSpO2,
+  formatWeight,
+  formatHeight,
+  calculateBMI,
+} from '../utils/vitals';
 
 interface MedicineItem {
   name: string;
@@ -109,6 +119,7 @@ export const DoctorDashboardPage: React.FC = () => {
   const [diagnosis, setDiagnosis] = useState('');
   const [chiefComplaints, setChiefComplaints] = useState('');
   const [symptoms, setSymptoms] = useState('');
+  const [examination, setExamination] = useState('');
   const [clinicalNotes, setClinicalNotes] = useState('');
   const [followUpDate, setFollowUpDate] = useState('');
   const [vitals, setVitals] = useState({
@@ -264,6 +275,7 @@ export const DoctorDashboardPage: React.FC = () => {
     setDiagnosis('');
     setChiefComplaints('');
     setSymptoms('');
+    setExamination('');
     setClinicalNotes('');
     setFollowUpDate('');
     setVitals({ bp: '', pulse: '', temperature: '', weight: '', spo2: '' });
@@ -285,25 +297,23 @@ export const DoctorDashboardPage: React.FC = () => {
     if (consultDetails.chiefComplaints) {
       setChiefComplaints(consultDetails.chiefComplaints);
     }
+    if (consultDetails.examination) {
+      setExamination(consultDetails.examination);
+    }
 
     const v = consultDetails.vitals || consultDetails.currentVitals;
     if (v) {
       const bpStr =
-        v.bloodPressure ||
-        (v.bloodPressureSys && v.bloodPressureDia
-          ? `${v.bloodPressureSys}/${v.bloodPressureDia} mmHg`
-          : v.bpSystolic && v.bpDiastolic
-          ? `${v.bpSystolic}/${v.bpDiastolic} mmHg`
-          : v.bloodPressureSys
-          ? `${v.bloodPressureSys} mmHg`
-          : '');
+        formatBP(v.bloodPressure) ||
+        formatSystolicDiastolicBP(v.bloodPressureSys || v.bpSystolic, v.bloodPressureDia || v.bpDiastolic) ||
+        (v.bloodPressureSys ? formatBP(v.bloodPressureSys) : '');
       const pulseStr = v.pulseRate ? `${v.pulseRate} bpm` : v.pulse ? `${v.pulse} bpm` : '';
       const tempStr = v.temperature ? `${v.temperature}°F` : '';
       const weightStr = v.weightKg ? `${v.weightKg} kg` : v.weight ? `${v.weight} kg` : '';
-      const spo2Str = v.spO2 ? `${v.spO2}%` : v.spo2 ? `${v.spo2}%` : '';
+      const spo2Str = v.spO2 || v.spo2 ? formatSpO2(v.spO2 || v.spo2) || '' : '';
 
       setVitals({
-        bp: bpStr,
+        bp: bpStr || '',
         pulse: pulseStr,
         temperature: tempStr,
         weight: weightStr,
@@ -512,6 +522,7 @@ export const DoctorDashboardPage: React.FC = () => {
     setDiagnosis('');
     setChiefComplaints('');
     setSymptoms('');
+    setExamination('');
     setClinicalNotes('');
     setFollowUpDate('');
     setVitals({
@@ -2037,12 +2048,12 @@ export const DoctorDashboardPage: React.FC = () => {
                       </span>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 pt-1 font-mono text-xs text-slate-800">
-                      <div>BP: <strong className="font-bold text-slate-900">{rv.bloodPressure || (rv.bloodPressureSys ? `${rv.bloodPressureSys}/${rv.bloodPressureDia}` : (rv.bpSystolic ? `${rv.bpSystolic}/${rv.bpDiastolic}` : 'N/A'))}</strong></div>
-                      <div>Pulse: <strong className="font-bold text-slate-900">{rv.pulseRate || rv.pulse || 'N/A'} bpm</strong></div>
-                      <div>Temp: <strong className="font-bold text-slate-900">{rv.temperature || 'N/A'}°F</strong></div>
-                      <div>SpO2: <strong className="font-bold text-slate-900">{rv.spO2 || rv.spo2 || 'N/A'}%</strong></div>
-                      <div>Weight: <strong className="font-bold text-slate-900">{rv.weightKg || rv.weight || 'N/A'} kg</strong></div>
-                      <div>Height: <strong className="font-bold text-slate-900">{rv.heightCm || rv.height || 'N/A'} cm</strong></div>
+                      <div>BP: <strong className="font-bold text-slate-900">{formatBP(rv.bloodPressure) || formatSystolicDiastolicBP(rv.bloodPressureSys || rv.bpSystolic, rv.bloodPressureDia || rv.bpDiastolic) || (rv.bloodPressureSys ? formatBP(rv.bloodPressureSys) : 'N/A')}</strong></div>
+                      <div>Pulse: <strong className="font-bold text-slate-900">{formatPulse(rv.pulseRate || rv.pulse) || 'N/A'}</strong></div>
+                      <div>Temp: <strong className="font-bold text-slate-900">{formatTemperature(rv.temperature) || 'N/A'}</strong></div>
+                      <div>SpO2: <strong className="font-bold text-slate-900">{formatSpO2(rv.spO2 || rv.spo2) || 'N/A'}</strong></div>
+                      <div>Weight: <strong className="font-bold text-slate-900">{formatWeight(rv.weightKg || rv.weight) || 'N/A'}</strong></div>
+                      <div>Height: <strong className="font-bold text-slate-900">{formatHeight(rv.heightCm || rv.height) || 'N/A'}</strong></div>
                     </div>
                     {rv.notes && (
                       <div className="text-[11px] text-teal-900 italic pt-0.5">
@@ -2127,6 +2138,20 @@ export const DoctorDashboardPage: React.FC = () => {
                 onChange={(e) => setChiefComplaints(e.target.value)}
                 placeholder="e.g. High fever with chills for 3 days, severe sore throat, dry cough..."
                 className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white focus:ring-2 focus:ring-royal-500 focus:outline-none font-medium"
+              />
+            </div>
+
+            {/* Examination (Dedicated multiline section for clinical examination findings) */}
+            <div>
+              <label className="block font-bold text-slate-800 mb-1">
+                Examination <span className="text-slate-400 font-normal">(Physical & clinical examination findings, systemic examination)</span>
+              </label>
+              <textarea
+                rows={3}
+                value={examination}
+                onChange={(e) => setExamination(e.target.value)}
+                placeholder="e.g. Chest: Clear bilaterally, CVS: S1 S2 heard no murmurs, P/A: Soft non-tender, Throat: Congested with mild tonsillar erythema..."
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white focus:ring-2 focus:ring-royal-500 focus:outline-none font-medium resize-y"
               />
             </div>
 
@@ -2423,6 +2448,7 @@ export const DoctorDashboardPage: React.FC = () => {
                         diagnosis: diagnosis.trim(),
                         chiefComplaints: chiefComplaints.trim() || undefined,
                         symptoms: chiefComplaints.trim() || symptoms.trim() || undefined,
+                        examination: examination.trim() || undefined,
                         clinicalNotes: clinicalNotes.trim() || undefined,
                         followUpDate: followUpDate.trim() || undefined,
                         vitals,

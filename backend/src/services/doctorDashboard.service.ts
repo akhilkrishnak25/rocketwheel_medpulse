@@ -6,6 +6,7 @@ import prisma from '../config/prisma';
 import { AuditService } from '../utils/audit';
 import { NotificationService } from './notification.service';
 import { generateClinicalConsultationPdf } from '../utils/pdf';
+import { formatBP, formatSystolicDiastolicBP, resolveConsultationVitals } from '../utils/vitals';
 
 export class DoctorDashboardService {
   static async getDoctorAppointments(doctorId: string, date?: string) {
@@ -379,6 +380,7 @@ export class DoctorDashboardService {
       followUpDate?: string | null;
       symptoms?: string;
       chiefComplaints?: string;
+      examination?: string | null;
       vitals?: { bp?: string; pulse?: string; temperature?: string; weight?: string; spo2?: string };
       clinicalNotes?: string;
       sendToPharmacy?: boolean;
@@ -396,6 +398,13 @@ export class DoctorDashboardService {
     }
 
     const chiefComplaintsText = data.chiefComplaints || data.symptoms || null;
+    const examinationText = data.examination?.trim() || null;
+    const normalizedVitals = data.vitals
+      ? {
+          ...data.vitals,
+          bp: formatBP(data.vitals.bp) || data.vitals.bp,
+        }
+      : {};
 
     const result = await prisma.$transaction(async (tx) => {
       // 1. Update appointment status to COMPLETED
@@ -421,6 +430,7 @@ export class DoctorDashboardService {
         where: { appointmentId },
         update: {
           diagnosis: data.diagnosis,
+          examination: examinationText,
           medicines: JSON.stringify(data.medicines || []),
           instructions: data.instructions,
           followUpDate: data.followUpDate,
@@ -436,6 +446,7 @@ export class DoctorDashboardService {
           patientId: apt.patientId,
           hospitalId: apt.hospitalId,
           diagnosis: data.diagnosis,
+          examination: examinationText,
           medicines: JSON.stringify(data.medicines || []),
           instructions: data.instructions,
           followUpDate: data.followUpDate,
@@ -450,14 +461,16 @@ export class DoctorDashboardService {
         where: { appointmentId },
         update: {
           symptoms: chiefComplaintsText,
-          vitals: JSON.stringify(data.vitals || {}),
+          examination: examinationText,
+          vitals: JSON.stringify(normalizedVitals),
           clinicalNotes: data.clinicalNotes,
         },
         create: {
           appointmentId,
           patientId: apt.patientId,
           symptoms: chiefComplaintsText,
-          vitals: JSON.stringify(data.vitals || {}),
+          examination: examinationText,
+          vitals: JSON.stringify(normalizedVitals),
           clinicalNotes: data.clinicalNotes,
         },
       });
@@ -550,6 +563,7 @@ export class DoctorDashboardService {
       vitals: latestVital,
       currentVitals: latestVital,
       chiefComplaints: apt.medicalRecord?.symptoms || null,
+      examination: apt.medicalRecord?.examination || apt.prescription?.examination || null,
       patientHistory: {
         previousAppointments: apt.patient.appointments,
         previousPrescriptions: apt.patient.prescriptions,
@@ -856,7 +870,7 @@ export class DoctorDashboardService {
         prescription: true,
         medicalRecord: true,
         vitals: { orderBy: { createdAt: 'desc' }, take: 1 },
-        labRequests: { include: { report: true } },
+        labRequests: { include: { report: true, lab: true } },
       },
     });
 
@@ -871,32 +885,9 @@ export class DoctorDashboardService {
       }
     }
 
-    let parsedVitals: any = null;
-    if (apt.vitals?.[0]) {
-      const v = apt.vitals[0];
-      parsedVitals = {
-        bp: v.bloodPressure || (v.bpSystolic && v.bpDiastolic ? `${v.bpSystolic}/${v.bpDiastolic}` : null),
-        pulse: v.pulseRate,
-        temperature: v.temperature,
-        spo2: v.spo2,
-        weight: v.weight,
-        height: v.height,
-      };
-    } else if (apt.medicalRecord?.vitals) {
-      try {
-        const v = JSON.parse(apt.medicalRecord.vitals);
-        parsedVitals = {
-          bp: v.bp,
-          pulse: v.pulse,
-          temperature: v.temperature,
-          spo2: v.spo2,
-          weight: v.weight,
-          height: v.height,
-        };
-      } catch {}
-    }
+    const parsedVitals = resolveConsultationVitals(apt);
 
-    const labTestsList: Array<{ name: string; status: string }> = [];
+    const labTestsList: Array<{ name: string; status: string; category?: string }> = [];
     if (apt.labRequests && apt.labRequests.length > 0) {
       for (const req of apt.labRequests) {
         let tList: any[] = [];
@@ -908,7 +899,8 @@ export class DoctorDashboardService {
         for (const t of tList) {
           labTestsList.push({
             name: t.name || 'Diagnostic Test',
-            status: req.status === 'COMPLETED' ? 'COMPLETED' : 'PENDING',
+            status: req.status || 'PENDING',
+            category: t.category || req.lab?.name || undefined,
           });
         }
       }
@@ -918,6 +910,7 @@ export class DoctorDashboardService {
       appointmentNumber: apt.appointmentNumber,
       consultationDate: apt.appointmentDate,
       tokenNumber: apt.tokenNumber,
+      letterheadHeight: (apt.hospital as any)?.letterheadHeight || 144,
       hospital: {
         name: apt.hospital.name,
         address: apt.hospital.address,
@@ -940,6 +933,7 @@ export class DoctorDashboardService {
         bloodGroup: apt.patient.bloodGroup,
       },
       chiefComplaints: apt.medicalRecord?.symptoms || null,
+      examination: apt.medicalRecord?.examination || apt.prescription?.examination || null,
       vitals: parsedVitals,
       diagnosis: apt.prescription?.diagnosis || 'Clinical evaluation completed',
       medicines: parsedMedicines,
@@ -1196,8 +1190,8 @@ export class DoctorDashboardService {
         bookingType: apt.bookingType,
         followUpDate: apt.prescription?.followUpDate || 'N/A',
         nurse: apt.assignedStaff?.user?.name || doctor.assignedStaff?.user?.name || 'General Nursing Pool',
-        bp: v?.bloodPressure || (v?.bpSystolic && v?.bpDiastolic ? `${v.bpSystolic}/${v.bpDiastolic}` : 'N/A'),
-        pulse: v?.pulseRate ? `${v.pulseRate}` : 'N/A',
+        bp: formatBP(v?.bloodPressure) || formatSystolicDiastolicBP(v?.bpSystolic, v?.bpDiastolic) || 'N/A',
+        pulse: v?.pulseRate ? `${v.pulseRate} bpm` : 'N/A',
         temp: v?.temperature ? `${v.temperature}°F` : 'N/A',
         spo2: v?.spo2 ? `${v.spo2}%` : 'N/A',
         weight: v?.weight ? `${v.weight} kg` : 'N/A',

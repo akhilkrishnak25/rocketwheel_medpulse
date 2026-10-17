@@ -338,6 +338,25 @@ export const PharmacyDashboardPage: React.FC = () => {
                       </div>
                     </div>
 
+                    {/* Clinical Vitals Section */}
+                    {rx.vitals && (rx.vitals.bp || rx.vitals.pulse || rx.vitals.temperature || rx.vitals.spo2 || rx.vitals.weight || rx.vitals.height) && (
+                      <div className="p-2.5 bg-blue-50/60 border border-blue-200/70 rounded-xl text-xs space-y-1">
+                        <div className="flex items-center gap-1.5 text-royal-900 font-bold text-[11px]">
+                          <span className="w-2 h-2 rounded-full bg-royal-600 inline-block"></span>
+                          Clinical Vitals (Doctor Verified):
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-slate-800">
+                          {rx.vitals.bp && <span>BP: <strong className="text-slate-900">{rx.vitals.bp}</strong></span>}
+                          {rx.vitals.pulse && <span>Pulse: <strong className="text-slate-900">{rx.vitals.pulse}</strong></span>}
+                          {rx.vitals.temperature && <span>Temp: <strong className="text-slate-900">{rx.vitals.temperature}</strong></span>}
+                          {rx.vitals.spo2 && <span>SpO₂: <strong className="text-slate-900">{rx.vitals.spo2}</strong></span>}
+                          {rx.vitals.weight && <span>Weight: <strong className="text-slate-900">{rx.vitals.weight}</strong></span>}
+                          {rx.vitals.height && <span>Height: <strong className="text-slate-900">{rx.vitals.height}</strong></span>}
+                          {rx.vitals.bmi && <span>BMI: <strong className="text-slate-900">{rx.vitals.bmi}</strong></span>}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Prescribed Medications & Substitution Section */}
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between">

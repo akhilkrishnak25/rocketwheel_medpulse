@@ -364,6 +364,7 @@ model Prescription {
   pharmacyId         String?
   pharmacy           Pharmacy?    @relation(fields: [pharmacyId], references: [id], onDelete: SetNull)
   diagnosis          String      
+  examination        String?
   medicines          String      
   instructions       String?     
   followUpDate       String?
@@ -507,6 +508,7 @@ model MedicalRecord {
   patientId     String
   patient       Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
   symptoms      String?    
+  examination   String?
   vitals        String?    
   clinicalNotes String?    
   createdAt     DateTime    @default(now())

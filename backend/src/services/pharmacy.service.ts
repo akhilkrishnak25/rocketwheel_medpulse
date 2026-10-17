@@ -2,6 +2,7 @@ import prisma from '../config/prisma';
 import { AuditService } from '../utils/audit';
 import { NotificationService } from './notification.service';
 import { generateClinicalConsultationPdf } from '../utils/pdf';
+import { resolveConsultationVitals, formatBP } from '../utils/vitals';
 
 export class PharmacyService {
   static async getPrescriptions(pharmacyId?: string, hospitalId?: string, status?: string) {
@@ -28,6 +29,8 @@ export class PharmacyService {
             appointmentDate: true,
             timeSlot: true,
             status: true,
+            vitals: { orderBy: { createdAt: 'desc' }, take: 1 },
+            medicalRecord: true,
           },
         },
         patient: {
@@ -39,6 +42,7 @@ export class PharmacyService {
             gender: true,
             dateOfBirth: true,
             age: true,
+            bloodGroup: true,
           },
         },
         doctor: {
@@ -62,6 +66,7 @@ export class PharmacyService {
 
     return prescriptions.map((p) => ({
       ...p,
+      vitals: resolveConsultationVitals(p),
       medicinesList: JSON.parse(p.medicines || '[]'),
     }));
   }
@@ -269,10 +274,14 @@ export class PharmacyService {
           include: {
             vitals: { orderBy: { createdAt: 'desc' }, take: 1 },
             medicalRecord: true,
-            labRequests: true,
+            labRequests: { include: { report: true, lab: true } },
           },
         },
-        patient: true,
+        patient: {
+          include: {
+            vitals: { orderBy: { createdAt: 'desc' }, take: 1 },
+          },
+        },
         doctor: {
           include: {
             department: true,
@@ -293,23 +302,9 @@ export class PharmacyService {
       parsedMedicines = [];
     }
 
-    let parsedVitals: any = null;
-    const latestVitals = rx.appointment?.vitals?.[0];
-    if (latestVitals) {
-      parsedVitals = {
-        bp:
-          latestVitals.bpSystolic && latestVitals.bpDiastolic
-            ? `${latestVitals.bpSystolic}/${latestVitals.bpDiastolic} mmHg`
-            : null,
-        pulse: latestVitals.pulseRate,
-        temperature: latestVitals.temperature,
-        spo2: latestVitals.spo2,
-        weight: latestVitals.weight,
-        height: latestVitals.height,
-      };
-    }
+    const parsedVitals = resolveConsultationVitals(rx);
 
-    const labTestsList: Array<{ name: string; status: string }> = [];
+    const labTestsList: Array<{ name: string; status: string; category?: string }> = [];
     if (rx.appointment?.labRequests && rx.appointment.labRequests.length > 0) {
       for (const req of rx.appointment.labRequests) {
         let tList: any[] = [];
@@ -321,7 +316,8 @@ export class PharmacyService {
         for (const t of tList) {
           labTestsList.push({
             name: t.name || 'Diagnostic Test',
-            status: req.status === 'COMPLETED' ? 'COMPLETED' : 'PENDING',
+            status: req.status || 'PENDING',
+            category: t.category || req.lab?.name || undefined,
           });
         }
       }
@@ -331,6 +327,7 @@ export class PharmacyService {
       appointmentNumber: rx.appointment?.appointmentNumber || `APT-${rx.id.slice(0, 8).toUpperCase()}`,
       consultationDate: rx.appointment?.appointmentDate || new Date(rx.createdAt).toISOString().split('T')[0],
       tokenNumber: rx.appointment?.tokenNumber || 1,
+      letterheadHeight: (rx.hospital as any)?.letterheadHeight || 144,
       hospital: {
         name: rx.hospital?.name || 'RocketWheel MedPulse Hospital',
         address: rx.hospital?.address || 'Hospital Road',
@@ -353,6 +350,7 @@ export class PharmacyService {
         bloodGroup: rx.patient?.bloodGroup,
       },
       chiefComplaints: rx.appointment?.medicalRecord?.symptoms || null,
+      examination: rx.appointment?.medicalRecord?.examination || rx.examination || null,
       vitals: parsedVitals,
       diagnosis: rx.diagnosis || 'Clinical evaluation completed',
       medicines: parsedMedicines,

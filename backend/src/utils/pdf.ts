@@ -1,5 +1,15 @@
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
+import {
+  formatBP,
+  formatPulse,
+  formatTemperature,
+  formatSpO2,
+  formatWeight,
+  formatHeight,
+  calculateBMI,
+  formatRespiratoryRate,
+} from './vitals';
 
 export interface DigitalOpPdfData {
   opNumber: string;
@@ -226,6 +236,7 @@ export interface ClinicalConsultationPdfData {
   appointmentNumber: string;
   consultationDate: string;
   tokenNumber?: number;
+  letterheadHeight?: number; // Configurable blank hospital letterhead height in points (default: 144 = 2 inches)
   hospital: {
     name: string;
     address: string;
@@ -238,6 +249,7 @@ export interface ClinicalConsultationPdfData {
     qualification?: string;
     specialization?: string;
     department?: string;
+    registrationNumber?: string;
   };
   patient: {
     fullName: string;
@@ -248,6 +260,7 @@ export interface ClinicalConsultationPdfData {
     bloodGroup?: string | null;
   };
   chiefComplaints?: string | null;
+  examination?: string | null;
   vitals?: {
     bp?: string | null;
     pulse?: string | number | null;
@@ -255,6 +268,8 @@ export interface ClinicalConsultationPdfData {
     spo2?: string | number | null;
     weight?: string | number | null;
     height?: string | number | null;
+    respiratoryRate?: string | number | null;
+    bmi?: string | null;
   } | null;
   diagnosis?: string | null;
   medicines?: Array<{
@@ -270,10 +285,47 @@ export interface ClinicalConsultationPdfData {
   labRequests?: Array<{
     name: string;
     status: string;
+    category?: string;
   }>;
   clinicalNotes?: string | null;
   instructions?: string | null;
   followUpDate?: string | null;
+  compress?: boolean;
+}
+
+function formatPdfFollowUpDate(dateStr?: string | null): string {
+  if (!dateStr || !dateStr.trim()) return '';
+  const trimmed = dateStr.trim();
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) return trimmed;
+  const ymdMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (ymdMatch) {
+    return `${ymdMatch[3]}/${ymdMatch[2]}/${ymdMatch[1]}`;
+  }
+  const d = new Date(trimmed);
+  if (!isNaN(d.getTime())) {
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+  return trimmed;
+}
+
+function getInvestigationStatus(status?: string): { label: string; textColor: string; bgColor: string } {
+  const s = (status || 'PENDING').toUpperCase().trim();
+  if (s === 'COMPLETED') {
+    return { label: 'COMPLETED', textColor: '#15803d', bgColor: '#dcfce7' };
+  }
+  if (s === 'SAMPLE_COLLECTED' || s === 'SAMPLE COLLECTED') {
+    return { label: 'SAMPLE COLLECTED', textColor: '#0369a1', bgColor: '#e0f2fe' };
+  }
+  if (s === 'PROCESSING' || s === 'IN_PROGRESS' || s === 'IN PROGRESS') {
+    return { label: 'IN PROGRESS', textColor: '#4338ca', bgColor: '#e0e7ff' };
+  }
+  if (s === 'CANCELLED' || s === 'CANCELED') {
+    return { label: 'CANCELLED', textColor: '#64748b', bgColor: '#f1f5f9' };
+  }
+  return { label: 'PENDING', textColor: '#b45309', bgColor: '#fef3c7' };
 }
 
 export const generateClinicalConsultationPdf = async (data: ClinicalConsultationPdfData): Promise<Buffer> => {
@@ -282,8 +334,9 @@ export const generateClinicalConsultationPdf = async (data: ClinicalConsultation
       const doc = new PDFDocument({
         size: 'A4',
         margin: 40,
+        compress: data.compress ?? true,
         info: {
-          Title: `Clinical Consultation - ${data.patient.fullName}`,
+          Title: `Prescription & Clinical Consultation - ${data.patient.fullName}`,
           Author: data.hospital.name,
           Subject: 'Official Consultation Summary & Prescription',
         },
@@ -295,161 +348,359 @@ export const generateClinicalConsultationPdf = async (data: ClinicalConsultation
         resolve(Buffer.concat(buffers));
       });
 
-      // 2 inches (144 points) space at the top reserved for Hospital Letterhead
-      // Content from old header (hospital name, address, CLINICAL CONSULTATION badge) is omitted
-      const infoTop = 144;
+      let pageNumber = 1;
 
-      // Two Column: Doctor & Patient Summary
-      doc.roundedRect(40, infoTop, 250, 68, 4).fill('#f8fafc');
-      doc.roundedRect(40, infoTop, 250, 68, 4).strokeColor('#e2e8f0').stroke();
+      const renderPageFooter = () => {
+        doc.moveTo(40, 770).lineTo(555, 770).strokeColor('#e2e8f0').stroke();
+        doc.fillColor('#94a3b8').fontSize(7).font('Helvetica')
+           .text(
+             'Rocket Wheel MedPulse Clinical Documentation System • Valid without physical signature under IT Act 2000.',
+             40,
+             776,
+             { width: 515, align: 'center' }
+           )
+           .text(
+             `Generated on: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`,
+             40,
+             786,
+             { width: 515, align: 'center' }
+           );
+      };
 
-      doc.fillColor('#1E20E0').fontSize(8.5).font('Helvetica-Bold').text('CONSULTING PHYSICIAN', 48, infoTop + 7);
-      doc.fillColor('#0f172a').fontSize(11).font('Helvetica-Bold').text(data.doctor.name, 48, infoTop + 20);
-      doc.fillColor('#475569').fontSize(8.5).font('Helvetica')
-         .text(`${data.doctor.qualification || 'MBBS, MD'} - ${data.doctor.specialization || 'General Specialist'}`, 48, infoTop + 35)
-         .text(`Dept: ${data.doctor.department || 'Outpatient Clinic'}`, 48, infoTop + 48);
+      const checkPageBreak = (neededHeight: number, isFinalContent = false): boolean => {
+        const threshold = isFinalContent ? 670 : 715;
+        if (curY + neededHeight > threshold) {
+          renderPageFooter();
+          doc.addPage({ size: 'A4', margin: 40 });
+          pageNumber++;
+          curY = 40;
+          return true;
+        }
+        return false;
+      };
 
-      doc.roundedRect(305, infoTop, 250, 68, 4).fill('#f8fafc');
-      doc.roundedRect(305, infoTop, 250, 68, 4).strokeColor('#e2e8f0').stroke();
+      // ----------------------------------------------------------------------
+      // 1. HOSPITAL LETTERHEAD SPACE (Page 1 Top Reserved Area)
+      // ----------------------------------------------------------------------
+      const letterheadHeight = typeof data.letterheadHeight === 'number' && data.letterheadHeight >= 0
+        ? data.letterheadHeight
+        : 144; // Default 144 points = 2 inches
+      const infoTop = letterheadHeight;
 
-      doc.fillColor('#1E20E0').fontSize(8.5).font('Helvetica-Bold').text('PATIENT PARTICULARS', 313, infoTop + 7);
-      doc.fillColor('#0f172a').fontSize(11).font('Helvetica-Bold').text(data.patient.fullName, 313, infoTop + 20);
+      // ----------------------------------------------------------------------
+      // 2. HIGHLIGHT DOCTOR AND PATIENT DETAILS USING SEPARATE BOXES
+      // ----------------------------------------------------------------------
+      const boxWidth = 250;
+      const leftColX = 40;
+      const rightColX = 305;
+
+      // Doctor Box Content
+      const doctorTitle = 'CONSULTING PHYSICIAN';
+      const doctorName = data.doctor.name.startsWith('Dr.') ? data.doctor.name : `Dr. ${data.doctor.name}`;
+      const docQualSpec = [data.doctor.qualification, data.doctor.specialization].filter(Boolean).join(' • ') || 'General Practitioner';
+      const docDept = `Dept: ${data.doctor.department || 'General Medicine'}`;
+      const docReg = data.doctor.registrationNumber ? `Reg No: ${data.doctor.registrationNumber}` : null;
+
+      // Patient Box Content
+      const patientTitle = 'PATIENT PARTICULARS';
+      const patientName = data.patient.fullName;
       const ageText = data.patient.age ? `${data.patient.age} Yrs` : 'N/A';
       const genderText = data.patient.gender || 'Not Specified';
+      const bloodText = data.patient.bloodGroup ? `Blood: ${data.patient.bloodGroup}` : 'Blood: N/A';
+      const patLine1 = `Age / Gender: ${ageText} / ${genderText}  |  ${bloodText}`;
       const mrnText = data.patient.patientIdNumber || 'MRN-Pending';
-      doc.fillColor('#475569').fontSize(8.5).font('Helvetica')
-         .text(`Age / Gender: ${ageText} / ${genderText}  |  Blood: ${data.patient.bloodGroup || 'N/A'}`, 313, infoTop + 35)
-         .text(`MRN: ${mrnText}  |  Mobile: ${data.patient.mobileNumber}`, 313, infoTop + 48);
+      const patLine2 = `MRN: ${mrnText}  |  Mobile: +91 ${data.patient.mobileNumber}`;
 
-      let curY = infoTop + 78;
+      // Measure required heights to balance both boxes
+      doc.fontSize(8.5).font('Helvetica');
+      const docQualH = doc.heightOfString(docQualSpec, { width: boxWidth - 16 });
+      const docHeight = 22 + 15 + docQualH + 13 + (docReg ? 13 : 0) + 8;
+      const patHeight = 22 + 15 + 13 + 13 + 8;
+      const boxHeight = Math.max(docHeight, patHeight, 72);
 
-      // Section: Chief Complaints
-      if (data.chiefComplaints) {
-        doc.fillColor('#0f172a').fontSize(9.5).font('Helvetica-Bold').text('CHIEF COMPLAINTS / SYMPTOMS:', 40, curY);
-        curY += 14;
-        doc.fillColor('#334155').fontSize(9).font('Helvetica').text(data.chiefComplaints, 40, curY, { width: 515 });
-        curY += doc.heightOfString(data.chiefComplaints, { width: 515 }) + 10;
+      // Render Doctor Box
+      doc.roundedRect(leftColX, infoTop, boxWidth, boxHeight, 4).fill('#f8fafc');
+      doc.roundedRect(leftColX, infoTop, boxWidth, boxHeight, 4).strokeColor('#cbd5e1').stroke();
+      doc.fillColor('#1E20E0').fontSize(8.5).font('Helvetica-Bold').text(doctorTitle, leftColX + 8, infoTop + 7);
+      doc.fillColor('#0f172a').fontSize(10.5).font('Helvetica-Bold').text(doctorName, leftColX + 8, infoTop + 19, { width: boxWidth - 16 });
+      let docTextY = infoTop + 33;
+      doc.fillColor('#334155').fontSize(8.5).font('Helvetica').text(docQualSpec, leftColX + 8, docTextY, { width: boxWidth - 16 });
+      docTextY += docQualH + 2;
+      doc.text(docDept, leftColX + 8, docTextY, { width: boxWidth - 16 });
+      if (docReg) {
+        docTextY += 12;
+        doc.fillColor('#64748b').fontSize(8).font('Helvetica').text(docReg, leftColX + 8, docTextY, { width: boxWidth - 16 });
       }
 
-      // Section: Vitals
-      if (data.vitals && Object.keys(data.vitals).length > 0) {
-        doc.roundedRect(40, curY, 515, 28, 4).fill('#f1f5f9');
-        doc.fillColor('#1e293b').fontSize(8.5).font('Helvetica-Bold').text('CLINICAL VITALS:', 48, curY + 9);
-        const vitalsList: string[] = [];
-        if (data.vitals.bp) vitalsList.push(`BP: ${data.vitals.bp}`);
-        if (data.vitals.pulse) vitalsList.push(`Pulse: ${data.vitals.pulse} bpm`);
-        if (data.vitals.temperature) vitalsList.push(`Temp: ${data.vitals.temperature} °F`);
-        if (data.vitals.spo2) vitalsList.push(`SpO2: ${data.vitals.spo2}%`);
-        if (data.vitals.weight) vitalsList.push(`Weight: ${data.vitals.weight} kg`);
-        if (data.vitals.height) vitalsList.push(`Height: ${data.vitals.height} cm`);
+      // Render Patient Box
+      doc.roundedRect(rightColX, infoTop, boxWidth, boxHeight, 4).fill('#f8fafc');
+      doc.roundedRect(rightColX, infoTop, boxWidth, boxHeight, 4).strokeColor('#cbd5e1').stroke();
+      doc.fillColor('#1E20E0').fontSize(8.5).font('Helvetica-Bold').text(patientTitle, rightColX + 8, infoTop + 7);
+      doc.fillColor('#0f172a').fontSize(10.5).font('Helvetica-Bold').text(patientName, rightColX + 8, infoTop + 19, { width: boxWidth - 16 });
+      doc.fillColor('#334155').fontSize(8.5).font('Helvetica')
+         .text(patLine1, rightColX + 8, infoTop + 33, { width: boxWidth - 16 })
+         .text(patLine2, rightColX + 8, infoTop + 48, { width: boxWidth - 16 });
 
-        const vitalsStr = vitalsList.length > 0 ? vitalsList.join('   |   ') : 'No vitals recorded';
-        doc.fillColor('#334155').fontSize(8.5).font('Helvetica').text(vitalsStr, 145, curY + 9);
-        curY += 36;
+      let curY = infoTop + boxHeight + 10;
+
+      // ----------------------------------------------------------------------
+      // 3. CLINICAL SECTIONS IN EXACT ORDER (1 TO 8)
+      // ----------------------------------------------------------------------
+
+      // ----------------------------------------------------------------------
+      // Section 1: CLINICAL VITALS
+      // ----------------------------------------------------------------------
+      const rawV = data.vitals;
+      const formattedBP = formatBP(rawV?.bp);
+      const formattedPulse = formatPulse(rawV?.pulse);
+      const formattedTemp = formatTemperature(rawV?.temperature);
+      const formattedSpO2 = formatSpO2(rawV?.spo2);
+      const formattedWeight = formatWeight(rawV?.weight);
+      const formattedHeight = formatHeight(rawV?.height);
+      const formattedResp = formatRespiratoryRate(rawV?.respiratoryRate);
+      const bmiCalc = rawV?.bmi || calculateBMI(rawV?.weight, rawV?.height);
+
+      const vitalsList: string[] = [];
+      if (formattedBP) vitalsList.push(`BP: ${formattedBP}`);
+      if (formattedPulse) vitalsList.push(`Pulse: ${formattedPulse}`);
+      if (formattedTemp) vitalsList.push(`Temp: ${formattedTemp}`);
+      if (formattedSpO2) vitalsList.push(`SpO2: ${formattedSpO2}`);
+      if (formattedResp) vitalsList.push(`Resp: ${formattedResp}`);
+      if (formattedWeight) vitalsList.push(`Weight: ${formattedWeight}`);
+      if (formattedHeight) vitalsList.push(`Height: ${formattedHeight}`);
+      if (bmiCalc) vitalsList.push(`BMI: ${bmiCalc}`);
+
+      if (vitalsList.length > 0) {
+        const vitalsStr = vitalsList.join('   |   ');
+        doc.fontSize(8.5).font('Helvetica');
+        const vitalsTextH = doc.heightOfString(vitalsStr, { width: 380, lineGap: 2 });
+        const vitalsBoxH = Math.max(26, vitalsTextH + 14);
+
+        checkPageBreak(vitalsBoxH + 6);
+        doc.roundedRect(40, curY, 515, vitalsBoxH, 4).fill('#f1f5f9');
+        doc.roundedRect(40, curY, 515, vitalsBoxH, 4).strokeColor('#cbd5e1').stroke();
+        doc.fillColor('#1E20E0').fontSize(8.5).font('Helvetica-Bold').text('CLINICAL VITALS:', 48, curY + 7);
+        doc.fillColor('#1e293b').fontSize(8.5).font('Helvetica').text(vitalsStr, 140, curY + 7, { width: 405, lineGap: 2 });
+        curY += vitalsBoxH + 8;
       }
 
-      // Section: Diagnosis
-      if (data.diagnosis) {
-        doc.fillColor('#1E20E0').fontSize(10).font('Helvetica-Bold').text('PROVISIONAL DIAGNOSIS:', 40, curY);
-        curY += 14;
-        doc.fillColor('#0f172a').fontSize(10).font('Helvetica').text(data.diagnosis, 40, curY, { width: 515 });
-        curY += doc.heightOfString(data.diagnosis, { width: 515 }) + 12;
+      // ----------------------------------------------------------------------
+      // Section 2: CHIEF COMPLAINTS / SYMPTOMS
+      // ----------------------------------------------------------------------
+      if (data.chiefComplaints && data.chiefComplaints.trim()) {
+        const text = data.chiefComplaints.trim();
+        doc.fontSize(8.5).font('Helvetica');
+        const textH = doc.heightOfString(text, { width: 515, lineGap: 2 });
+        checkPageBreak(textH + 20);
+
+        doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold').text('CHIEF COMPLAINTS / SYMPTOMS:', 40, curY);
+        curY += 13;
+        doc.fillColor('#334155').fontSize(8.5).font('Helvetica').text(text, 40, curY, { width: 515, lineGap: 2 });
+        curY += textH + 8;
       }
 
-      // Section: Prescription / Medicines
-      if (data.medicines && data.medicines.length > 0) {
-        const hasSubstituted = data.medicines.some((m) => m.isSubstituted);
-        doc.fillColor('#0f172a').fontSize(10).font('Helvetica-Bold').text('PRESCRIPTION (Rx):', 40, curY);
-        if (hasSubstituted) {
-          doc.fillColor('#b45309').fontSize(7.5).font('Helvetica-Bold')
-             .text('• REVISED PRESCRIPTION (Includes authorized pharmacy substitutions)', 180, curY + 2, { align: 'right', width: 375 });
-        }
-        curY += 14;
+      // ----------------------------------------------------------------------
+      // Section 3: EXAMINATION (Clinical Examination Findings)
+      // ----------------------------------------------------------------------
+      if (data.examination && data.examination.trim()) {
+        const text = data.examination.trim();
+        doc.fontSize(8.5).font('Helvetica');
+        const textH = doc.heightOfString(text, { width: 515, lineGap: 2 });
+        checkPageBreak(textH + 20);
 
-        // Table Header
-        doc.roundedRect(40, curY, 515, 20, 2).fill('#1E20E0');
-        doc.fillColor('#ffffff').fontSize(8).font('Helvetica-Bold');
-        doc.text('#', 46, curY + 5, { width: 20 });
-        doc.text('MEDICINE NAME', 68, curY + 5, { width: 175 });
-        doc.text('DOSAGE', 245, curY + 5, { width: 65 });
-        doc.text('FREQUENCY', 312, curY + 5, { width: 75 });
-        doc.text('DURATION', 390, curY + 5, { width: 60 });
-        doc.text('INSTRUCTIONS', 452, curY + 5, { width: 100 });
-        curY += 22;
-
-        data.medicines.forEach((med, idx) => {
-          const rowBg = idx % 2 === 0 ? '#f8fafc' : '#ffffff';
-          const isSub = Boolean(med.isSubstituted);
-          const rowHeight = isSub ? 30 : 20;
-          doc.rect(40, curY, 515, rowHeight).fill(rowBg);
-          doc.fillColor('#334155').fontSize(8).font('Helvetica');
-          doc.text(String(idx + 1), 46, curY + 5, { width: 20 });
-          doc.font('Helvetica-Bold').text(med.name, 68, curY + 5, { width: 175 }).font('Helvetica');
-          if (isSub) {
-            doc.fillColor('#b45309').fontSize(6.5).font('Helvetica-Bold')
-               .text(`[Substituted for: ${med.originalMedicine || 'Unavailable'} - ${med.substitutionReason || 'Clinically equivalent'}]`, 68, curY + 16, { width: 175 });
-          }
-          doc.fillColor('#334155').fontSize(8).font('Helvetica');
-          doc.text(med.dosage || '1 dose', 245, curY + 5, { width: 65 });
-          doc.text(med.frequency || '1-0-1', 312, curY + 5, { width: 75 });
-          doc.text(med.duration || '5 days', 390, curY + 5, { width: 60 });
-          doc.text(med.instructions || 'After food', 452, curY + 5, { width: 100 });
-          curY += rowHeight + 1;
-        });
-        curY += 10;
+        doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold').text('EXAMINATION / CLINICAL FINDINGS:', 40, curY);
+        curY += 13;
+        doc.fillColor('#334155').fontSize(8.5).font('Helvetica').text(text, 40, curY, { width: 515, lineGap: 2 });
+        curY += textH + 8;
       }
 
-      // Section: Requested Lab Tests
+      // ----------------------------------------------------------------------
+      // Section 4: PROVISIONAL DIAGNOSIS
+      // ----------------------------------------------------------------------
+      if (data.diagnosis && data.diagnosis.trim()) {
+        const text = data.diagnosis.trim();
+        doc.fontSize(9.5).font('Helvetica');
+        const textH = doc.heightOfString(text, { width: 515, lineGap: 2 });
+        checkPageBreak(textH + 20);
+
+        doc.fillColor('#1E20E0').fontSize(9).font('Helvetica-Bold').text('PROVISIONAL DIAGNOSIS:', 40, curY);
+        curY += 13;
+        doc.fillColor('#0f172a').fontSize(9.5).font('Helvetica-Bold').text(text, 40, curY, { width: 515, lineGap: 2 });
+        curY += textH + 8;
+      }
+
+      // ----------------------------------------------------------------------
+      // Section 5: DIAGNOSTIC INVESTIGATIONS / RADIOLOGY
+      // ----------------------------------------------------------------------
       if (data.labRequests && data.labRequests.length > 0) {
-        doc.fillColor('#0f172a').fontSize(10).font('Helvetica-Bold').text('REQUESTED DIAGNOSTIC INVESTIGATIONS:', 40, curY);
+        checkPageBreak(30);
+        doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold').text('DIAGNOSTIC INVESTIGATIONS / RADIOLOGY:', 40, curY);
         curY += 14;
 
         data.labRequests.forEach((req, idx) => {
-          const isDone = req.status === 'COMPLETED';
-          const icon = isDone ? '[✓ COMPLETED]' : '[○ PENDING]';
-          const color = isDone ? '#15803d' : '#d97706';
+          const statusInfo = getInvestigationStatus(req.status);
+          const reqCategory = req.category ? ` [${req.category}]` : '';
+          const nameWithCategory = `${idx + 1}. ${req.name}${reqCategory}`;
 
+          doc.fontSize(8.5).font('Helvetica');
+          const nameH = doc.heightOfString(nameWithCategory, { width: 365, lineGap: 1 });
+          const rowH = Math.max(nameH, 14) + 4;
+
+          checkPageBreak(rowH);
+
+          // Name on left
           doc.fillColor('#334155').fontSize(8.5).font('Helvetica')
-             .text(`${idx + 1}. ${req.name}`, 48, curY, { width: 350 });
-          doc.fillColor(color).fontSize(8).font('Helvetica-Bold')
-             .text(icon, 410, curY, { width: 140, align: 'right' });
-          curY += 16;
+             .text(nameWithCategory, 48, curY, { width: 365, lineGap: 1 });
+
+          // Clean status badge on right (NO malformed Unicode icons)
+          const badgeWidth = 110;
+          const badgeX = 445;
+          doc.roundedRect(badgeX, curY - 1, badgeWidth, 14, 2).fill(statusInfo.bgColor);
+          doc.fillColor(statusInfo.textColor).fontSize(7.5).font('Helvetica-Bold')
+             .text(statusInfo.label, badgeX, curY + 2, { width: badgeWidth, align: 'center' });
+
+          curY += rowH;
         });
-        curY += 10;
+
+        curY += 8;
       }
 
-      // Section: Advice & Clinical Notes
-      if (data.clinicalNotes || data.instructions || data.followUpDate) {
-        doc.roundedRect(40, curY, 515, 48, 4).fill('#f8fafc');
-        doc.roundedRect(40, curY, 515, 48, 4).strokeColor('#e2e8f0').stroke();
+      // ----------------------------------------------------------------------
+      // Section 6: PRESCRIPTION (Rx)
+      // ----------------------------------------------------------------------
+      const renderRxTableHeader = () => {
+        doc.roundedRect(40, curY, 515, 20, 2).fill('#1E20E0');
+        doc.fillColor('#ffffff').fontSize(8).font('Helvetica-Bold');
+        doc.text('#', 44, curY + 6, { width: 20, align: 'center' });
+        doc.text('MEDICINE NAME', 68, curY + 6, { width: 170 });
+        doc.text('DOSAGE', 242, curY + 6, { width: 65 });
+        doc.text('FREQUENCY', 311, curY + 6, { width: 75 });
+        doc.text('DURATION', 390, curY + 6, { width: 55 });
+        doc.text('INSTRUCTIONS', 449, curY + 6, { width: 102 });
+        curY += 21;
+      };
 
-        let noteY = curY + 8;
-        if (data.instructions || data.clinicalNotes) {
-          doc.fillColor('#0f172a').fontSize(8.5).font('Helvetica-Bold').text('ADVICE / CLINICAL NOTES:', 48, noteY);
-          doc.fillColor('#475569').fontSize(8.5).font('Helvetica')
-             .text(data.instructions || data.clinicalNotes || '', 175, noteY, { width: 365 });
-          noteY += 18;
+      if (data.medicines && data.medicines.length > 0) {
+        const hasSubstituted = data.medicines.some((m) => m.isSubstituted);
+        checkPageBreak(45);
+
+        doc.fillColor('#0f172a').fontSize(9.5).font('Helvetica-Bold').text('PRESCRIPTION (Rx):', 40, curY);
+        if (hasSubstituted) {
+          doc.fillColor('#b45309').fontSize(7.5).font('Helvetica-Bold')
+             .text('• REVISED PRESCRIPTION (Includes authorized pharmacy substitutions)', 160, curY + 2, { align: 'right', width: 395 });
         }
+        curY += 14;
 
-        if (data.followUpDate) {
-          doc.fillColor('#1E20E0').fontSize(8.5).font('Helvetica-Bold').text('FOLLOW-UP DATE:', 48, noteY);
-          doc.fillColor('#0f172a').fontSize(8.5).font('Helvetica-Bold').text(data.followUpDate, 175, noteY);
-        }
+        renderRxTableHeader();
 
-        curY += 58;
+        data.medicines.forEach((med, idx) => {
+          const isSub = Boolean(med.isSubstituted);
+          const subNote = isSub
+            ? `[Substituted for: ${med.originalMedicine || 'Original Medicine'}${med.substitutionReason ? ` - ${med.substitutionReason}` : ''}]`
+            : '';
+
+          doc.fontSize(8).font('Helvetica');
+          const medNameH = doc.heightOfString(med.name, { width: 170 });
+          const subNoteH = isSub ? doc.heightOfString(subNote, { width: 170, lineGap: 1 }) : 0;
+          const instructionsH = doc.heightOfString(med.instructions || 'As advised', { width: 102 });
+
+          const rowHeight = Math.max(medNameH + (isSub ? subNoteH + 3 : 0), instructionsH, 16) + 8;
+
+          // Multi-page pagination check: repeat header on new page
+          const broke = checkPageBreak(rowHeight);
+          if (broke) {
+            renderRxTableHeader();
+          }
+
+          // Row background
+          const rowBg = isSub ? '#fffbeb' : idx % 2 === 0 ? '#f8fafc' : '#ffffff';
+          doc.rect(40, curY, 515, rowHeight).fill(rowBg);
+
+          // Substituted orange indicator accent bar on the left edge
+          if (isSub) {
+            doc.rect(40, curY, 3, rowHeight).fill('#f59e0b');
+          }
+
+          // Subtle bottom border
+          doc.moveTo(40, curY + rowHeight).lineTo(555, curY + rowHeight).strokeColor('#e2e8f0').stroke();
+
+          // Cell text
+          doc.fillColor('#334155').fontSize(8).font('Helvetica')
+             .text(String(idx + 1), 44, curY + 4, { width: 20, align: 'center' });
+
+          // Medicine Name + Substitution Note
+          doc.fillColor('#0f172a').font('Helvetica-Bold').text(med.name, 68, curY + 4, { width: 170 }).font('Helvetica');
+          if (isSub) {
+            doc.fillColor('#b45309').fontSize(6.5).font('Helvetica-Bold')
+               .text(subNote, 68, curY + 4 + medNameH + 1, { width: 170, lineGap: 1 });
+          }
+
+          // Dosage, Frequency, Duration, Instructions
+          doc.fillColor('#334155').fontSize(8).font('Helvetica');
+          doc.text(med.dosage || '1 dose', 242, curY + 4, { width: 65 });
+          doc.text(med.frequency || '1-0-1', 311, curY + 4, { width: 75 });
+          doc.text(med.duration || '5 days', 390, curY + 4, { width: 55 });
+          doc.text(med.instructions || 'After food', 449, curY + 4, { width: 102 });
+
+          curY += rowHeight;
+        });
+
+        curY += 8;
       }
 
-      // Doctor Signature Area
-      const sigTop = Math.max(curY + 20, 700);
+      // ----------------------------------------------------------------------
+      // Section 7: ADVICE / CLINICAL NOTES
+      // ----------------------------------------------------------------------
+      const adviceContent = (data.instructions || data.clinicalNotes || '').trim();
+      if (adviceContent) {
+        doc.fontSize(8.5).font('Helvetica');
+        const adviceH = doc.heightOfString(adviceContent, { width: 495, lineGap: 2 });
+        const adviceBoxH = adviceH + 16;
+
+        checkPageBreak(adviceBoxH + 20);
+
+        doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold').text('ADVICE / CLINICAL NOTES:', 40, curY);
+        curY += 13;
+
+        doc.roundedRect(40, curY, 515, adviceBoxH, 4).fill('#f8fafc');
+        doc.roundedRect(40, curY, 515, adviceBoxH, 4).strokeColor('#cbd5e1').stroke();
+        doc.fillColor('#334155').fontSize(8.5).font('Helvetica')
+           .text(adviceContent, 48, curY + 8, { width: 495, lineGap: 2 });
+
+        curY += adviceBoxH + 8;
+      }
+
+      // ----------------------------------------------------------------------
+      // Section 8: FOLLOW-UP DATE (Clearly Separated Row — Never Overlaps Advice)
+      // ----------------------------------------------------------------------
+      if (data.followUpDate && data.followUpDate.trim()) {
+        const formattedDate = formatPdfFollowUpDate(data.followUpDate);
+        checkPageBreak(32);
+
+        doc.roundedRect(40, curY, 515, 26, 4).fill('#f8fafc');
+        doc.roundedRect(40, curY, 515, 26, 4).strokeColor('#cbd5e1').stroke();
+
+        doc.fillColor('#1E20E0').fontSize(8.5).font('Helvetica-Bold')
+           .text('FOLLOW-UP REVIEW DATE:', 48, curY + 8);
+        doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold')
+           .text(formattedDate, 205, curY + 8);
+
+        curY += 34;
+      }
+
+      // ----------------------------------------------------------------------
+      // DOCTOR SIGNATURE AREA
+      // ----------------------------------------------------------------------
+      checkPageBreak(65, true);
+      const sigTop = Math.max(curY + 15, 695);
       doc.moveTo(380, sigTop).lineTo(540, sigTop).strokeColor('#94a3b8').stroke();
-      doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold').text(data.doctor.name, 380, sigTop + 6, { width: 160, align: 'center' });
-      doc.fillColor('#64748b').fontSize(7.5).font('Helvetica').text('Authorized Medical Officer', 380, sigTop + 18, { width: 160, align: 'center' });
+      doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold')
+         .text(doctorName, 380, sigTop + 6, { width: 160, align: 'center' });
+      doc.fillColor('#64748b').fontSize(7.5).font('Helvetica')
+         .text('Authorized Medical Officer', 380, sigTop + 18, { width: 160, align: 'center' });
 
-      // Bottom Footer
-      doc.moveTo(40, 765).lineTo(555, 765).strokeColor('#e2e8f0').stroke();
-      doc.fillColor('#94a3b8').fontSize(7).font('Helvetica')
-         .text('Rocket Wheel MedPulse Clinical Documentation System. Valid without physical signature under IT Act 2000.', 40, 772, { width: 515, align: 'center' })
-         .text(`Generated on: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`, 40, 782, { width: 515, align: 'center' });
+      // Render footer on the final page
+      renderPageFooter();
 
       doc.end();
     } catch (err) {

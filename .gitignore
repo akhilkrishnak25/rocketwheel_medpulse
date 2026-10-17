@@ -31,6 +31,8 @@ frontend/.env
 *.sqlite3
 backend/prisma/*.db
 backend/prisma/*.db-journal
+backend/prisma/*.db.bak
+backend/src/tests/*.pdf
 
 # Logs
 logs/

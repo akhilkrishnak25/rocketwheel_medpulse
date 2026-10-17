@@ -315,6 +315,7 @@ export const completeConsultationSchema = z.object({
     .transform((val) => (val && val.trim().length > 0 ? val.trim() : null)),
   symptoms: z.string().optional(),
   chiefComplaints: z.string().optional(),
+  examination: z.string().optional().nullable(),
   vitals: z
     .object({
       bp: z.string().optional(),

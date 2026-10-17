@@ -22,6 +22,8 @@ export const doctorDashboardApi = {
       instructions?: string;
       followUpDate?: string;
       symptoms?: string;
+      chiefComplaints?: string;
+      examination?: string;
       vitals?: {
         bp?: string;
         pulse?: string;

@@ -188,6 +188,8 @@ export interface Prescription {
   appointmentId?: string;
   appointment?: Appointment;
   diagnosis: string;
+  examination?: string;
+  vitals?: any;
   medicines: string; // JSON string
   medicinesList?: Array<{ name: string; dosage: string; frequency: string; duration: string; instructions?: string }>;
   instructions?: string;
