@@ -3,9 +3,11 @@ import { DoctorDashboardService } from '../services/doctorDashboard.service';
 import { successResponse, errorResponse } from '../utils/response';
 import {
   completeConsultationSchema,
+  saveConsultationDraftSchema,
   doctorLeaveSchema,
   doctorScheduleUpdateSchema,
   prescriptionTemplateSchema,
+  labTestTemplateSchema,
   createLabRequestSchema,
   updateDoctorAssignedStaffSchema,
   doctorOwnProfileUpdateSchema,
@@ -148,6 +150,33 @@ export class DoctorDashboardController {
     }
   }
 
+  static async saveConsultationDraft(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) {
+        return errorResponse(res, 'Doctor account not linked to this session', 400);
+      }
+
+      const appointmentId = req.params.appointmentId as string;
+      const validated = saveConsultationDraftSchema.parse(req.body);
+
+      const result = await DoctorDashboardService.saveConsultationDraft(
+        doctorId,
+        appointmentId,
+        validated,
+        req.user?.id
+      );
+
+      return successResponse(
+        res,
+        result,
+        'Consultation draft saved successfully. Changes persisted to database.'
+      );
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to save consultation draft', 400, error.errors);
+    }
+  }
+
   static async completeConsultation(req: Request, res: Response) {
     try {
       const doctorId = req.user?.doctorId;
@@ -282,6 +311,62 @@ export class DoctorDashboardController {
       return successResponse(res, null, 'Template deleted successfully');
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to delete template', 400);
+    }
+  }
+
+  // -------------------------------------------------------------
+  // LAB TEST TEMPLATES
+  // -------------------------------------------------------------
+  static async getLabTestTemplates(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const search = req.query.search as string | undefined;
+      const templates = await DoctorDashboardService.getLabTestTemplates(doctorId, search);
+      return successResponse(res, templates, 'Lab test templates retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch lab test templates', 500);
+    }
+  }
+
+  static async createLabTestTemplate(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const validated = labTestTemplateSchema.parse(req.body);
+      const template = await DoctorDashboardService.createLabTestTemplate(doctorId, validated, req.user?.id);
+      return successResponse(res, template, 'Lab test template saved successfully', 201);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to save lab test template', 400, error.errors);
+    }
+  }
+
+  static async updateLabTestTemplate(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const templateId = req.params.templateId as string;
+      const validated = labTestTemplateSchema.partial().parse(req.body);
+      const updated = await DoctorDashboardService.updateLabTestTemplate(doctorId, templateId, validated, req.user?.id);
+      return successResponse(res, updated, 'Lab test template updated successfully');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to update lab test template', 400, error.errors);
+    }
+  }
+
+  static async deleteLabTestTemplate(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) return errorResponse(res, 'Doctor session required', 400);
+
+      const templateId = req.params.templateId as string;
+      await DoctorDashboardService.deleteLabTestTemplate(doctorId, templateId, req.user?.id);
+      return successResponse(res, null, 'Lab test template deleted successfully');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to delete lab test template', 400);
     }
   }
 

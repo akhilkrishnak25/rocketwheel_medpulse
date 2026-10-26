@@ -14,7 +14,7 @@ export class DoctorDashboardService {
     const today = new Date().toISOString().split('T')[0];
     let dateFilter: any = today;
     let orderClause: any = { tokenNumber: 'asc' };
-    let statusFilterClause: any = { in: ['CONFIRMED', 'WAITING', 'IN_CONSULTATION', 'COMPLETED', 'NO_SHOW', 'CANCELLED'] };
+    let statusFilterClause: any = { in: ['CONFIRMED', 'WAITING', 'IN_CONSULTATION', 'DRAFT', 'COMPLETED', 'NO_SHOW', 'CANCELLED'] };
 
     if (date?.toUpperCase() === 'COMPLETED') {
       return prisma.appointment.findMany({
@@ -29,6 +29,9 @@ export class DoctorDashboardService {
             include: { pharmacy: true },
           },
           medicalRecord: true,
+          draft: {
+            select: { id: true, updatedAt: true },
+          },
           digitalOp: true,
           assignedStaff: {
             include: {
@@ -83,6 +86,9 @@ export class DoctorDashboardService {
           include: { pharmacy: true },
         },
         medicalRecord: true,
+        draft: {
+          select: { id: true, updatedAt: true },
+        },
         digitalOp: true,
         assignedStaff: {
           include: {
@@ -312,7 +318,7 @@ export class DoctorDashboardService {
     ] = await Promise.all([
       prisma.appointment.count({ where: { doctorId, appointmentDate: today } }),
       prisma.appointment.count({ where: { doctorId, appointmentDate: today, status: 'COMPLETED' } }),
-      prisma.appointment.count({ where: { doctorId, appointmentDate: today, status: { in: ['CONFIRMED', 'WAITING', 'IN_CONSULTATION'] } } }),
+      prisma.appointment.count({ where: { doctorId, appointmentDate: today, status: { in: ['CONFIRMED', 'WAITING', 'IN_CONSULTATION', 'DRAFT'] } } }),
       prisma.appointment.count({ where: { doctorId, status: 'COMPLETED' } }),
       prisma.review.count({ where: { doctorId } }),
       prisma.review.findMany({ where: { doctorId }, select: { rating: true } }),
@@ -369,6 +375,232 @@ export class DoctorDashboardService {
     });
 
     return updated;
+  }
+
+  static async saveConsultationDraft(
+    doctorId: string,
+    appointmentId: string,
+    data: {
+      diagnosis?: string | null;
+      medicines?: Array<{
+        name?: string;
+        dosage?: string;
+        frequency?: string;
+        duration?: string;
+        instructions?: string;
+        priority?: number | null;
+        isSubstituted?: boolean;
+        originalMedicine?: string | null;
+        substitutionReason?: string | null;
+      }>;
+      instructions?: string | null;
+      followUpDate?: string | null;
+      symptoms?: string | null;
+      chiefComplaints?: string | null;
+      examination?: string | null;
+      vitals?: { bp?: string | null; pulse?: string | null; temperature?: string | null; weight?: string | null; spo2?: string | null } | null;
+      clinicalNotes?: string | null;
+      sendToPharmacy?: boolean;
+      pharmacyId?: string | null;
+      labRequests?: any[];
+    },
+    requestingUserId?: string
+  ) {
+    const apt = await prisma.appointment.findFirst({
+      where: { id: appointmentId, doctorId },
+      include: { patient: true, doctor: true, prescription: true, medicalRecord: true, draft: true },
+    });
+
+    if (!apt) {
+      throw new Error('Appointment not assigned to this doctor');
+    }
+
+    const existingDraft = apt.draft;
+
+    const chiefComplaintsText = data.chiefComplaints !== undefined
+      ? (data.chiefComplaints || data.symptoms || null)
+      : (data.symptoms !== undefined ? (data.symptoms || null) : (existingDraft?.chiefComplaints ?? apt.medicalRecord?.symptoms ?? null));
+
+    const examinationText = data.examination !== undefined
+      ? (data.examination?.trim() || null)
+      : (existingDraft?.examination ?? apt.medicalRecord?.examination ?? null);
+
+    let vitalsJson = existingDraft?.vitals || (apt.medicalRecord?.vitals ? (typeof apt.medicalRecord.vitals === 'string' ? apt.medicalRecord.vitals : JSON.stringify(apt.medicalRecord.vitals)) : '{}');
+    if (data.vitals !== undefined) {
+      const normalizedVitals = data.vitals
+        ? {
+            ...data.vitals,
+            bp: data.vitals.bp ? (formatBP(data.vitals.bp) || data.vitals.bp) : null,
+          }
+        : {};
+      vitalsJson = JSON.stringify(normalizedVitals);
+    }
+
+    let medicinesJson = existingDraft?.medicines || apt.prescription?.medicines || '[]';
+    if (data.medicines !== undefined) {
+      const medicinesList = (data.medicines || []).map((m, idx) => ({
+        ...m,
+        priority: typeof m.priority === 'number' && m.priority > 0 ? Math.floor(m.priority) : idx + 1,
+      }));
+      medicinesJson = JSON.stringify(medicinesList);
+    }
+
+    const diagnosisText = data.diagnosis !== undefined
+      ? (data.diagnosis || null)
+      : (existingDraft?.diagnosis ?? apt.prescription?.diagnosis ?? null);
+
+    const clinicalNotesText = data.clinicalNotes !== undefined
+      ? (data.clinicalNotes || null)
+      : (existingDraft?.clinicalNotes ?? apt.medicalRecord?.clinicalNotes ?? null);
+
+    const followUpDateText = data.followUpDate !== undefined
+      ? (data.followUpDate || null)
+      : (existingDraft?.followUpDate ?? apt.prescription?.followUpDate ?? null);
+
+    const sendToPharmacyVal = data.sendToPharmacy !== undefined
+      ? Boolean(data.sendToPharmacy)
+      : (existingDraft?.sendToPharmacy ?? false);
+
+    const pharmacyIdVal = data.pharmacyId !== undefined
+      ? (data.pharmacyId || null)
+      : (existingDraft?.pharmacyId ?? null);
+
+    const labRequestsVal = data.labRequests !== undefined
+      ? JSON.stringify(data.labRequests || [])
+      : (existingDraft?.labRequests ?? '[]');
+
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Update appointment status to DRAFT (if not already completed)
+      let updatedApt: any = apt;
+      if (apt.status !== 'COMPLETED') {
+        updatedApt = await tx.appointment.update({
+          where: { id: appointmentId },
+          data: {
+            status: 'DRAFT',
+            notes: clinicalNotesText || apt.notes,
+          },
+          include: { patient: true, department: true },
+        });
+      } else {
+        if (clinicalNotesText) {
+          updatedApt = await tx.appointment.update({
+            where: { id: appointmentId },
+            data: { notes: clinicalNotesText },
+            include: { patient: true, department: true },
+          });
+        }
+      }
+
+      // 2. Upsert ConsultationDraft
+      const draft = await tx.consultationDraft.upsert({
+        where: { appointmentId },
+        update: {
+          doctorId,
+          patientId: apt.patientId,
+          chiefComplaints: chiefComplaintsText,
+          examination: examinationText,
+          diagnosis: diagnosisText,
+          vitals: vitalsJson,
+          medicines: medicinesJson,
+          clinicalNotes: clinicalNotesText,
+          followUpDate: followUpDateText,
+          sendToPharmacy: sendToPharmacyVal,
+          pharmacyId: pharmacyIdVal,
+          labRequests: labRequestsVal,
+        },
+        create: {
+          appointmentId,
+          doctorId,
+          patientId: apt.patientId,
+          chiefComplaints: chiefComplaintsText,
+          examination: examinationText,
+          diagnosis: diagnosisText,
+          vitals: vitalsJson,
+          medicines: medicinesJson,
+          clinicalNotes: clinicalNotesText,
+          followUpDate: followUpDateText,
+          sendToPharmacy: sendToPharmacyVal,
+          pharmacyId: pharmacyIdVal,
+          labRequests: labRequestsVal,
+        },
+      });
+
+      // 3. If consultation was already completed, also update Prescription & Medical Record
+      if (apt.status === 'COMPLETED') {
+        const sortedMedicines = sortMedicinesByPriority(JSON.parse(medicinesJson || '[]'));
+        await tx.prescription.upsert({
+          where: { appointmentId },
+          update: {
+            ...(diagnosisText ? { diagnosis: diagnosisText } : {}),
+            examination: examinationText,
+            medicines: JSON.stringify(sortedMedicines),
+            instructions: clinicalNotesText || undefined,
+            followUpDate: followUpDateText,
+            ...(data.sendToPharmacy !== undefined ? {
+              pharmacyId: pharmacyIdVal || undefined,
+              pharmacyStatus: sendToPharmacyVal ? 'SENT' : 'NONE',
+              sentToPharmacyAt: sendToPharmacyVal ? new Date() : null,
+            } : {})
+          },
+          create: {
+            appointmentId,
+            doctorId,
+            patientId: apt.patientId,
+            hospitalId: apt.hospitalId,
+            diagnosis: diagnosisText || 'Clinical Consultation',
+            examination: examinationText,
+            medicines: JSON.stringify(sortedMedicines),
+            instructions: clinicalNotesText,
+            followUpDate: followUpDateText,
+            pharmacyId: pharmacyIdVal,
+            pharmacyStatus: sendToPharmacyVal ? 'SENT' : 'NONE',
+            sentToPharmacyAt: sendToPharmacyVal ? new Date() : null,
+          }
+        });
+
+        await tx.medicalRecord.upsert({
+          where: { appointmentId },
+          update: {
+            symptoms: chiefComplaintsText,
+            examination: examinationText,
+            vitals: vitalsJson,
+            clinicalNotes: clinicalNotesText,
+          },
+          create: {
+            appointmentId,
+            patientId: apt.patientId,
+            symptoms: chiefComplaintsText,
+            examination: examinationText,
+            vitals: vitalsJson,
+            clinicalNotes: clinicalNotesText,
+          }
+        });
+      }
+
+      return { appointment: updatedApt, draft };
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: apt.status === 'COMPLETED' ? 'UPDATE_COMPLETED_CONSULTATION' : 'SAVE_CONSULTATION_DRAFT',
+      entity: 'Appointment',
+      entityId: appointmentId,
+      details: {
+        diagnosis: data.diagnosis,
+        medicineCount: data.medicines?.length || 0,
+      },
+    });
+
+    return result;
+  }
+
+  static async saveConsultationChanges(
+    doctorId: string,
+    appointmentId: string,
+    data: Parameters<typeof DoctorDashboardService.saveConsultationDraft>[2],
+    requestingUserId?: string
+  ) {
+    return DoctorDashboardService.saveConsultationDraft(doctorId, appointmentId, data, requestingUserId);
   }
 
   static async completeConsultation(
@@ -490,6 +722,11 @@ export class DoctorDashboardService {
         },
       });
 
+      // 4. Clean up any consultation draft since consultation is finalized
+      await tx.consultationDraft.deleteMany({
+        where: { appointmentId },
+      });
+
       return { appointment: updatedApt, prescription, medicalRecord };
     });
 
@@ -557,6 +794,7 @@ export class DoctorDashboardService {
         },
         prescription: true,
         medicalRecord: true,
+        draft: true,
         labRequests: {
           include: { report: true, lab: true },
         },
@@ -570,6 +808,11 @@ export class DoctorDashboardService {
       orderBy: { diseaseName: 'asc' },
     });
 
+    const labTemplates = await prisma.labTestTemplate.findMany({
+      where: { doctorId },
+      orderBy: { diseaseName: 'asc' },
+    });
+
     const latestVital = apt.vitals[0] || null;
 
     return {
@@ -577,8 +820,9 @@ export class DoctorDashboardService {
       patient: apt.patient,
       vitals: latestVital,
       currentVitals: latestVital,
-      chiefComplaints: apt.medicalRecord?.symptoms || null,
-      examination: apt.medicalRecord?.examination || apt.prescription?.examination || null,
+      chiefComplaints: apt.draft?.chiefComplaints || apt.medicalRecord?.symptoms || null,
+      examination: apt.draft?.examination || apt.medicalRecord?.examination || apt.prescription?.examination || null,
+      draft: apt.draft || null,
       patientHistory: {
         previousAppointments: apt.patient.appointments,
         previousPrescriptions: apt.patient.prescriptions,
@@ -587,6 +831,10 @@ export class DoctorDashboardService {
       templates: templates.map((t) => ({
         ...t,
         medicinesList: sortMedicinesByPriority(JSON.parse(t.medicines || '[]')),
+      })),
+      labTemplates: labTemplates.map((t) => ({
+        ...t,
+        labTestsList: JSON.parse(t.labTests || '[]'),
       })),
     };
   }
@@ -734,6 +982,119 @@ export class DoctorDashboardService {
     if (!existing) throw new Error('Template not found');
 
     await prisma.prescriptionTemplate.delete({ where: { id: templateId } });
+    return { success: true };
+  }
+
+  // -------------------------------------------------------------
+  // DISEASE-BASED LAB TEST TEMPLATES
+  // -------------------------------------------------------------
+  static async getLabTestTemplates(doctorId: string, search?: string) {
+    const where: any = { doctorId };
+    if (search && search.trim()) {
+      const q = search.trim();
+      where.OR = [
+        { diseaseName: { contains: q } },
+        { description: { contains: q } },
+        { labTests: { contains: q } },
+      ];
+    }
+    const templates = await prisma.labTestTemplate.findMany({
+      where,
+      orderBy: { diseaseName: 'asc' },
+    });
+
+    return templates.map((t) => ({
+      ...t,
+      labTestsList: JSON.parse(t.labTests || '[]'),
+    }));
+  }
+
+  static async createLabTestTemplate(
+    doctorId: string,
+    data: {
+      diseaseName: string;
+      description?: string | null;
+      labTests: Array<{ name: string; code?: string | null; category?: string | null; price?: number | null; notes?: string | null }>;
+    },
+    requestingUserId?: string
+  ) {
+    const template = await prisma.labTestTemplate.create({
+      data: {
+        doctorId,
+        diseaseName: data.diseaseName.trim(),
+        description: data.description?.trim() || null,
+        labTests: JSON.stringify(data.labTests || []),
+      },
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'CREATE_LAB_TEST_TEMPLATE',
+      entity: 'LabTestTemplate',
+      entityId: template.id,
+      details: { diseaseName: data.diseaseName, testCount: data.labTests?.length || 0 },
+    });
+
+    return {
+      ...template,
+      labTestsList: data.labTests,
+    };
+  }
+
+  static async updateLabTestTemplate(
+    doctorId: string,
+    templateId: string,
+    data: {
+      diseaseName?: string;
+      description?: string | null;
+      labTests?: Array<{ name: string; code?: string | null; category?: string | null; price?: number | null; notes?: string | null }>;
+    },
+    requestingUserId?: string
+  ) {
+    const existing = await prisma.labTestTemplate.findFirst({
+      where: { id: templateId, doctorId },
+    });
+    if (!existing) throw new Error('Lab test template not found');
+
+    const updated = await prisma.labTestTemplate.update({
+      where: { id: templateId },
+      data: {
+        diseaseName: data.diseaseName !== undefined ? data.diseaseName.trim() : existing.diseaseName,
+        description: data.description !== undefined ? data.description?.trim() || null : existing.description,
+        labTests: data.labTests !== undefined ? JSON.stringify(data.labTests) : existing.labTests,
+      },
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'UPDATE_LAB_TEST_TEMPLATE',
+      entity: 'LabTestTemplate',
+      entityId: templateId,
+      details: { diseaseName: updated.diseaseName },
+    });
+
+    return {
+      ...updated,
+      labTestsList: data.labTests || JSON.parse(updated.labTests || '[]'),
+    };
+  }
+
+  static async deleteLabTestTemplate(doctorId: string, templateId: string, requestingUserId?: string) {
+    const existing = await prisma.labTestTemplate.findFirst({
+      where: { id: templateId, doctorId },
+    });
+    if (!existing) throw new Error('Lab test template not found');
+
+    await prisma.labTestTemplate.delete({ where: { id: templateId } });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'DELETE_LAB_TEST_TEMPLATE',
+      entity: 'LabTestTemplate',
+      entityId: templateId,
+      details: { diseaseName: existing.diseaseName },
+    });
+
     return { success: true };
   }
 
@@ -905,6 +1266,10 @@ export class DoctorDashboardService {
     const labTestsList: Array<{ name: string; status: string; category?: string }> = [];
     if (apt.labRequests && apt.labRequests.length > 0) {
       for (const req of apt.labRequests) {
+        const reqStatus = (req.status || '').toUpperCase().trim();
+        if (reqStatus === 'CANCELLED' || reqStatus === 'CANCELED' || reqStatus === 'REJECTED') {
+          continue;
+        }
         let tList: any[] = [];
         try {
           tList = JSON.parse(req.tests || '[]');
@@ -912,6 +1277,10 @@ export class DoctorDashboardService {
           tList = [{ name: req.tests }];
         }
         for (const t of tList) {
+          const testStatus = (t.status || req.status || '').toUpperCase().trim();
+          if (testStatus === 'CANCELLED' || testStatus === 'CANCELED' || testStatus === 'REJECTED') {
+            continue;
+          }
           labTestsList.push({
             name: t.name || 'Diagnostic Test',
             status: req.status || 'PENDING',

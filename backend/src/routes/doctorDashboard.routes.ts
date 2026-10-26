@@ -12,6 +12,8 @@ router.get('/appointments', DoctorDashboardController.getAppointments);
 router.get('/appointments/:appointmentId/consultation', DoctorDashboardController.getConsultationDetails);
 router.get('/appointments/:appointmentId/pdf', DoctorDashboardController.downloadConsultationPdf);
 router.post('/appointments/:appointmentId/start', DoctorDashboardController.startConsultation);
+router.post('/appointments/:appointmentId/draft', DoctorDashboardController.saveConsultationDraft);
+router.post('/appointments/:appointmentId/save-changes', DoctorDashboardController.saveConsultationDraft);
 router.post('/appointments/:appointmentId/complete', DoctorDashboardController.completeConsultation);
 router.get('/appointments/:appointmentId/prescription', DoctorDashboardController.getPrescription);
 
@@ -21,6 +23,13 @@ router.post('/templates', DoctorDashboardController.createTemplate);
 router.post('/templates/bulk', DoctorDashboardController.bulkCreateTemplates);
 router.patch('/templates/:templateId', DoctorDashboardController.updateTemplate);
 router.delete('/templates/:templateId', DoctorDashboardController.deleteTemplate);
+
+// Lab Test Templates
+router.get('/lab-templates', DoctorDashboardController.getLabTestTemplates);
+router.post('/lab-templates', DoctorDashboardController.createLabTestTemplate);
+router.patch('/lab-templates/:templateId', DoctorDashboardController.updateLabTestTemplate);
+router.put('/lab-templates/:templateId', DoctorDashboardController.updateLabTestTemplate);
+router.delete('/lab-templates/:templateId', DoctorDashboardController.deleteLabTestTemplate);
 
 // Lab Requests
 router.post('/lab-requests', DoctorDashboardController.createLabRequest);

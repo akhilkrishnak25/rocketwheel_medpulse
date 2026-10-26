@@ -366,10 +366,12 @@ async function runTests() {
   assert(pdfText.includes('EXAMINATION / CLINICAL FINDINGS:'), 'PDF contains Section 3 EXAMINATION heading');
   assert(pdfText.includes('Bilateral vesicular breath sounds'), 'PDF renders saved clinical examination findings');
 
-  // Verify Section 5: Diagnostic Investigation statuses clean (no %Ë malformed chars)
-  assert(!pdfText.includes('%Ë'), 'PDF does not contain broken Unicode "%Ë" before PENDING');
-  assert(pdfText.includes('PENDING'), 'PDF contains clean PENDING investigation status');
-  assert(pdfText.includes('COMPLETED'), 'PDF contains clean COMPLETED investigation status');
+  // Verify Section 5: Diagnostic Investigation statuses removed (Requirement 2: No status labels like PENDING/COMPLETED)
+  assert(!pdfText.includes('%Ë'), 'PDF does not contain broken Unicode "%Ë"');
+  assert(!pdfText.includes('PENDING'), 'PDF does not display PENDING status label');
+  assert(!pdfText.includes('COMPLETED'), 'PDF does not display COMPLETED status label');
+  assert(pdfText.includes('Complete Blood Picture (CBC)'), 'PDF contains non-cancelled investigation name');
+  assert(pdfText.includes('Chest X-Ray PA View'), 'PDF contains non-cancelled radiology name');
 
   // Verify Section 6: Automatic sorting by priority in generated PDF
   const eroxPos = pdfText.indexOf('erox cv 625');

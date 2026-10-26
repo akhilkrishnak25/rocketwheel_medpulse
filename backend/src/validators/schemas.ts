@@ -125,6 +125,7 @@ export const updateAppointmentStatusSchema = z.object({
     'CONFIRMED',
     'WAITING',
     'IN_CONSULTATION',
+    'DRAFT',
     'COMPLETED',
     'CANCELLED',
     'NO_SHOW',
@@ -331,6 +332,48 @@ export const completeConsultationSchema = z.object({
   pharmacyId: z.string().optional().nullable(),
 });
 
+export const saveConsultationDraftSchema = z.object({
+  diagnosis: z.string().optional().nullable(),
+  medicines: z
+    .array(
+      z.object({
+        name: z.string().optional().default(''),
+        dosage: z.string().optional().default(''),
+        frequency: z.string().optional().default(''),
+        duration: z.string().optional().default(''),
+        instructions: z.string().optional().default(''),
+        priority: z.coerce.number().int().positive().optional().nullable(),
+        isSubstituted: z.boolean().optional(),
+        originalMedicine: z.string().optional().nullable(),
+        substitutionReason: z.string().optional().nullable(),
+      })
+    )
+    .optional(),
+  instructions: z.string().optional().nullable(),
+  followUpDate: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((val) => (val && val.trim().length > 0 ? val.trim() : null)),
+  symptoms: z.string().optional().nullable(),
+  chiefComplaints: z.string().optional().nullable(),
+  examination: z.string().optional().nullable(),
+  vitals: z
+    .object({
+      bp: z.string().optional().nullable(),
+      pulse: z.string().optional().nullable(),
+      temperature: z.string().optional().nullable(),
+      weight: z.string().optional().nullable(),
+      spo2: z.string().optional().nullable(),
+    })
+    .optional()
+    .nullable(),
+  clinicalNotes: z.string().optional().nullable(),
+  sendToPharmacy: z.boolean().optional(),
+  pharmacyId: z.string().optional().nullable(),
+  labRequests: z.array(z.any()).optional(),
+});
+
 export const registerDoctorSchema = z.object({
   name: z.string().min(2, 'Full name is required'),
   email: z.string().email('Valid professional email required'),
@@ -443,7 +486,16 @@ export const createOfflineAppointmentSchema = z.object({
     gender: z.string().optional().nullable(),
     age: z.coerce.number().int().min(0).max(130).optional().nullable(),
     address: z.string().optional().nullable(),
-    bloodGroup: z.string().optional().nullable(),
+    bloodGroup: z
+      .string()
+      .optional()
+      .nullable()
+      .transform((val) => {
+        if (!val || val.trim() === '' || val.trim().toLowerCase() === 'none') {
+          return null;
+        }
+        return val.trim();
+      }),
     emergencyContact: z.string().optional().nullable(),
   }),
   notes: z.string().optional().nullable(),
@@ -481,6 +533,22 @@ export const prescriptionTemplateSchema = z.object({
     .optional()
     .default([]),
   instructions: z.string().optional().nullable(),
+});
+
+export const labTestTemplateSchema = z.object({
+  diseaseName: z.string().min(2, 'Disease / Condition name required (e.g. Dengue Fever, Diabetic Workup)'),
+  description: z.string().optional().nullable(),
+  labTests: z
+    .array(
+      z.object({
+        name: z.string().min(1, 'Test name required'),
+        code: z.string().optional().nullable(),
+        category: z.string().optional().nullable(),
+        price: z.coerce.number().optional().nullable(),
+        notes: z.string().optional().nullable(),
+      })
+    )
+    .min(1, 'At least one diagnostic lab test is required in the template'),
 });
 
 export const createLabRequestSchema = z.object({

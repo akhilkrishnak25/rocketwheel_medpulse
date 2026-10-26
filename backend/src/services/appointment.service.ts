@@ -742,6 +742,13 @@ export class AppointmentService {
         }
       }
 
+      const sanitizedBloodGroup =
+        patientData.bloodGroup &&
+        patientData.bloodGroup.trim() !== '' &&
+        patientData.bloodGroup.trim().toLowerCase() !== 'none'
+          ? patientData.bloodGroup.trim()
+          : null;
+
       patient = await prisma.patient.create({
         data: {
           hospitalId,
@@ -753,7 +760,7 @@ export class AppointmentService {
           age: patientAge,
           gender: patientData.gender,
           address: patientData.address,
-          bloodGroup: patientData.bloodGroup,
+          bloodGroup: sanitizedBloodGroup,
           emergencyContact: patientData.emergencyContact,
         },
       });
@@ -767,6 +774,13 @@ export class AppointmentService {
         }
       }
 
+      const sanitizedBloodGroup =
+        patientData.bloodGroup &&
+        patientData.bloodGroup.trim() !== '' &&
+        patientData.bloodGroup.trim().toLowerCase() !== 'none'
+          ? patientData.bloodGroup.trim()
+          : null;
+
       patient = await prisma.patient.update({
         where: { id: patient.id },
         data: {
@@ -776,7 +790,7 @@ export class AppointmentService {
           age: patientAge !== undefined && patientAge !== null ? patientAge : patient.age,
           gender: patientData.gender || patient.gender,
           address: patientData.address || patient.address,
-          bloodGroup: patientData.bloodGroup || patient.bloodGroup,
+          bloodGroup: sanitizedBloodGroup || patient.bloodGroup || null,
           emergencyContact: patientData.emergencyContact || patient.emergencyContact,
         },
       });

@@ -135,6 +135,7 @@ export type AppointmentStatus =
   | 'CONFIRMED'
   | 'WAITING'
   | 'IN_CONSULTATION'
+  | 'DRAFT'
   | 'COMPLETED'
   | 'CANCELLED'
   | 'NO_SHOW';
@@ -362,6 +363,7 @@ export interface Appointment {
   payment?: Payment;
   digitalOp?: DigitalOP;
   prescription?: Prescription;
+  draft?: any;
   vitals?: PatientVital[];
   labRequests?: LabTestRequest[];
   assignedStaffId?: string | null;

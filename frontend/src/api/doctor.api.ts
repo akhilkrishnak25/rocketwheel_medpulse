@@ -33,8 +33,49 @@ export const doctorDashboardApi = {
         spo2?: string;
       };
       clinicalNotes?: string;
+      sendToPharmacy?: boolean;
+      pharmacyId?: string | null;
     }
   ) => api.post(`/doctor/appointments/${appointmentId}/complete`, data),
+
+  saveDraftConsultation: (
+    appointmentId: string,
+    data: {
+      diagnosis?: string;
+      medicines?: Array<{
+        name?: string;
+        dosage?: string;
+        frequency?: string;
+        duration?: string;
+        instructions?: string;
+        priority?: number | null;
+        isSubstituted?: boolean;
+        originalMedicine?: string;
+        substitutionReason?: string;
+      }>;
+      instructions?: string;
+      followUpDate?: string;
+      symptoms?: string;
+      chiefComplaints?: string;
+      examination?: string;
+      vitals?: {
+        bp?: string;
+        pulse?: string;
+        temperature?: string;
+        weight?: string;
+        spo2?: string;
+      };
+      clinicalNotes?: string;
+      sendToPharmacy?: boolean;
+      pharmacyId?: string | null;
+      labRequests?: any[];
+    }
+  ) => api.post(`/doctor/appointments/${appointmentId}/draft`, data),
+
+  saveConsultationChanges: (
+    appointmentId: string,
+    data: any
+  ) => api.post(`/doctor/appointments/${appointmentId}/draft`, data),
 
   getPrescription: (appointmentId: string) =>
     api.get<any>(`/doctor/appointments/${appointmentId}/prescription`),
@@ -74,6 +115,27 @@ export const doctorDashboardApi = {
   updateTemplate: (templateId: string, data: any) => api.patch<any>(`/doctor/templates/${templateId}`, data),
 
   deleteTemplate: (templateId: string) => api.delete<any>(`/doctor/templates/${templateId}`),
+
+  // Disease-Based Diagnostic Lab Test Templates
+  getLabTemplates: (search?: string) =>
+    api.get<any[]>(`/doctor/lab-templates${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+
+  createLabTemplate: (data: {
+    diseaseName: string;
+    description?: string;
+    labTests: Array<{ name: string; code?: string; category?: string; price?: number; notes?: string }>;
+  }) => api.post<any>('/doctor/lab-templates', data),
+
+  updateLabTemplate: (
+    templateId: string,
+    data: {
+      diseaseName?: string;
+      description?: string;
+      labTests?: Array<{ name: string; code?: string; category?: string; price?: number; notes?: string }>;
+    }
+  ) => api.patch<any>(`/doctor/lab-templates/${templateId}`, data),
+
+  deleteLabTemplate: (templateId: string) => api.delete<any>(`/doctor/lab-templates/${templateId}`),
 
   // Lab Test Requests
   createLabRequest: (data: any) => api.post<any>('/doctor/lab-requests', data),

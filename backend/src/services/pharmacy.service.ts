@@ -310,6 +310,10 @@ export class PharmacyService {
     const labTestsList: Array<{ name: string; status: string; category?: string }> = [];
     if (rx.appointment?.labRequests && rx.appointment.labRequests.length > 0) {
       for (const req of rx.appointment.labRequests) {
+        const reqStatus = (req.status || '').toUpperCase().trim();
+        if (reqStatus === 'CANCELLED' || reqStatus === 'CANCELED' || reqStatus === 'REJECTED') {
+          continue;
+        }
         let tList: any[] = [];
         try {
           tList = JSON.parse(req.tests || '[]');
@@ -317,6 +321,10 @@ export class PharmacyService {
           tList = [{ name: req.tests }];
         }
         for (const t of tList) {
+          const testStatus = (t.status || req.status || '').toUpperCase().trim();
+          if (testStatus === 'CANCELLED' || testStatus === 'CANCELED' || testStatus === 'REJECTED') {
+            continue;
+          }
           labTestsList.push({
             name: t.name || 'Diagnostic Test',
             status: req.status || 'PENDING',

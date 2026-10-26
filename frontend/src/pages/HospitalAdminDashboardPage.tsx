@@ -352,7 +352,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
   const [offlineEmail, setOfflineEmail] = useState('');
   const [offlineAge, setOfflineAge] = useState<number | ''>('');
   const [offlineGender, setOfflineGender] = useState('MALE');
-  const [offlineBloodGroup, setOfflineBloodGroup] = useState('O+');
+  const [offlineBloodGroup, setOfflineBloodGroup] = useState('');
   const [offlineAddress, setOfflineAddress] = useState('');
   const [offlineEmergencyContact, setOfflineEmergencyContact] = useState('');
   const [offlineFee, setOfflineFee] = useState<number>(500);
@@ -1162,6 +1162,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                 setCreatedOfflineBooking(null);
                 setOfflineDoctorId(doctors?.[0]?.id || '');
                 setOfflineFee(doctors?.[0]?.consultationFee || 500);
+                setOfflineBloodGroup('');
                 setIsOfflineBookingOpen(true);
               }}
               className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm"
@@ -1570,7 +1571,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                       <td className="px-5 py-4">
                         <div className="font-bold text-slate-900">{apt.patient.fullName}</div>
                         <div className="text-[11px] text-slate-500">+91 {apt.patient.mobileNumber}</div>
-                        <div className="text-[10px] text-slate-400">{apt.patient.bloodGroup || 'Blood: N/A'}</div>
+                        <div className="text-[10px] text-slate-400">{apt.patient.bloodGroup ? `Blood: ${apt.patient.bloodGroup}` : 'Blood: Not specified'}</div>
                       </td>
                       <td className="px-5 py-4">
                         <div className="font-semibold text-slate-900">{apt.doctor.name}</div>
@@ -2142,7 +2143,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
                       </td>
                       <td className="px-5 py-3.5">
                         <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 font-bold text-[10px]">
-                          {p.bloodGroup || 'Unknown'}
+                          {p.bloodGroup || 'Not specified'}
                         </span>
                       </td>
                       <td className="px-5 py-3.5 font-mono text-[11px] text-slate-400">
@@ -4239,6 +4240,12 @@ Dr. Vikram Verma,vikram.verma@hospital.org,Consultant Physician,MBBS MD,${c2},8,
                   return;
                 }
                 const selectedDoc = doctors?.find((d) => d.id === offlineDoctorId);
+                const sanitizedBloodGroup =
+                  offlineBloodGroup &&
+                  offlineBloodGroup !== 'None' &&
+                  offlineBloodGroup.trim() !== ''
+                    ? offlineBloodGroup.trim()
+                    : null;
                 createOfflineBookingMutation.mutate({
                   doctorId: offlineDoctorId,
                   departmentId: selectedDoc?.departmentId,
@@ -4249,7 +4256,7 @@ Dr. Vikram Verma,vikram.verma@hospital.org,Consultant Physician,MBBS MD,${c2},8,
                     email: offlineEmail.trim() || undefined,
                     age: offlineAge ? Number(offlineAge) : undefined,
                     gender: offlineGender,
-                    bloodGroup: offlineBloodGroup,
+                    bloodGroup: sanitizedBloodGroup,
                     address: offlineAddress.trim() || undefined,
                     emergencyContact: offlineEmergencyContact.trim() || undefined,
                   },
@@ -4341,12 +4348,16 @@ Dr. Vikram Verma,vikram.verma@hospital.org,Consultant Physician,MBBS MD,${c2},8,
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Blood Group</label>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Blood Group <span className="text-slate-400 font-normal">(Optional)</span>
+                  </label>
                   <select
                     value={offlineBloodGroup}
                     onChange={(e) => setOfflineBloodGroup(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white"
                   >
+                    <option value="">None / Not Specified</option>
+                    <option value="None">None</option>
                     <option value="A+">A+</option>
                     <option value="A-">A-</option>
                     <option value="B+">B+</option>
@@ -4465,7 +4476,7 @@ Dr. Vikram Verma,vikram.verma@hospital.org,Consultant Physician,MBBS MD,${c2},8,
                 </div>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">Blood Group</span>
-                  <span className="font-bold text-rose-600">{patientDetails.bloodGroup || 'Unknown'}</span>
+                  <span className="font-bold text-rose-600">{patientDetails.bloodGroup || 'Not specified'}</span>
                 </div>
               </div>
 

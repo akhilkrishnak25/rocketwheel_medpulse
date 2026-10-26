@@ -212,7 +212,7 @@ export const AppointmentConfirmationPage: React.FC = () => {
               </div>
               <div className="flex justify-between py-1">
                 <span className="text-slate-500">Blood Group:</span>
-                <span className="font-bold text-slate-900">{appointment.patient.bloodGroup || 'N/A'}</span>
+                <span className="font-bold text-slate-900">{appointment.patient.bloodGroup || 'Not specified'}</span>
               </div>
             </div>
 

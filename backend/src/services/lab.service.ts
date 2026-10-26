@@ -21,6 +21,12 @@ export class LabService {
       }
     }
 
+    where.NOT = {
+      appointment: {
+        status: 'DRAFT',
+      },
+    };
+
     const requests = await prisma.labTestRequest.findMany({
       where,
       include: {
@@ -67,10 +73,13 @@ export class LabService {
   ) {
     const request = await prisma.labTestRequest.findFirst({
       where: { id: requestId, labId },
-      include: { patient: true },
+      include: { patient: true, appointment: true },
     });
     if (!request) {
       throw new Error('Diagnostic requisition not found for this laboratory.');
+    }
+    if (request.appointment && request.appointment.status === 'DRAFT') {
+      throw new Error('Cannot process laboratory requisition for an OP consultation that is currently in draft.');
     }
 
     const upper = (rawStatus || '').toUpperCase().trim();

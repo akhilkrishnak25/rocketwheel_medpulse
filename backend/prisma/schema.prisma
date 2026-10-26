@@ -162,7 +162,9 @@ model Doctor {
   reviews               Review[]
   prescriptions         Prescription[]
   prescriptionTemplates PrescriptionTemplate[]
+  labTestTemplates      LabTestTemplate[]
   labRequests           LabTestRequest[]
+  consultationDrafts    ConsultationDraft[]
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
 }
@@ -212,6 +214,7 @@ model Patient {
   vitals           PatientVital[]
   prescriptions    Prescription[]
   labRequests      LabTestRequest[]
+  consultationDrafts ConsultationDraft[]
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
@@ -245,6 +248,7 @@ model Appointment {
   digitalOp          DigitalOP?
   prescription       Prescription?
   medicalRecord      MedicalRecord?
+  draft              ConsultationDraft?
   appointmentSlot    AppointmentSlot?
   vitals             PatientVital[]
   labRequests        LabTestRequest[]
@@ -347,6 +351,19 @@ model PrescriptionTemplate {
   instructions String? 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@index([doctorId])
+}
+
+model LabTestTemplate {
+  id          String   @id @default(uuid())
+  doctorId    String
+  doctor      Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  diseaseName String   // e.g. "Dengue Fever", "Diabetes Mellitus Workup", "Thyroid Profile"
+  description String?  // Optional clinical notes or indications
+  labTests    String   // JSON array of [{ name: string, code?: string, category?: string, price?: number, notes?: string }]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([doctorId])
 }
@@ -591,4 +608,30 @@ model StoredFile {
   createdAt DateTime @default(now())
 
   @@index([filename])
+}
+
+model ConsultationDraft {
+  id              String       @id @default(uuid())
+  appointmentId   String       @unique
+  appointment     Appointment  @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  doctorId        String
+  doctor          Doctor       @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  patientId       String
+  patient         Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  chiefComplaints String?
+  examination     String?
+  diagnosis       String?
+  vitals          String?      // JSON string of { bp, pulse, temperature, weight, spo2 }
+  medicines       String?      // JSON string of medicines array
+  clinicalNotes   String?      // Clinical notes & lifestyle advice
+  followUpDate    String?
+  sendToPharmacy  Boolean      @default(false)
+  pharmacyId      String?
+  labRequests     String?      // JSON string of requested laboratory tests
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([appointmentId])
+  @@index([doctorId])
+  @@index([patientId])
 }

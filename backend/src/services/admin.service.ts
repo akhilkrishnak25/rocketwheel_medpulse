@@ -52,7 +52,7 @@ export class AdminService {
         where: { hospitalId },
       }),
       prisma.appointment.findMany({
-        where: { hospitalId, status: { in: ['CONFIRMED', 'COMPLETED', 'WAITING', 'IN_CONSULTATION'] } },
+        where: { hospitalId, status: { in: ['CONFIRMED', 'COMPLETED', 'WAITING', 'IN_CONSULTATION', 'DRAFT'] } },
         select: { totalAmount: true, appointmentDate: true },
       }),
       prisma.notification.findMany({
@@ -1696,6 +1696,11 @@ export class AdminService {
         { hospitalId },
         { doctor: { hospitalId } },
       ],
+      NOT: {
+        appointment: {
+          status: 'DRAFT',
+        },
+      },
     };
 
     if (date) {
@@ -1827,7 +1832,7 @@ export class AdminService {
       { metric: 'Total Appointments on Record', value: appointments.length },
       { metric: 'Today\'s OP Bookings', value: appointments.filter((a) => a.appointmentDate === today).length },
       { metric: 'Completed Consultations', value: appointments.filter((a) => a.status === 'COMPLETED').length },
-      { metric: 'Waiting / In-Consultation', value: appointments.filter((a) => ['WAITING', 'IN_CONSULTATION', 'CONFIRMED'].includes(a.status)).length },
+      { metric: 'Waiting / In-Consultation', value: appointments.filter((a) => ['WAITING', 'IN_CONSULTATION', 'DRAFT', 'CONFIRMED'].includes(a.status)).length },
       { metric: 'Cancelled Bookings', value: appointments.filter((a) => a.status === 'CANCELLED').length },
       { metric: 'Total Consultation Revenue (INR)', value: `₹${totalRevenue.toLocaleString()}` },
       { metric: 'Registered Doctors Count', value: doctors.length },

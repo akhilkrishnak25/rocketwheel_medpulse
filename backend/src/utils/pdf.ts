@@ -408,7 +408,7 @@ export const generateClinicalConsultationPdf = async (data: ClinicalConsultation
       const patientName = data.patient.fullName;
       const ageText = data.patient.age ? `${data.patient.age} Yrs` : 'N/A';
       const genderText = data.patient.gender || 'Not Specified';
-      const bloodText = data.patient.bloodGroup ? `Blood: ${data.patient.bloodGroup}` : 'Blood: N/A';
+      const bloodText = data.patient.bloodGroup ? `Blood: ${data.patient.bloodGroup}` : 'Blood: Not specified';
       const patLine1 = `Age / Gender: ${ageText} / ${genderText}  |  ${bloodText}`;
       const mrnText = data.patient.patientIdNumber || 'MRN-Pending';
       const patLine2 = `MRN: ${mrnText}  |  Mobile: +91 ${data.patient.mobileNumber}`;
@@ -533,33 +533,31 @@ export const generateClinicalConsultationPdf = async (data: ClinicalConsultation
 
       // ----------------------------------------------------------------------
       // Section 5: DIAGNOSTIC INVESTIGATIONS / RADIOLOGY
+      // (Cancelled tests excluded; status column and labels completely omitted)
       // ----------------------------------------------------------------------
-      if (data.labRequests && data.labRequests.length > 0) {
+      const activeLabRequests = (data.labRequests || []).filter((req) => {
+        const s = (req.status || '').toUpperCase().trim();
+        return s !== 'CANCELLED' && s !== 'CANCELED' && s !== 'REJECTED';
+      });
+
+      if (activeLabRequests.length > 0) {
         checkPageBreak(30);
         doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold').text('DIAGNOSTIC INVESTIGATIONS / RADIOLOGY:', 40, curY);
         curY += 14;
 
-        data.labRequests.forEach((req, idx) => {
-          const statusInfo = getInvestigationStatus(req.status);
+        activeLabRequests.forEach((req, idx) => {
           const reqCategory = req.category ? ` [${req.category}]` : '';
           const nameWithCategory = `${idx + 1}. ${req.name}${reqCategory}`;
 
           doc.fontSize(8.5).font('Helvetica');
-          const nameH = doc.heightOfString(nameWithCategory, { width: 365, lineGap: 1 });
+          const nameH = doc.heightOfString(nameWithCategory, { width: 500, lineGap: 1 });
           const rowH = Math.max(nameH, 14) + 4;
 
           checkPageBreak(rowH);
 
-          // Name on left
+          // Name across width, clean test description without status badge/column/labels
           doc.fillColor('#334155').fontSize(8.5).font('Helvetica')
-             .text(nameWithCategory, 48, curY, { width: 365, lineGap: 1 });
-
-          // Clean status badge on right (NO malformed Unicode icons)
-          const badgeWidth = 110;
-          const badgeX = 445;
-          doc.roundedRect(badgeX, curY - 1, badgeWidth, 14, 2).fill(statusInfo.bgColor);
-          doc.fillColor(statusInfo.textColor).fontSize(7.5).font('Helvetica-Bold')
-             .text(statusInfo.label, badgeX, curY + 2, { width: badgeWidth, align: 'center' });
+             .text(nameWithCategory, 48, curY, { width: 500, lineGap: 1 });
 
           curY += rowH;
         });
@@ -758,7 +756,7 @@ export const generateLabReportPdf = async (report: any): Promise<Buffer> => {
       doc.fillColor('#7c3aed').fontSize(8.5).font('Helvetica-Bold').text('PATIENT IDENTIFICATION', 50, infoY + 8);
       doc.fillColor('#0f172a').fontSize(11).font('Helvetica-Bold').text(patient?.fullName || 'Patient Name', 50, infoY + 20);
       doc.fillColor('#475569').fontSize(8.5).font('Helvetica')
-        .text(`MRN: ${patient?.patientIdNumber || 'MRN-Pending'}  |  Age/Gender: ${patient?.age || 'N/A'} Y / ${patient?.gender || 'N/A'}  |  Blood: ${patient?.bloodGroup || 'N/A'}`, 50, infoY + 35)
+        .text(`MRN: ${patient?.patientIdNumber || 'MRN-Pending'}  |  Age/Gender: ${patient?.age || 'N/A'} Y / ${patient?.gender || 'N/A'}  |  Blood: ${patient?.bloodGroup || 'Not specified'}`, 50, infoY + 35)
         .text(`Contact: +91 ${patient?.mobileNumber || 'N/A'}`, 50, infoY + 48);
 
       doc.fillColor('#7c3aed').fontSize(8.5).font('Helvetica-Bold').text('REFERRING PHYSICIAN', 320, infoY + 8);
