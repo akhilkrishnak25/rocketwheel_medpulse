@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import prisma from '../config/prisma';
 import { successResponse, errorResponse } from '../utils/response';
 import { generateLabReportPdf } from '../utils/pdf';
+import { uploadToStorage, downloadFromStorage } from '../utils/storage';
 
 const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 const REPORTS_DIR = path.join(UPLOAD_ROOT, 'reports');
@@ -59,7 +60,10 @@ export class UploadController {
 
       const url = `/uploads/reports/${randomName}`;
 
-      // Persist to PostgreSQL database to survive Render ephemeral disk restarts
+      // Upload to Neon Object Storage (S3-compatible)
+      await uploadToStorage(`reports/${randomName}`, buffer, 'application/pdf');
+
+      // Persist to PostgreSQL database as backup/reference
       try {
         await prisma.storedFile.upsert({
           where: { path: url },
@@ -140,7 +144,10 @@ export class UploadController {
 
       const url = `/uploads/avatars/${randomName}`;
 
-      // Persist to PostgreSQL database to survive Render ephemeral disk restarts
+      // Upload to Neon Object Storage (S3-compatible)
+      await uploadToStorage(`avatars/${randomName}`, buffer, mimeType);
+
+      // Persist to PostgreSQL database as backup/reference
       try {
         await prisma.storedFile.upsert({
           where: { path: url },
@@ -264,6 +271,9 @@ export class UploadController {
 
       const url = `/uploads/avatars/${randomName}`;
 
+      // Upload to Neon Object Storage (S3-compatible)
+      await uploadToStorage(`avatars/${randomName}`, buffer, mimeType);
+
       // Persist to StoredFile database
       try {
         await prisma.storedFile.upsert({
@@ -377,7 +387,27 @@ export class UploadController {
         return res.sendFile(filePath);
       }
 
-      // 2. Check StoredFile in database (survives container restarts)
+      // 2. Check Neon Object Storage (S3-compatible)
+      try {
+        const s3Key = `${folder}/${filename}`;
+        const s3Buffer = await downloadFromStorage(s3Key);
+        if (s3Buffer) {
+          try {
+            const targetDir = path.join(UPLOAD_ROOT, folder);
+            if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+            fs.writeFileSync(filePath, s3Buffer);
+          } catch (e) {}
+
+          const mimeType = folder === 'reports' ? 'application/pdf' : 'image/jpeg';
+          res.setHeader('Content-Type', mimeType);
+          res.setHeader('Content-Length', s3Buffer.length);
+          return res.send(s3Buffer);
+        }
+      } catch (s3Err) {
+        console.warn('Neon storage lookup error:', s3Err);
+      }
+
+      // 3. Check StoredFile in database (survives container restarts)
       const lookupUrl = `/uploads/${folder}/${filename}`;
       const stored = await prisma.storedFile.findFirst({
         where: {

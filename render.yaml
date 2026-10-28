@@ -8,7 +8,7 @@ services:
     region: oregon
     plan: free
     rootDir: backend
-    buildCommand: cp prisma/schema.postgresql.prisma prisma/schema.prisma && npm ci --include=dev && npx prisma generate && npm run build
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
     startCommand: npx prisma db push && npm run seed && node dist/server.js
     healthCheckPath: /api/health
     envVars:
@@ -17,7 +17,9 @@ services:
       - key: PORT
         value: 5000
       - key: DATABASE_URL
-        value: postgresql://rocketwheel_op_user:0YYh9BNKP8iDBxoMbGVXfPqCN8bnNJZQ@dpg-dasjahojo6nc73c1n0cg-a.oregon-postgres.render.com/rocketwheel_op
+        sync: false   # Set this manually in Render Dashboard → Environment → DATABASE_URL
+      - key: DIRECT_URL
+        sync: false   # Set this manually in Render Dashboard → Environment → DIRECT_URL
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET

@@ -14,6 +14,7 @@
     "test:registrations": "tsx src/tests/test_http_registrations.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1158.0",
     "@prisma/client": "^6.4.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
