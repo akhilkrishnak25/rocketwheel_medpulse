@@ -10,6 +10,8 @@ router.use(authenticate, requireRole(['PHARMACY_STAFF', 'HOSPITAL_ADMIN', 'HOSPI
 router.get('/prescriptions', PharmacyController.getPrescriptions);
 router.patch('/prescriptions/:prescriptionId/status', PharmacyController.updateStatus);
 router.patch('/prescriptions/:prescriptionId/replace-medicine', PharmacyController.replaceMedicine);
+router.delete('/prescriptions/:prescriptionId/medicines/:medicineIndex', PharmacyController.deleteMedicine);
+router.delete('/prescriptions/:prescriptionId/medicines', PharmacyController.deleteMedicine);
 router.get('/prescriptions/:prescriptionId/pdf', PharmacyController.downloadPrescriptionPdf);
 
 export default router;

@@ -38,6 +38,8 @@ router.get('/lab-requests', DoctorDashboardController.getLabRequests);
 // Doctor Profile & Analytics
 router.get('/profile', DoctorDashboardController.getProfile);
 router.patch('/profile', DoctorDashboardController.updateProfile);
+router.get('/branding', DoctorDashboardController.getBranding);
+router.put('/branding', DoctorDashboardController.updateBranding);
 router.get('/stats', DoctorDashboardController.getStats);
 
 // Weekly Schedules & Leaves

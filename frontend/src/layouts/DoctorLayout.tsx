@@ -11,6 +11,7 @@ import {
   Menu,
   Stethoscope,
   UserCog,
+  FileImage,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/Button';
@@ -27,7 +28,7 @@ export const DoctorLayout: React.FC = () => {
   useEffect(() => {
     const syncTab = () => {
       const hash = window.location.hash.replace('#', '').toLowerCase();
-      if (['queue', 'templates', 'labs', 'roster', 'leaves', 'profile'].includes(hash)) {
+      if (['queue', 'templates', 'labs', 'roster', 'leaves', 'profile', 'branding'].includes(hash)) {
         setCurrentTab(hash);
       } else {
         setCurrentTab('queue');
@@ -108,6 +109,12 @@ export const DoctorLayout: React.FC = () => {
       label: 'Edit Profile',
       icon: UserCog,
       color: 'text-sky-400',
+    },
+    {
+      id: 'branding',
+      label: 'Letterhead & Branding',
+      icon: FileImage,
+      color: 'text-indigo-400',
     },
   ];
 

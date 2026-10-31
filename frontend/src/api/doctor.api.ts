@@ -166,6 +166,20 @@ export const doctorDashboardApi = {
   updateAssignedStaff: (assignedStaffId: string | null) =>
     api.patch<any>('/doctor/assigned-staff', { assignedStaffId }),
 
+  // Doctor Branding (Custom Header and Footer Images)
+  getBranding: () =>
+    api.get<{
+      doctorId: string;
+      doctorName: string;
+      headerImageUrl: string | null;
+      footerImageUrl: string | null;
+      hospitalBranding: any | null;
+      hospitalName: string;
+    }>('/doctor/branding'),
+
+  updateBranding: (data: { headerImageUrl?: string | null; footerImageUrl?: string | null }) =>
+    api.put<any>('/doctor/branding', data),
+
   // Export All Doctor Data to Excel (.xlsx)
   exportAllDataExcel: async (params?: { status?: string }): Promise<Blob> => {
     const token =

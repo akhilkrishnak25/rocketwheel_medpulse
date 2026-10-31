@@ -49,6 +49,7 @@ import { useToast } from '../components/ui/Toast';
 import { InlineSpinner } from '../components/ui/Loading';
 import { Appointment } from '../types';
 import { DoctorEditProfileSection } from '../components/DoctorEditProfileSection';
+import { DoctorLetterheadBrandingSection } from '../components/DoctorLetterheadBrandingSection';
 import {
   formatBP,
   formatSystolicDiastolicBP,
@@ -84,17 +85,17 @@ export const DoctorDashboardPage: React.FC = () => {
   const [isUnsavedWarningOpen, setIsUnsavedWarningOpen] = useState(false);
   const [pendingSwitchAppointment, setPendingSwitchAppointment] = useState<Appointment | null>(null);
   const lastSavedSnapshotRef = useRef<string>('');
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'unsaved' | 'saving' | 'saved' | 'error'>('idle');
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isRestoringDraftRef = useRef(false);
 
-  const [activeTab, setActiveTab] = useState<'queue' | 'templates' | 'labs' | 'roster' | 'leaves' | 'profile'>('queue');
+  const [activeTab, setActiveTab] = useState<'queue' | 'templates' | 'labs' | 'roster' | 'leaves' | 'profile' | 'branding'>('queue');
 
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '').toLowerCase();
-      if (['queue', 'templates', 'labs', 'roster', 'leaves', 'profile'].includes(hash)) {
+      if (['queue', 'templates', 'labs', 'roster', 'leaves', 'profile', 'branding'].includes(hash)) {
         setActiveTab(hash as any);
       }
     };
@@ -876,7 +877,30 @@ export const DoctorDashboardPage: React.FC = () => {
     });
   };
 
-  // Automatic debounced draft persistence for active consultation encounter
+  // Helper to check if the consultation contains any entered clinical data
+  const hasEnteredConsultationData = () => {
+    if ((diagnosis || '').trim().length > 0) return true;
+    if ((chiefComplaints || '').trim().length > 0) return true;
+    if ((symptoms || '').trim().length > 0) return true;
+    if ((examination || '').trim().length > 0) return true;
+    if ((clinicalNotes || '').trim().length > 0) return true;
+    if ((followUpDate || '').trim().length > 0) return true;
+    if (
+      (vitals.bp || '').trim().length > 0 ||
+      (vitals.pulse || '').trim().length > 0 ||
+      (vitals.temperature || '').trim().length > 0 ||
+      (vitals.weight || '').trim().length > 0 ||
+      (vitals.spo2 || '').trim().length > 0
+    ) {
+      return true;
+    }
+    if ((medicines || []).some((m) => m.name && m.name.trim().length > 0)) {
+      return true;
+    }
+    return false;
+  };
+
+  // Automatic debounced draft persistence for active consultation encounter (30-second inactivity rule)
   useEffect(() => {
     if (!isConsultModalOpen || !activeAppointment || isRestoringDraftRef.current) {
       return;
@@ -887,17 +911,60 @@ export const DoctorDashboardPage: React.FC = () => {
 
     const currentSnapshot = getFormSnapshot();
     if (currentSnapshot === lastSavedSnapshotRef.current) {
+      // Form matches the last saved state
+      if (saveStatus === 'unsaved') {
+        setSaveStatus(lastSavedTime ? 'saved' : 'idle');
+      }
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
       return;
     }
 
-    setSaveStatus('saving');
+    // Auto-save only when the consultation contains data and has unsaved changes
+    if (!hasEnteredConsultationData()) {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+      return;
+    }
+
+    // There are unsaved changes. Do NOT trigger auto-save immediately.
+    // Display 'unsaved' state and reset the 30-second inactivity timer.
+    setSaveStatus('unsaved');
 
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current);
     }
 
+    const currentApptId = activeAppointment.id;
+
+    // Wait until the doctor stops typing for 30 seconds before triggering auto-save
     autoSaveTimerRef.current = setTimeout(() => {
-      if (!isConsultModalOpen || !activeAppointment) return;
+      // Ensure the consultation modal is still open and for the exact same OP
+      if (!isConsultModalOpen || !activeAppointment || activeAppointment.id !== currentApptId) {
+        return;
+      }
+
+      // Prevent duplicate or overlapping save requests
+      if (saveDraftMutation.isPending) {
+        return;
+      }
+
+      const latestSnapshot = getFormSnapshot();
+      if (latestSnapshot === lastSavedSnapshotRef.current) {
+        setSaveStatus('saved');
+        return;
+      }
+
+      if (!hasEnteredConsultationData()) {
+        return;
+      }
+
+      // Trigger auto-save after 30 seconds of typing inactivity
+      setSaveStatus('saving');
 
       const payload = {
         diagnosis: diagnosis.trim() || undefined,
@@ -914,26 +981,28 @@ export const DoctorDashboardPage: React.FC = () => {
           weight: vitals.weight.trim() || undefined,
           spo2: vitals.spo2.trim() || undefined,
         },
-        medicines: medicines.map((m, idx) => ({
-          name: m.name.trim(),
-          dosage: m.dosage.trim() || '1 tablet',
-          frequency: m.frequency.trim() || 'TDS (Thrice daily)',
-          duration: m.duration.trim() || '5 days',
-          instructions: m.instructions.trim() || 'After food',
-          priority: typeof m.priority === 'number' && m.priority > 0 ? m.priority : idx + 1,
-          isSubstituted: m.isSubstituted,
-          originalMedicine: m.originalMedicine,
-          substitutionReason: m.substitutionReason,
-        })),
+        medicines: medicines
+          .filter((m) => m.name && m.name.trim().length > 0)
+          .map((m, idx) => ({
+            name: m.name.trim(),
+            dosage: m.dosage.trim() || '1 tablet',
+            frequency: m.frequency.trim() || 'TDS (Thrice daily)',
+            duration: m.duration.trim() || '5 days',
+            instructions: m.instructions.trim() || 'After food',
+            priority: typeof m.priority === 'number' && m.priority > 0 ? m.priority : idx + 1,
+            isSubstituted: m.isSubstituted,
+            originalMedicine: m.originalMedicine,
+            substitutionReason: m.substitutionReason,
+          })),
         labRequests: consultDetails?.appointment?.labRequests || [],
       };
 
       saveDraftMutation.mutate({
-        appointmentId: activeAppointment.id,
+        appointmentId: currentApptId,
         payload,
         silent: true,
       });
-    }, 1500);
+    }, 30000); // 30 seconds debounce timer
 
     return () => {
       if (autoSaveTimerRef.current) {
@@ -945,6 +1014,7 @@ export const DoctorDashboardPage: React.FC = () => {
     activeAppointment?.id,
     diagnosis,
     chiefComplaints,
+    symptoms,
     examination,
     clinicalNotes,
     followUpDate,
@@ -1547,6 +1617,7 @@ export const DoctorDashboardPage: React.FC = () => {
               {activeTab === 'roster' && "Doctor Practice Roster & Timings"}
               {activeTab === 'leaves' && "Doctor Leave & Absence Calendar"}
               {activeTab === 'profile' && "Doctor Profile & Registration Details"}
+              {activeTab === 'branding' && "Consultation Letterhead & Branding"}
             </h1>
             <Badge variant="success" className="text-[11px] font-bold">
               OPD Active
@@ -1559,6 +1630,7 @@ export const DoctorDashboardPage: React.FC = () => {
             {activeTab === 'roster' && "Configure OPD consultation schedules, slot durations, and hospital practice hours"}
             {activeTab === 'leaves' && "Submit leave requests and view upcoming duty off days"}
             {activeTab === 'profile' && "Update your personal, contact, clinical credentials, consultation settings, and account password"}
+            {activeTab === 'branding' && "Configure custom doctor header and footer banners for clinical consultation PDFs"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -2959,6 +3031,15 @@ export const DoctorDashboardPage: React.FC = () => {
         />
       )}
 
+      {/* TAB: DOCTOR LETTERHEAD & BRANDING */}
+      {activeTab === 'branding' && (
+        <DoctorLetterheadBrandingSection
+          user={user}
+          profile={profile}
+          refetchProfile={refetchProfile}
+        />
+      )}
+
       {/* APPLY LEAVE MODAL */}
       {isApplyLeaveOpen && (
         <Modal
@@ -3085,14 +3166,24 @@ export const DoctorDashboardPage: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-2">
-                {saveStatus === 'saving' ? (
-                  <span className="flex items-center gap-1.5 text-royal-600 font-medium text-[11px]">
+                {saveDraftMutation.isPending || saveStatus === 'saving' ? (
+                  <span className="flex items-center gap-1.5 text-royal-700 font-semibold text-[11px] bg-royal-50 border border-royal-200 px-2.5 py-1 rounded-lg shadow-2xs">
                     <InlineSpinner size="sm" />
-                    <span>Saving changes...</span>
+                    <span>Saving...</span>
+                  </span>
+                ) : saveStatus === 'error' ? (
+                  <span className="flex items-center gap-1.5 text-rose-700 font-semibold bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-lg text-[11px] shadow-2xs">
+                    <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Save failed</span>
+                  </span>
+                ) : saveStatus === 'unsaved' ? (
+                  <span className="flex items-center gap-1.5 text-amber-800 font-medium bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg text-[11px]" title="Auto-save will trigger 30 seconds after you stop typing">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    <span>Unsaved changes</span>
                   </span>
                 ) : lastSavedTime ? (
-                  <span className="flex items-center gap-1 text-emerald-700 font-medium bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg text-[11px]">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                  <span className="flex items-center gap-1 text-emerald-700 font-medium bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg text-[11px]">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                     <span>Saved at {lastSavedTime}</span>
                   </span>
                 ) : null}
@@ -3866,19 +3957,24 @@ export const DoctorDashboardPage: React.FC = () => {
                 {/* Live Consultation Auto-Save / Save Changes Status Indicator */}
                 <div className="text-xs">
                   {saveDraftMutation.isPending || saveStatus === 'saving' ? (
-                    <span className="flex items-center gap-1.5 text-royal-600 font-medium">
+                    <span className="flex items-center gap-1.5 text-royal-700 font-semibold bg-royal-50 border border-royal-200 px-2.5 py-1 rounded-lg">
                       <InlineSpinner size="sm" />
-                      <span>Saving changes...</span>
+                      <span>Saving...</span>
                     </span>
                   ) : saveStatus === 'error' ? (
-                    <span className="flex items-center gap-1.5 text-rose-600 font-medium">
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      <span>Auto-save failed. Click Save Changes</span>
+                    <span className="flex items-center gap-1.5 text-rose-700 font-semibold bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-lg text-[11px]">
+                      <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                      <span>Save failed</span>
+                    </span>
+                  ) : saveStatus === 'unsaved' ? (
+                    <span className="flex items-center gap-1.5 text-amber-800 font-medium bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg text-[11px]" title="Auto-save will trigger 30 seconds after you stop typing">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                      <span>Unsaved changes (auto-saving in 30s)</span>
                     </span>
                   ) : lastSavedTime ? (
                     <span className="flex items-center gap-1.5 text-emerald-700 font-medium bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg text-[11px]">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Changes saved at {lastSavedTime}</span>
+                      <span>Saved at {lastSavedTime}</span>
                     </span>
                   ) : null}
                 </div>

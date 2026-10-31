@@ -323,6 +323,112 @@ export class UploadController {
     }
   }
 
+  static async uploadDoctorAsset(req: Request, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        return errorResponse(res, 'Authentication required', 401);
+      }
+
+      let doctorId = req.user?.doctorId;
+      if (!doctorId) {
+        const docRec = await prisma.doctor.findFirst({ where: { userId } });
+        if (docRec) doctorId = docRec.id;
+      }
+
+      if (!doctorId) {
+        return errorResponse(res, 'Doctor account not associated with this session', 403);
+      }
+
+      const { fileData, assetType = 'header' } = req.body;
+      if (!fileData) {
+        return errorResponse(res, 'Image data (base64) is required', 400);
+      }
+
+      let base64Content = fileData;
+      let extension = '.jpg';
+      let mimeType = 'image/jpeg';
+
+      if (typeof fileData === 'string' && fileData.startsWith('data:')) {
+        const matches = fileData.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
+        if (!matches || matches.length !== 3) {
+          return errorResponse(res, 'Invalid image data format. Must be PNG, JPEG, or WEBP.', 400);
+        }
+        let ext = matches[1].toLowerCase();
+        if (ext === 'jpeg') ext = 'jpg';
+        if (!['jpg', 'png', 'webp', 'svg'].includes(ext)) {
+          return errorResponse(res, 'Only JPG, PNG, and WEBP images are supported', 400);
+        }
+        extension = `.${ext}`;
+        mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+        base64Content = matches[2];
+      }
+
+      const buffer = Buffer.from(base64Content, 'base64');
+      if (buffer.length > 8 * 1024 * 1024) {
+        return errorResponse(res, 'Doctor image size exceeds 8MB limit', 400);
+      }
+
+      const randomName = `doctor-${doctorId}-${assetType}-${Date.now()}${extension}`;
+      const filePath = path.join(AVATARS_DIR, randomName);
+      try {
+        fs.writeFileSync(filePath, buffer);
+      } catch (writeErr) {
+        console.warn('Failed to write doctor image to disk:', writeErr);
+      }
+
+      const url = `/uploads/avatars/${randomName}`;
+
+      // Upload to Neon Object Storage (S3-compatible)
+      await uploadToStorage(`avatars/${randomName}`, buffer, mimeType);
+
+      // Persist to StoredFile database
+      try {
+        await prisma.storedFile.upsert({
+          where: { path: url },
+          create: {
+            path: url,
+            filename: randomName,
+            mimeType,
+            fileData: base64Content,
+            size: buffer.length,
+          },
+          update: {
+            fileData: base64Content,
+            size: buffer.length,
+          },
+        });
+      } catch (dbErr) {
+        console.warn('Could not persist doctor asset to database:', dbErr);
+      }
+
+      const updateData: any = {};
+      if (assetType === 'header') {
+        updateData.headerImageUrl = url;
+      } else if (assetType === 'footer') {
+        updateData.footerImageUrl = url;
+      }
+
+      let updatedDoctor = null;
+      if (Object.keys(updateData).length > 0) {
+        updatedDoctor = await prisma.doctor.update({
+          where: { id: doctorId },
+          data: updateData,
+          select: {
+            id: true,
+            name: true,
+            headerImageUrl: true,
+            footerImageUrl: true,
+          },
+        });
+      }
+
+      return successResponse(res, { url, doctor: updatedDoctor }, `Doctor ${assetType} image uploaded successfully`);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to upload doctor asset', 500);
+    }
+  }
+
   static async removeProfilePhoto(req: Request, res: Response) {
     try {
       const userId = req.user?.id;

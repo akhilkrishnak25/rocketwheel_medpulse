@@ -37,6 +37,10 @@ router.post('/departments', AdminController.addDepartment);
 router.get('/profile', AdminController.getHospitalProfile);
 router.patch('/profile', AdminController.updateHospitalProfile);
 
+// Hospital PDF Branding Settings
+router.get('/branding', AdminController.getHospitalBranding);
+router.put('/branding', AdminController.updateHospitalBranding);
+
 // Offline OP Bookings
 router.post('/appointments/offline', AdminController.createOfflineAppointment);
 

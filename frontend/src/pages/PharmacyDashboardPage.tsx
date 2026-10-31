@@ -17,6 +17,7 @@ import {
   Printer,
   Download,
   RefreshCw,
+  Trash2,
 } from 'lucide-react';
 import { pharmacyApi } from '../api/pharmacy.api';
 import { useAuth } from '../context/AuthContext';
@@ -106,6 +107,32 @@ export const PharmacyDashboardPage: React.FC = () => {
     },
     onError: (err: any) => {
       toast.error('Substitution Failed', err.message);
+    },
+  });
+
+  // Delete medicine from pharmacy order state
+  const [deletingRx, setDeletingRx] = useState<any | null>(null);
+  const [deletingMedicineIndex, setDeletingMedicineIndex] = useState<number | null>(null);
+  const [deletingMedicine, setDeletingMedicine] = useState<any | null>(null);
+  const [deleteReason, setDeleteReason] = useState<string>('');
+
+  // Delete medicine mutation
+  const deleteMedicineMutation = useMutation({
+    mutationFn: (data: { prescriptionId: string; medicineIndex: number; reason?: string }) =>
+      pharmacyApi.deleteMedicine(data.prescriptionId, data.medicineIndex, data.reason),
+    onSuccess: () => {
+      toast.success(
+        'Medicine Removed',
+        `Removed "${deletingMedicine?.name || 'Medicine'}" from the pharmacy dispensing list.`
+      );
+      setDeletingRx(null);
+      setDeletingMedicineIndex(null);
+      setDeletingMedicine(null);
+      setDeleteReason('');
+      queryClient.invalidateQueries({ queryKey: ['pharmacy-prescriptions'] });
+    },
+    onError: (err: any) => {
+      toast.error('Failed to Delete Medicine', err?.response?.data?.message || err.message);
     },
   });
 
@@ -434,35 +461,60 @@ export const PharmacyDashboardPage: React.FC = () => {
                                   )}
                                 </div>
 
-                                {/* Replace / Substitute Action button */}
+                                {/* Replace / Substitute & Delete Action buttons */}
                                 {status !== 'COMPLETED' && (
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="shrink-0 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-300 hover:bg-amber-100 shadow-2xs py-1 px-2 h-auto"
-                                    onClick={() => {
-                                      const rawIndex = rawMeds.findIndex(
-                                        (rm: any) =>
-                                          rm.name === m.name &&
-                                          rm.dosage === m.dosage &&
-                                          rm.priority === m.priority
-                                      );
-                                      const targetIdx = rawIndex !== -1 ? rawIndex : i;
-                                      setSubstitutingRx(rx);
-                                      setSubstitutingMedicineIndex(targetIdx);
-                                      setSubstitutingMedicine(m);
-                                      setReplacementName(m.isSubstituted ? m.name : '');
-                                      setReplacementDosage(m.dosage || '1 tablet');
-                                      setReplacementFrequency(m.frequency || '1-0-1');
-                                      setReplacementDuration(m.duration || '5 days');
-                                      setReplacementInstructions(m.instructions || 'After food');
-                                      setSubstitutionReason(m.substitutionReason || '');
-                                      setDoctorApproved(true);
-                                    }}
-                                  >
-                                    <RefreshCw className="w-3 h-3 mr-1 text-amber-600" />
-                                    {isSub ? 'Edit Substitution' : 'Out of Stock / Replace'}
-                                  </Button>
+                                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap sm:flex-nowrap justify-end">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-300 hover:bg-amber-100 shadow-2xs py-1 px-2 h-auto"
+                                      onClick={() => {
+                                        const rawIndex = rawMeds.findIndex(
+                                          (rm: any) =>
+                                            rm.name === m.name &&
+                                            rm.dosage === m.dosage &&
+                                            rm.priority === m.priority
+                                        );
+                                        const targetIdx = rawIndex !== -1 ? rawIndex : i;
+                                        setSubstitutingRx(rx);
+                                        setSubstitutingMedicineIndex(targetIdx);
+                                        setSubstitutingMedicine(m);
+                                        setReplacementName(m.isSubstituted ? m.name : '');
+                                        setReplacementDosage(m.dosage || '1 tablet');
+                                        setReplacementFrequency(m.frequency || '1-0-1');
+                                        setReplacementDuration(m.duration || '5 days');
+                                        setReplacementInstructions(m.instructions || 'After food');
+                                        setSubstitutionReason(m.substitutionReason || '');
+                                        setDoctorApproved(true);
+                                      }}
+                                    >
+                                      <RefreshCw className="w-3 h-3 mr-1 text-amber-600" />
+                                      {isSub ? 'Edit Substitution' : 'Out of Stock / Replace'}
+                                    </Button>
+
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 hover:text-rose-900 shadow-2xs py-1 px-2 h-auto"
+                                      onClick={() => {
+                                        const rawIndex = rawMeds.findIndex(
+                                          (rm: any) =>
+                                            rm.name === m.name &&
+                                            rm.dosage === m.dosage &&
+                                            rm.priority === m.priority
+                                        );
+                                        const targetIdx = rawIndex !== -1 ? rawIndex : i;
+                                        setDeletingRx(rx);
+                                        setDeletingMedicineIndex(targetIdx);
+                                        setDeletingMedicine(m);
+                                        setDeleteReason('');
+                                      }}
+                                      title="Remove this medicine from pharmacy dispensing list (preserves doctor's original record)"
+                                    >
+                                      <Trash2 className="w-3 h-3 mr-1 text-rose-600" />
+                                      Delete
+                                    </Button>
+                                  </div>
                                 )}
                               </div>
                             </div>
@@ -734,6 +786,77 @@ export const PharmacyDashboardPage: React.FC = () => {
               </Button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* DELETE MEDICINE CONFIRMATION MODAL */}
+      {deletingRx && deletingMedicine && deletingMedicineIndex !== null && (
+        <Modal
+          isOpen={true}
+          onClose={() => !deleteMedicineMutation.isPending && setDeletingRx(null)}
+          title="Remove Medicine from Pharmacy Order"
+          maxWidth="md"
+        >
+          <div className="space-y-4">
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">Original Consultation Record Protected</p>
+                <p className="text-[11px] text-amber-800 mt-0.5">
+                  Removing this medicine will omit it from this pharmacy order and dispensing slip. The doctor's original clinical consultation record and diagnosis will remain unchanged.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Selected Medicine</span>
+              <p className="text-sm font-bold text-slate-900">{deletingMedicine.name}</p>
+              <p className="text-xs text-slate-600">
+                Dosage: <strong>{deletingMedicine.dosage}</strong> • Freq: <strong>{deletingMedicine.frequency}</strong> • Duration: <strong>{deletingMedicine.duration}</strong>
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Reason for Removal (Optional)
+              </label>
+              <input
+                type="text"
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                placeholder="e.g. Discontinued by patient / Not stocked in facility / Advised by physician"
+                className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setDeletingRx(null)}
+                disabled={deleteMedicineMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
+                isLoading={deleteMedicineMutation.isPending}
+                onClick={() => {
+                  deleteMedicineMutation.mutate({
+                    prescriptionId: deletingRx.id,
+                    medicineIndex: deletingMedicineIndex,
+                    reason: deleteReason,
+                  });
+                }}
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                Confirm & Remove Medicine
+              </Button>
+            </div>
+          </div>
         </Modal>
       )}
     </div>

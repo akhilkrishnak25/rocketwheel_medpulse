@@ -165,6 +165,102 @@ export class LabController {
   }
 
   // -------------------------------------------------------------
+  // BULK IMPORT & EXPORT OF LAB TESTS (MASTER CATALOG)
+  // -------------------------------------------------------------
+  static async downloadSampleTemplate(req: Request, res: Response) {
+    try {
+      const format = (req.query.format as string) === 'csv' ? 'csv' : 'xlsx';
+      const file = await LabService.generateSampleTemplate(format);
+
+      res.setHeader('Content-Type', file.contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+      return res.send(file.buffer);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to generate sample template', 500);
+    }
+  }
+
+  static async previewImportTests(req: Request, res: Response) {
+    try {
+      const labId = await LabService.resolveLabForUser(req.user);
+      const { fileData, fileName, rows: directRows } = req.body;
+
+      let rowsToValidate: any[] = [];
+
+      if (Array.isArray(directRows) && directRows.length > 0) {
+        rowsToValidate = directRows;
+      } else if (fileData) {
+        let base64Content = fileData;
+        if (typeof fileData === 'string' && fileData.startsWith('data:')) {
+          const parts = fileData.split(',');
+          base64Content = parts[1] || parts[0];
+        }
+        const buffer = Buffer.from(base64Content, 'base64');
+        rowsToValidate = await LabService.parseUploadedLabTestFile(buffer, fileName || 'upload.xlsx');
+      } else {
+        return errorResponse(res, 'File data or rows array is required for preview', 400);
+      }
+
+      if (rowsToValidate.length === 0) {
+        return errorResponse(res, 'No data rows found in the uploaded file.', 400);
+      }
+
+      const preview = await LabService.validateAndPreviewImport(labId, rowsToValidate);
+      return successResponse(res, preview, 'Lab test import preview generated');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to validate lab tests', 400);
+    }
+  }
+
+  static async importTests(req: Request, res: Response) {
+    try {
+      const labId = await LabService.resolveLabForUser(req.user);
+      const { tests } = req.body;
+
+      if (!Array.isArray(tests) || tests.length === 0) {
+        return errorResponse(res, 'Please provide an array of validated tests to import', 400);
+      }
+
+      const result = await LabService.importLabTests(labId, tests, req.user?.id);
+      return successResponse(res, result, `Successfully imported ${result.importedCount} lab test(s) into catalog`, 201);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to import lab tests', 400);
+    }
+  }
+
+  static async exportTests(req: Request, res: Response) {
+    try {
+      const labId = await LabService.resolveLabForUser(req.user);
+      const format = (req.query.format as string) === 'csv' ? 'csv' : 'xlsx';
+      const category = req.query.category as string | undefined;
+      const department = req.query.department as string | undefined;
+      const status = req.query.status as string | undefined;
+      const search = req.query.search as string | undefined;
+      let testIds: string[] | undefined;
+
+      if (req.query.testIds) {
+        if (Array.isArray(req.query.testIds)) {
+          testIds = req.query.testIds as string[];
+        } else if (typeof req.query.testIds === 'string') {
+          testIds = (req.query.testIds as string).split(',').map((id) => id.trim()).filter(Boolean);
+        }
+      }
+
+      const file = await LabService.exportLabTests(
+        labId,
+        { category, department, status, search, testIds },
+        format
+      );
+
+      res.setHeader('Content-Type', file.contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+      return res.send(file.buffer);
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to export lab tests', 500);
+    }
+  }
+
+  // -------------------------------------------------------------
   // PUBLIC & CUSTOMER-FACING ENDPOINTS
   // -------------------------------------------------------------
   static async getActiveLabs(req: Request, res: Response) {

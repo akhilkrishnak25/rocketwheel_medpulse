@@ -251,6 +251,13 @@ export const doctorOwnProfileUpdateSchema = z.object({
   breakStart: z.string().optional().nullable(),
   breakEnd: z.string().optional().nullable(),
   photoUrl: z.string().optional().nullable().or(z.literal('')),
+  headerImageUrl: z.string().optional().nullable().or(z.literal('')),
+  footerImageUrl: z.string().optional().nullable().or(z.literal('')),
+});
+
+export const doctorBrandingUpdateSchema = z.object({
+  headerImageUrl: z.string().optional().nullable().or(z.literal('')),
+  footerImageUrl: z.string().optional().nullable().or(z.literal('')),
 });
 
 export const updateDoctorSchema = z.object({

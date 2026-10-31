@@ -177,6 +177,8 @@ export class DoctorDashboardService {
         data: {
           name: data.name !== undefined ? data.name.trim() : existing.name,
           photoUrl: data.photoUrl !== undefined ? (data.photoUrl ? data.photoUrl.trim() : null) : existing.photoUrl,
+          headerImageUrl: data.headerImageUrl !== undefined ? (data.headerImageUrl ? data.headerImageUrl.trim() : null) : existing.headerImageUrl,
+          footerImageUrl: data.footerImageUrl !== undefined ? (data.footerImageUrl ? data.footerImageUrl.trim() : null) : existing.footerImageUrl,
           qualification: data.qualification !== undefined ? data.qualification.trim() : existing.qualification,
           specialization: data.specialization !== undefined ? data.specialization.trim() : existing.specialization,
           experienceYears: data.experienceYears !== undefined ? Number(data.experienceYears) : existing.experienceYears,
@@ -214,6 +216,106 @@ export class DoctorDashboardService {
     });
 
     return updated;
+  }
+
+  static async getDoctorBranding(doctorId: string) {
+    const doc = await prisma.doctor.findUnique({
+      where: { id: doctorId },
+      select: {
+        id: true,
+        name: true,
+        qualification: true,
+        specialization: true,
+        headerImageUrl: true,
+        footerImageUrl: true,
+        hospital: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            city: true,
+            phone: true,
+            email: true,
+            branding: true,
+          },
+        },
+      },
+    });
+    if (!doc) throw new Error('Doctor not found');
+
+    return {
+      doctorId: doc.id,
+      doctorName: doc.name,
+      headerImageUrl: doc.headerImageUrl || null,
+      footerImageUrl: doc.footerImageUrl || null,
+      hospitalBranding: doc.hospital?.branding || null,
+      hospitalName: doc.hospital?.name || '',
+    };
+  }
+
+  static async updateDoctorBranding(
+    doctorId: string,
+    data: { headerImageUrl?: string | null; footerImageUrl?: string | null },
+    requestingUserId?: string
+  ) {
+    const doc = await prisma.doctor.findUnique({
+      where: { id: doctorId },
+      select: { id: true, userId: true },
+    });
+    if (!doc) throw new Error('Doctor not found');
+    if (requestingUserId && doc.userId && doc.userId !== requestingUserId) {
+      throw new Error('Unauthorized: You can only configure your own letterhead branding');
+    }
+
+    const updateData: any = {};
+    if (data.headerImageUrl !== undefined) {
+      updateData.headerImageUrl = data.headerImageUrl ? data.headerImageUrl.trim() : null;
+    }
+    if (data.footerImageUrl !== undefined) {
+      updateData.footerImageUrl = data.footerImageUrl ? data.footerImageUrl.trim() : null;
+    }
+
+    const updated = await prisma.doctor.update({
+      where: { id: doctorId },
+      data: updateData,
+      select: {
+        id: true,
+        name: true,
+        headerImageUrl: true,
+        footerImageUrl: true,
+        hospital: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            city: true,
+            phone: true,
+            email: true,
+            branding: true,
+          },
+        },
+      },
+    });
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'UPDATE_DOCTOR_PDF_BRANDING',
+      entity: 'Doctor',
+      entityId: doctorId,
+      details: {
+        hasHeaderImage: !!updated.headerImageUrl,
+        hasFooterImage: !!updated.footerImageUrl,
+      },
+    });
+
+    return {
+      doctorId: updated.id,
+      doctorName: updated.name,
+      headerImageUrl: updated.headerImageUrl || null,
+      footerImageUrl: updated.footerImageUrl || null,
+      hospitalBranding: updated.hospital?.branding || null,
+      hospitalName: updated.hospital?.name || '',
+    };
   }
 
   static async getDoctorSchedules(doctorId: string) {
@@ -1295,6 +1397,7 @@ export class DoctorDashboardService {
       consultationDate: apt.appointmentDate,
       tokenNumber: apt.tokenNumber,
       letterheadHeight: (apt.hospital as any)?.letterheadHeight || 144,
+      branding: (apt.hospital as any)?.branding || null,
       hospital: {
         name: apt.hospital.name,
         address: apt.hospital.address,
@@ -1307,6 +1410,8 @@ export class DoctorDashboardService {
         qualification: apt.doctor.qualification,
         specialization: apt.doctor.specialization,
         department: apt.doctor.department?.name,
+        headerImageUrl: (apt.doctor as any)?.headerImageUrl || null,
+        footerImageUrl: (apt.doctor as any)?.footerImageUrl || null,
       },
       patient: {
         fullName: apt.patient.fullName,

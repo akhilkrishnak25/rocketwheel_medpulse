@@ -15,6 +15,13 @@ router.post('/requests/:requestId/report', LabController.submitReport);
 // Test Catalog & Price Management (CRUD)
 router.get('/tests', LabController.getTests);
 router.post('/tests', LabController.createTest);
+
+// Bulk Import & Export of Master Lab Tests (Must be registered before :testId)
+router.get('/tests/sample-template', LabController.downloadSampleTemplate);
+router.post('/tests/import-preview', LabController.previewImportTests);
+router.post('/tests/import', LabController.importTests);
+router.get('/tests/export', LabController.exportTests);
+
 router.patch('/tests/:testId', LabController.updateTest);
 router.patch('/tests/:testId/toggle', LabController.toggleTest);
 router.delete('/tests/:testId', LabController.deleteTest);

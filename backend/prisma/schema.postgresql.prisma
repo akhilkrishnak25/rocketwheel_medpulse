@@ -66,6 +66,7 @@ model Hospital {
   prescriptions       Prescription[]
   notifications       Notification[]
   reviews             Review[]
+  branding            HospitalBranding?
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 }
@@ -153,6 +154,8 @@ model Doctor {
   breakEnd              String?                @default("14:00")
   isActive              Boolean                @default(true)
   status                String                 @default("ACTIVE")
+  headerImageUrl        String?                @db.Text // Custom Doctor Header Image for consultation PDFs
+  footerImageUrl        String?                @db.Text // Custom Doctor Footer Image for consultation PDFs
   assignedStaffId       String?
   assignedStaff         SupportStaff?          @relation("DoctorAssignedSupportStaff", fields: [assignedStaffId], references: [id], onDelete: SetNull)
   schedules             DoctorSchedule[]
@@ -383,6 +386,7 @@ model Prescription {
   diagnosis          String       @db.Text
   examination        String?      @db.Text
   medicines          String       @db.Text
+  pharmacyMedicines  String?      @db.Text
   instructions       String?      @db.Text
   followUpDate       String?
   pharmacyStatus     String       @default("NONE") // NONE, SENT, ACCEPTED, PROCESSING, COMPLETED
@@ -453,6 +457,7 @@ model LabTest {
   name        String
   code        String?
   category    String?   @default("Pathology")
+  department  String?
   description String?   @db.Text
   price       Float     @default(0)
   status      String    @default("ACTIVE") // ACTIVE, INACTIVE
@@ -634,4 +639,45 @@ model ConsultationDraft {
   @@index([appointmentId])
   @@index([doctorId])
   @@index([patientId])
+}
+
+model HospitalBranding {
+  id                String    @id @default(uuid())
+  hospitalId        String    @unique
+  hospital          Hospital  @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  
+  // Header Settings
+  headerImageUrl    String?   @db.Text // Full hospital header banner/letterhead image
+  logoUrl           String?   @db.Text
+  hospitalName      String?
+  address           String?   @db.Text
+  city              String?
+  state             String?
+  pincode           String?
+  phone             String?
+  email             String?
+  website           String?
+  regDetails        String?   @db.Text // Registration / License / NABH Accreditation Details
+  headerStyle       String    @default("MODERN") // MODERN, CLASSIC, MINIMAL
+  
+  // Footer Settings
+  footerImageUrl    String?   @db.Text // Full hospital footer banner/disclaimer image
+  footerText        String?   @db.Text // Tagline or footer statement
+  contactInfo       String?   @db.Text // Emergency phone, helpline, address summary
+  disclaimer        String?   @db.Text // Legal or clinical disclaimer
+  showPageNumbers   Boolean   @default(true)
+  
+  // Watermark Settings
+  watermarkType     String    @default("NONE") // NONE, TEXT, IMAGE
+  watermarkText     String?
+  watermarkImageUrl String?   @db.Text
+  watermarkOpacity  Float     @default(0.12)  // 0.05 to 0.40
+  watermarkSize     Int       @default(42)    // Font size for text (20-72) or scale % for image (20-100)
+  watermarkPosition String    @default("CENTER") // CENTER, DIAGONAL, TOP, BOTTOM
+  watermarkRotation Int       @default(-30)   // -90 to 90 degrees
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([hospitalId])
 }

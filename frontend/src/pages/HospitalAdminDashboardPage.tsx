@@ -52,6 +52,9 @@ import {
   Trash2,
   ListFilter,
   Pill,
+  Sliders,
+  RotateCw,
+  Type,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { adminApi } from '../api/admin.api';
@@ -83,7 +86,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
   const canManageLabs = !isSubAdmin || subPermissions.includes('LAB_MANAGEMENT');
   const canManagePharmacies = !isSubAdmin || subPermissions.includes('PHARMACY_MANAGEMENT') || subPermissions.includes('OP_MANAGEMENT');
 
-  const [activeTab, setActiveTab] = useState<'appointments' | 'doctors' | 'patients' | 'staff' | 'subadmins' | 'notifications' | 'labs' | 'pharmacies'>('appointments');
+  const [activeTab, setActiveTab] = useState<'appointments' | 'doctors' | 'patients' | 'staff' | 'subadmins' | 'notifications' | 'labs' | 'pharmacies' | 'branding'>('appointments');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>('');
@@ -107,6 +110,40 @@ export const HospitalAdminDashboardPage: React.FC = () => {
 
   // Hospital Admin Avatar Upload State (Requirement 20)
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+
+  // Dedicated PDF Branding State & Controls
+  const [pdfBranding, setPdfBranding] = useState({
+    headerImageUrl: '',
+    footerImageUrl: '',
+    headerLogoUrl: '',
+    hospitalName: '',
+    address: '',
+    contactPhone: '',
+    contactEmail: '',
+    website: '',
+    regDetails: '',
+    headerStyle: 'CLASSIC',
+
+    footerText: '',
+    footerPhone: '',
+    footerEmail: '',
+    disclaimer: '',
+    showPageNumbers: true,
+
+    watermarkEnabled: false,
+    watermarkType: 'TEXT', // 'TEXT' | 'IMAGE'
+    watermarkText: '',
+    watermarkImageUrl: '',
+    watermarkOpacity: 0.08,
+    watermarkSize: 48,
+    watermarkPosition: 'CENTER',
+    watermarkRotation: -30,
+  });
+
+  const [isUploadingWatermarkImage, setIsUploadingWatermarkImage] = useState(false);
+  const [isUploadingHeaderImage, setIsUploadingHeaderImage] = useState(false);
+  const [isUploadingFooterImage, setIsUploadingFooterImage] = useState(false);
+  const [isSavingPdfBranding, setIsSavingPdfBranding] = useState(false);
 
   // Hospital Profile & Branding State
   const [isBrandingModalOpen, setIsBrandingModalOpen] = useState(false);
@@ -140,7 +177,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '').toLowerCase();
-      if (['appointments', 'doctors', 'patients', 'staff', 'subadmins', 'notifications', 'labs', 'pharmacies'].includes(hash)) {
+      if (['appointments', 'doctors', 'patients', 'staff', 'subadmins', 'notifications', 'labs', 'pharmacies', 'branding'].includes(hash)) {
         setActiveTab(hash as any);
       }
     };
@@ -150,7 +187,7 @@ export const HospitalAdminDashboardPage: React.FC = () => {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  const handleTabChange = (tab: 'appointments' | 'doctors' | 'patients' | 'staff' | 'subadmins' | 'notifications' | 'labs' | 'pharmacies') => {
+  const handleTabChange = (tab: 'appointments' | 'doctors' | 'patients' | 'staff' | 'subadmins' | 'notifications' | 'labs' | 'pharmacies' | 'branding') => {
     setActiveTab(tab);
     window.location.hash = `#${tab}`;
   };
@@ -767,6 +804,150 @@ export const HospitalAdminDashboardPage: React.FC = () => {
     },
   });
 
+  // Hospital PDF Branding Query & Save Mutation
+  const { data: brandingData, isLoading: isBrandingLoading, refetch: refetchBranding } = useQuery({
+    queryKey: ['hospital-pdf-branding'],
+    queryFn: () => adminApi.getHospitalBranding(),
+    enabled: activeTab === 'branding',
+  });
+
+  useEffect(() => {
+    if (brandingData) {
+      setPdfBranding({
+        headerImageUrl: brandingData.headerImageUrl || '',
+        footerImageUrl: brandingData.footerImageUrl || '',
+        headerLogoUrl: brandingData.headerLogoUrl || '',
+        hospitalName: brandingData.hospitalName || hospitalProfile?.name || user?.hospital?.name || '',
+        address: brandingData.address || (hospitalProfile ? `${hospitalProfile.address}, ${hospitalProfile.city}` : ''),
+        contactPhone: brandingData.contactPhone || hospitalProfile?.phone || '',
+        contactEmail: brandingData.contactEmail || hospitalProfile?.email || '',
+        website: brandingData.website || '',
+        regDetails: brandingData.regDetails || '',
+        headerStyle: brandingData.headerStyle || 'CLASSIC',
+
+        footerText: brandingData.footerText || `${brandingData.hospitalName || hospitalProfile?.name || 'RocketWheel MedPulse'} Clinical Documentation System • Valid without physical signature under IT Act 2000.`,
+        footerPhone: brandingData.footerPhone || hospitalProfile?.phone || '',
+        footerEmail: brandingData.footerEmail || hospitalProfile?.email || '',
+        disclaimer: brandingData.disclaimer || 'This is an electronically generated and verified medical document. For critical emergency care, please visit the emergency triage department immediately.',
+        showPageNumbers: brandingData.showPageNumbers !== false,
+
+        watermarkEnabled: Boolean(brandingData.watermarkEnabled),
+        watermarkType: brandingData.watermarkType || 'TEXT',
+        watermarkText: brandingData.watermarkText || brandingData.hospitalName || hospitalProfile?.name || 'HOSPITAL CONSULTATION',
+        watermarkImageUrl: brandingData.watermarkImageUrl || '',
+        watermarkOpacity: brandingData.watermarkOpacity !== undefined ? brandingData.watermarkOpacity : 0.08,
+        watermarkSize: brandingData.watermarkSize !== undefined ? brandingData.watermarkSize : 48,
+        watermarkPosition: brandingData.watermarkPosition || 'CENTER',
+        watermarkRotation: brandingData.watermarkRotation !== undefined ? brandingData.watermarkRotation : -30,
+      });
+    }
+  }, [brandingData, hospitalProfile, user]);
+
+  const handleSavePdfBranding = async () => {
+    setIsSavingPdfBranding(true);
+    try {
+      await adminApi.updateHospitalBranding(pdfBranding);
+      toast.success('Branding Saved', 'PDF branding settings and live layout updated successfully.');
+      queryClient.invalidateQueries({ queryKey: ['hospital-pdf-branding'] });
+    } catch (err: any) {
+      toast.error('Save Failed', err?.response?.data?.message || err.message || 'Failed to save branding');
+    } finally {
+      setIsSavingPdfBranding(false);
+    }
+  };
+
+  const handleUploadHeaderImage = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error('Invalid Format', 'Please upload a PNG, JPG, or JPEG image file.');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error('File Exceeds Limit', 'Header image must be under 8MB.');
+      return;
+    }
+    setIsUploadingHeaderImage(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const res = await uploadApi.uploadHospitalAsset(reader.result as string, 'cover');
+          setPdfBranding((prev) => ({ ...prev, headerImageUrl: res.url }));
+          toast.success('Header Image Uploaded', 'Hospital header banner ready. Click "Save Branding Settings" to persist.');
+        } catch (err: any) {
+          toast.error('Upload Failed', err.message);
+        } finally {
+          setIsUploadingHeaderImage(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      toast.error('Upload Failed', err.message);
+      setIsUploadingHeaderImage(false);
+    }
+  };
+
+  const handleUploadFooterImage = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error('Invalid Format', 'Please upload a PNG, JPG, or JPEG image file.');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error('File Exceeds Limit', 'Footer image must be under 8MB.');
+      return;
+    }
+    setIsUploadingFooterImage(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const res = await uploadApi.uploadHospitalAsset(reader.result as string, 'cover');
+          setPdfBranding((prev) => ({ ...prev, footerImageUrl: res.url }));
+          toast.success('Footer Image Uploaded', 'Hospital footer banner ready. Click "Save Branding Settings" to persist.');
+        } catch (err: any) {
+          toast.error('Upload Failed', err.message);
+        } finally {
+          setIsUploadingFooterImage(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      toast.error('Upload Failed', err.message);
+      setIsUploadingFooterImage(false);
+    }
+  };
+
+
+
+  const handleUploadWatermarkImage = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error('Invalid Image', 'Please upload a PNG, JPEG, or SVG image.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('File Exceeds Limit', 'Image must be under 5MB.');
+      return;
+    }
+    setIsUploadingWatermarkImage(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const res = await uploadApi.uploadHospitalAsset(reader.result as string, 'logo');
+          setPdfBranding((prev) => ({ ...prev, watermarkImageUrl: res.url, watermarkType: 'IMAGE' }));
+          toast.success('Watermark Uploaded', 'Watermark image uploaded successfully.');
+        } catch (err: any) {
+          toast.error('Upload Failed', err.message);
+        } finally {
+          setIsUploadingWatermarkImage(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      toast.error('Upload Failed', err.message);
+      setIsUploadingWatermarkImage(false);
+    }
+  };
+
   // Doctor Laboratory Test Requests for this hospital (by Date)
   const { data: adminLabRequests, isLoading: adminLabRequestsLoading, refetch: refetchAdminLabRequests } = useQuery({
     queryKey: ['admin-lab-requests', labRequestDate],
@@ -1280,6 +1461,16 @@ export const HospitalAdminDashboardPage: React.FC = () => {
             >
               <Bell className="w-3.5 h-3.5 text-pink-500" />
               Notifications
+            </button>
+
+            <button
+              onClick={() => handleTabChange('branding')}
+              className={`px-3.5 py-2 rounded-lg transition-colors shrink-0 flex items-center gap-1.5 ${
+                activeTab === 'branding' ? 'bg-white text-royal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <FileHeart className="w-3.5 h-3.5 text-rose-500" />
+              PDF Branding
             </button>
           </div>
         </div>
@@ -3225,6 +3416,613 @@ export const HospitalAdminDashboardPage: React.FC = () => {
             </table>
           </div>
         </Card>
+      )}
+
+      {/* PDF BRANDING & LETTERHEAD CUSTOMIZATION TAB */}
+      {activeTab === 'branding' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <div>
+              <h2 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                <FileHeart className="w-6 h-6 text-rose-600" />
+                Hospital PDF Branding & Letterhead Customization
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Configure your official hospital logo, header metadata, legal disclaimer footer, and anti-fraud watermark.
+                Settings automatically apply to all doctor consultation summaries and prescription PDFs across all pages.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetchBranding()}
+                className="text-xs"
+              >
+                <RefreshCw className="w-3.5 h-3.5 mr-1" /> Reset Form
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSavePdfBranding}
+                isLoading={isSavingPdfBranding}
+                className="bg-royal-600 hover:bg-royal-700 text-white font-bold text-xs shadow-sm"
+              >
+                <Check className="w-3.5 h-3.5 mr-1.5" /> Save Branding Settings
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left 7 Columns: Form Controls */}
+            <div className="lg:col-span-7 space-y-6">
+              {/* 1. Upload Header Image Card */}
+              <Card className="rounded-2xl border-slate-200 shadow-sm p-6 space-y-4">
+                <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-royal-600" />
+                      Upload Header Image
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Upload your official hospital header banner or letterhead image. It will appear at the top of every clinical consultation PDF preserving original aspect ratio.
+                    </p>
+                  </div>
+                </div>
+
+                {pdfBranding.headerImageUrl ? (
+                  <div className="space-y-3">
+                    <div className="relative rounded-xl border border-slate-200 bg-slate-50 p-2 overflow-hidden flex items-center justify-center min-h-[100px] max-h-[160px]">
+                      <img
+                        src={getMediaUrl(pdfBranding.headerImageUrl)}
+                        alt="Hospital Header Banner"
+                        className="max-h-[140px] w-auto max-w-full object-contain rounded"
+                      />
+                      {isUploadingHeaderImage && (
+                        <div className="absolute inset-0 bg-white/80 backdrop-blur-xs flex items-center justify-center">
+                          <InlineSpinner size="md" className="text-royal-600" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 flex items-center gap-1.5">
+                        <Check className="w-3.5 h-3.5" /> Header Image Configured
+                      </span>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="file"
+                          id="pdf-header-image-input"
+                          accept="image/png, image/jpeg, image/jpg"
+                          className="hidden"
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files[0]) {
+                              handleUploadHeaderImage(e.target.files[0]);
+                            }
+                          }}
+                          disabled={isUploadingHeaderImage}
+                        />
+                        <label
+                          htmlFor="pdf-header-image-input"
+                          className="cursor-pointer inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 shadow-2xs transition-colors"
+                        >
+                          {isUploadingHeaderImage ? (
+                            <InlineSpinner size="sm" className="mr-1.5" />
+                          ) : (
+                            <Upload className="w-3.5 h-3.5 mr-1.5 text-royal-600" />
+                          )}
+                          Replace Header Image
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setPdfBranding((prev) => ({ ...prev, headerImageUrl: '' }))}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-colors"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-6 border-2 border-dashed border-slate-200 hover:border-royal-400 rounded-xl bg-slate-50/50 hover:bg-slate-50 text-center transition-all">
+                    <input
+                      type="file"
+                      id="pdf-header-image-input"
+                      accept="image/png, image/jpeg, image/jpg"
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleUploadHeaderImage(e.target.files[0]);
+                        }
+                      }}
+                      disabled={isUploadingHeaderImage}
+                    />
+                    <label htmlFor="pdf-header-image-input" className="cursor-pointer flex flex-col items-center">
+                      <div className="w-12 h-12 rounded-full bg-royal-50 text-royal-600 flex items-center justify-center mb-2">
+                        {isUploadingHeaderImage ? (
+                          <InlineSpinner size="md" />
+                        ) : (
+                          <Upload className="w-6 h-6" />
+                        )}
+                      </div>
+                      <span className="text-xs font-bold text-slate-800">
+                        {isUploadingHeaderImage ? 'Uploading Image...' : 'Click to Upload Hospital Header Image'}
+                      </span>
+                      <span className="text-[11px] text-slate-400 mt-0.5">
+                        Supports PNG, JPG, and JPEG formats (Max 8MB)
+                      </span>
+                    </label>
+                  </div>
+                )}
+              </Card>
+
+              {/* 2. Watermark Settings Card */}
+              <Card className="rounded-2xl border-slate-200 shadow-sm p-6 space-y-4">
+                <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-purple-600" />
+                      Anti-Fraud Watermark Settings
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Subtle background watermark rendered on every consultation page to prevent forgery without obscuring clinical text.
+                    </p>
+                  </div>
+
+                  {/* Toggle Watermark */}
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={pdfBranding.watermarkEnabled}
+                      onChange={(e) => setPdfBranding({ ...pdfBranding, watermarkEnabled: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                    <span className="ml-2 text-xs font-bold text-slate-700">
+                      {pdfBranding.watermarkEnabled ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </label>
+                </div>
+
+                {pdfBranding.watermarkEnabled && (
+                  <div className="space-y-4 pt-1 text-xs">
+                    {/* Watermark Type */}
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1.5">Watermark Type</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setPdfBranding({ ...pdfBranding, watermarkType: 'TEXT' })}
+                          className={`p-2.5 rounded-xl border text-center font-bold flex items-center justify-center gap-2 transition-all ${
+                            pdfBranding.watermarkType === 'TEXT'
+                              ? 'border-purple-600 bg-purple-50 text-purple-700 shadow-sm'
+                              : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Type className="w-4 h-4 text-purple-600" />
+                          Custom Hospital Text
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPdfBranding({ ...pdfBranding, watermarkType: 'IMAGE' })}
+                          className={`p-2.5 rounded-xl border text-center font-bold flex items-center justify-center gap-2 transition-all ${
+                            pdfBranding.watermarkType === 'IMAGE'
+                              ? 'border-purple-600 bg-purple-50 text-purple-700 shadow-sm'
+                              : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          <ImageIcon className="w-4 h-4 text-pink-600" />
+                          Watermark Logo Image
+                        </button>
+                      </div>
+                    </div>
+
+                    {pdfBranding.watermarkType === 'TEXT' ? (
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">Watermark Text</label>
+                        <input
+                          type="text"
+                          value={pdfBranding.watermarkText}
+                          onChange={(e) => setPdfBranding({ ...pdfBranding, watermarkText: e.target.value })}
+                          placeholder="e.g. APOLLO HOSPITALS or OFFICIAL RECORD"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-800 uppercase"
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">Watermark Image</label>
+                        <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                          <div className="w-12 h-12 rounded-lg border border-slate-300 bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-2xs">
+                            {pdfBranding.watermarkImageUrl ? (
+                              <img
+                                src={getMediaUrl(pdfBranding.watermarkImageUrl)}
+                                alt="Watermark"
+                                className="w-full h-full object-contain"
+                              />
+                            ) : (
+                              <ImageIcon className="w-5 h-5 text-slate-400" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <input
+                              type="file"
+                              id="pdf-watermark-image-input"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                if (e.target.files && e.target.files[0]) {
+                                  handleUploadWatermarkImage(e.target.files[0]);
+                                }
+                              }}
+                              disabled={isUploadingWatermarkImage}
+                            />
+                            <label
+                              htmlFor="pdf-watermark-image-input"
+                              className="cursor-pointer inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 shadow-2xs"
+                            >
+                              {isUploadingWatermarkImage ? (
+                                <InlineSpinner size="sm" className="mr-1" />
+                              ) : (
+                                <Upload className="w-3 h-3 mr-1 text-purple-600" />
+                              )}
+                              {pdfBranding.watermarkImageUrl ? 'Change Watermark Image' : 'Upload Image'}
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Sliders: Opacity, Size, Rotation */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+                      {/* Opacity */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-slate-700">Opacity</span>
+                          <span className="font-mono font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded text-[10px]">
+                            {Math.round(pdfBranding.watermarkOpacity * 100)}%
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0.02"
+                          max="0.25"
+                          step="0.01"
+                          value={pdfBranding.watermarkOpacity}
+                          onChange={(e) => setPdfBranding({ ...pdfBranding, watermarkOpacity: parseFloat(e.target.value) })}
+                          className="w-full accent-purple-600"
+                        />
+                        <div className="flex justify-between text-[10px] text-slate-400">
+                          <span>2%</span>
+                          <span>Subtle</span>
+                          <span>25%</span>
+                        </div>
+                      </div>
+
+                      {/* Font Size / Scale */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-slate-700">Size / Scale</span>
+                          <span className="font-mono font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded text-[10px]">
+                            {pdfBranding.watermarkSize}pt
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="24"
+                          max="80"
+                          step="2"
+                          value={pdfBranding.watermarkSize}
+                          onChange={(e) => setPdfBranding({ ...pdfBranding, watermarkSize: parseInt(e.target.value) })}
+                          className="w-full accent-purple-600"
+                        />
+                        <div className="flex justify-between text-[10px] text-slate-400">
+                          <span>24pt</span>
+                          <span>Medium</span>
+                          <span>80pt</span>
+                        </div>
+                      </div>
+
+                      {/* Rotation */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-slate-700">Angle Rotation</span>
+                          <span className="font-mono font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded text-[10px]">
+                            {pdfBranding.watermarkRotation}°
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="-75"
+                          max="75"
+                          step="5"
+                          value={pdfBranding.watermarkRotation}
+                          onChange={(e) => setPdfBranding({ ...pdfBranding, watermarkRotation: parseInt(e.target.value) })}
+                          className="w-full accent-purple-600"
+                        />
+                        <div className="flex justify-between text-[10px] text-slate-400">
+                          <span>-75°</span>
+                          <span>0°</span>
+                          <span>+75°</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </Card>
+
+              {/* 3. Upload Footer Image Card */}
+              <Card className="rounded-2xl border-slate-200 shadow-sm p-6 space-y-4">
+                <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-emerald-600" />
+                      Upload Footer Image
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Upload your official hospital footer banner or disclaimer image. It will appear at the bottom of every clinical consultation PDF page preserving original aspect ratio.
+                    </p>
+                  </div>
+                </div>
+
+                {pdfBranding.footerImageUrl ? (
+                  <div className="space-y-3">
+                    <div className="relative rounded-xl border border-slate-200 bg-slate-50 p-2 overflow-hidden flex items-center justify-center min-h-[80px] max-h-[140px]">
+                      <img
+                        src={getMediaUrl(pdfBranding.footerImageUrl)}
+                        alt="Hospital Footer Banner"
+                        className="max-h-[120px] w-auto max-w-full object-contain rounded"
+                      />
+                      {isUploadingFooterImage && (
+                        <div className="absolute inset-0 bg-white/80 backdrop-blur-xs flex items-center justify-center">
+                          <InlineSpinner size="md" className="text-emerald-600" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 flex items-center gap-1.5">
+                        <Check className="w-3.5 h-3.5" /> Footer Image Configured
+                      </span>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="file"
+                          id="pdf-footer-image-input"
+                          accept="image/png, image/jpeg, image/jpg"
+                          className="hidden"
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files[0]) {
+                              handleUploadFooterImage(e.target.files[0]);
+                            }
+                          }}
+                          disabled={isUploadingFooterImage}
+                        />
+                        <label
+                          htmlFor="pdf-footer-image-input"
+                          className="cursor-pointer inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 shadow-2xs transition-colors"
+                        >
+                          {isUploadingFooterImage ? (
+                            <InlineSpinner size="sm" className="mr-1.5" />
+                          ) : (
+                            <Upload className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
+                          )}
+                          Replace Footer Image
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setPdfBranding((prev) => ({ ...prev, footerImageUrl: '' }))}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-colors"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-6 border-2 border-dashed border-slate-200 hover:border-emerald-400 rounded-xl bg-slate-50/50 hover:bg-slate-50 text-center transition-all">
+                    <input
+                      type="file"
+                      id="pdf-footer-image-input"
+                      accept="image/png, image/jpeg, image/jpg"
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleUploadFooterImage(e.target.files[0]);
+                        }
+                      }}
+                      disabled={isUploadingFooterImage}
+                    />
+                    <label htmlFor="pdf-footer-image-input" className="cursor-pointer flex flex-col items-center">
+                      <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mb-2">
+                        {isUploadingFooterImage ? (
+                          <InlineSpinner size="md" />
+                        ) : (
+                          <Upload className="w-6 h-6" />
+                        )}
+                      </div>
+                      <span className="text-xs font-bold text-slate-800">
+                        {isUploadingFooterImage ? 'Uploading Image...' : 'Click to Upload Hospital Footer Image'}
+                      </span>
+                      <span className="text-[11px] text-slate-400 mt-0.5">
+                        Supports PNG, JPG, and JPEG formats (Max 8MB)
+                      </span>
+                    </label>
+                  </div>
+                )}
+              </Card>
+
+              {/* Bottom Action Save Bar */}
+              <div className="flex justify-end gap-3 pt-2">
+                <Button
+                  size="md"
+                  onClick={handleSavePdfBranding}
+                  isLoading={isSavingPdfBranding}
+                  className="bg-royal-600 hover:bg-royal-700 text-white font-bold px-6 py-2.5 rounded-xl shadow-md"
+                >
+                  <Check className="w-4 h-4 mr-2" /> Save & Apply Branding to Consultation PDFs
+                </Button>
+              </div>
+            </div>
+
+            {/* Right 5 Columns: Live Interactive A4 PDF Document Layout Preview */}
+            <div className="lg:col-span-5 sticky top-6">
+              <div className="bg-slate-800 text-white px-4 py-2.5 rounded-t-2xl font-bold text-xs flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Eye className="w-4 h-4 text-emerald-400" />
+                  Live Prescription A4 Document Preview
+                </span>
+                <span className="text-[10px] text-slate-400 bg-slate-700 px-2 py-0.5 rounded-full font-mono">
+                  Scale: 1:1 Live
+                </span>
+              </div>
+
+              {/* A4 Sheet Container */}
+              <div className="bg-white border-x border-b border-slate-300 rounded-b-2xl shadow-xl p-5 relative overflow-hidden flex flex-col justify-between text-slate-800 select-none min-h-[640px]">
+                {/* 1. Watermark Layer (Interactive Real-time Overlaid) */}
+                {pdfBranding.watermarkEnabled && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0 overflow-hidden">
+                    {pdfBranding.watermarkType === 'IMAGE' && pdfBranding.watermarkImageUrl ? (
+                      <div
+                        style={{
+                          transform: `rotate(${pdfBranding.watermarkRotation}deg)`,
+                          opacity: pdfBranding.watermarkOpacity,
+                          width: `${Math.max(100, Math.min(320, pdfBranding.watermarkSize * 3.5))}px`,
+                        }}
+                        className="transition-all duration-75"
+                      >
+                        <img
+                          src={getMediaUrl(pdfBranding.watermarkImageUrl)}
+                          alt="Watermark Preview"
+                          className="w-full h-auto object-contain"
+                        />
+                      </div>
+                    ) : (
+                      <span
+                        style={{
+                          transform: `rotate(${pdfBranding.watermarkRotation}deg)`,
+                          opacity: pdfBranding.watermarkOpacity,
+                          fontSize: `${Math.max(16, Math.min(60, pdfBranding.watermarkSize * 0.75))}px`,
+                        }}
+                        className="font-black text-slate-900 tracking-wider uppercase whitespace-nowrap transition-all duration-75 select-none"
+                      >
+                        {pdfBranding.watermarkText || pdfBranding.hospitalName || 'HOSPITAL CONSULTATION'}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* 2. Top Header Layer */}
+                <div className="relative z-10 space-y-2">
+                  {pdfBranding.headerImageUrl ? (
+                    <div className="w-full flex justify-center pb-1">
+                      <img
+                        src={getMediaUrl(pdfBranding.headerImageUrl)}
+                        alt="Header Banner Preview"
+                        className="w-full max-h-[85px] object-contain rounded border border-slate-200 bg-slate-50 p-1"
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      {/* Decorative Accent Bar */}
+                      <div className="flex h-1.5 w-full rounded-full overflow-hidden">
+                        <div className="bg-royal-600 flex-[3]"></div>
+                        <div className="bg-pink-500 flex-1"></div>
+                      </div>
+
+                      <div className="flex items-start gap-3 pt-1">
+                        <div className="w-10 h-10 rounded-lg bg-royal-100 text-royal-700 flex items-center justify-center shrink-0">
+                          <Building2 className="w-5 h-5" />
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-black text-slate-900 text-sm tracking-tight truncate leading-tight">
+                            {hospitalProfile?.name || user?.hospital?.name || 'RocketWheel MedPulse Hospital'}
+                          </h4>
+                          <p className="text-[10px] text-slate-500 truncate mt-0.5">
+                            {hospitalProfile?.address ? `${hospitalProfile.address}, ${hospitalProfile.city}` : '21 Hospital Road, Chennai'}
+                          </p>
+                          <p className="text-[9px] text-slate-400 truncate">
+                            {hospitalProfile?.phone ? `Tel: ${hospitalProfile.phone}` : 'Tel: +91 44 2829 0200'} • {hospitalProfile?.email ? `Email: ${hospitalProfile.email}` : 'Email: opd@hospital.com'}
+                          </p>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="border-b border-slate-200"></div>
+
+                  {/* Mock Doctor & Patient Particulars */}
+                  <div className="grid grid-cols-2 gap-2 text-[9.5px]">
+                    <div className="p-2 rounded-lg bg-slate-50/80 border border-slate-200">
+                      <span className="font-bold text-royal-700 block text-[8px] uppercase">Consulting Physician</span>
+                      <strong className="text-slate-900 text-[10px] block mt-0.5">Dr. Rajesh Sharma, MD</strong>
+                      <span className="text-slate-500 block">General Medicine • Reg: MCI-29104</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-slate-50/80 border border-slate-200">
+                      <span className="font-bold text-royal-700 block text-[8px] uppercase">Patient Particulars</span>
+                      <strong className="text-slate-900 text-[10px] block mt-0.5">Suresh Kumar</strong>
+                      <span className="text-slate-500 block">42 Yrs / Male • Blood: B+ • MRN-89412</span>
+                    </div>
+                  </div>
+
+                  {/* Mock Vitals & Chief Complaints */}
+                  <div className="p-2 rounded-lg bg-slate-50/80 border border-slate-200 text-[9px] space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-700">Vitals:</span>
+                      <span className="font-mono text-slate-600">BP: 120/80 mmHg • Pulse: 74 bpm • Temp: 98.4°F • SpO2: 99%</span>
+                    </div>
+                    <div>
+                      <span className="font-bold text-slate-700">Complaints: </span>
+                      <span className="text-slate-600">Mild fever, persistent dry cough x 3 days.</span>
+                    </div>
+                  </div>
+
+                  {/* Mock Prescriptions Table */}
+                  <div className="border border-slate-200 rounded-lg overflow-hidden text-[9px]">
+                    <div className="bg-slate-100 px-2 py-1 font-bold text-slate-700 flex justify-between border-b border-slate-200">
+                      <span>Prescribed Medication (Rx)</span>
+                      <span>Freq / Duration</span>
+                    </div>
+                    <div className="p-2 space-y-1 divide-y divide-slate-100">
+                      <div className="flex justify-between items-center pt-0.5">
+                        <div>
+                          <strong className="text-slate-900">1. Tab. Paracetamol 650mg</strong>
+                          <span className="text-slate-500 block text-[8px]">After meals (SOS for fever)</span>
+                        </div>
+                        <span className="text-slate-600 font-mono">1-0-1 (3 Days)</span>
+                      </div>
+                      <div className="flex justify-between items-center pt-1">
+                        <div>
+                          <strong className="text-slate-900">2. Cap. Amoxicillin 500mg</strong>
+                          <span className="text-slate-500 block text-[8px]">Take with plenty of water</span>
+                        </div>
+                        <span className="text-slate-600 font-mono">1-0-1 (5 Days)</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Footer Layer */}
+                <div className="relative z-10 pt-3 mt-6 border-t border-slate-200">
+                  {pdfBranding.footerImageUrl ? (
+                    <div className="w-full flex justify-center">
+                      <img
+                        src={getMediaUrl(pdfBranding.footerImageUrl)}
+                        alt="Footer Banner Preview"
+                        className="w-full max-h-[50px] object-contain rounded border border-slate-200 bg-slate-50 p-1"
+                      />
+                    </div>
+                  ) : (
+                    <div className="text-[8.5px] text-center text-slate-400 font-medium py-1">
+                      No Footer Image Uploaded • Standard Footer Active
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* EDIT HOSPITAL LAB MODAL */}

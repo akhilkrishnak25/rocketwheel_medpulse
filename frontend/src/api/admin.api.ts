@@ -48,6 +48,10 @@ export const adminApi = {
 
   updateHospitalProfile: (data: any) => api.patch<any>('/admin/profile', data),
 
+  getHospitalBranding: () => api.get<any>('/admin/branding').then((res) => res.data),
+
+  updateHospitalBranding: (data: any) => api.put<any>('/admin/branding', data).then((res) => res.data),
+
   getDoctorSchedules: (doctorId: string) => api.get<any[]>(`/admin/doctors/${doctorId}/schedules`),
 
   updateDoctorSchedules: (doctorId: string, schedules: any[]) =>

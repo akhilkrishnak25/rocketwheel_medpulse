@@ -14,6 +14,9 @@ import {
   LogOut,
   FileText,
   Upload,
+  Download,
+  FileSpreadsheet,
+  AlertTriangle,
   ExternalLink,
   Plus,
   Trash2,
@@ -131,9 +134,106 @@ export const LabTechnicianDashboardPage: React.FC = () => {
     code: '',
     category: 'Biochemistry',
     description: '',
+    department: '',
     tatHours: 24,
     price: 500,
   });
+
+  // Bulk Import & Export States
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [previewData, setPreviewData] = useState<any | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importSummary, setImportSummary] = useState<any | null>(null);
+
+  const [exportFormat, setExportFormat] = useState<'xlsx' | 'csv'>('xlsx');
+  const [exportCategory, setExportCategory] = useState<string>('ALL');
+  const [exportDepartment, setExportDepartment] = useState<string>('ALL');
+  const [exportStatus, setExportStatus] = useState<string>('ALL');
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleDownloadTemplate = async (format: 'xlsx' | 'csv') => {
+    try {
+      toast.info('Downloading Template', `Preparing sample ${format.toUpperCase()} template...`);
+      await labApi.downloadSampleTemplate(format);
+      toast.success('Template Downloaded', `Sample lab tests ${format.toUpperCase()} template downloaded.`);
+    } catch (err: any) {
+      toast.error('Download Failed', err.message || 'Could not download template');
+    }
+  };
+
+  const handleSelectImportFile = async (file: File) => {
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (!['xlsx', 'xls', 'csv'].includes(ext || '')) {
+      toast.error('Invalid Format', 'Please upload an Excel (.xlsx, .xls) or CSV (.csv) file.');
+      return;
+    }
+
+    setImportFile(file);
+    setIsPreviewLoading(true);
+    setPreviewData(null);
+    setImportSummary(null);
+
+    try {
+      const data = await labApi.previewImportTests(file);
+      setPreviewData(data);
+      if (data.totalRows === 0) {
+        toast.info('Empty File', 'The uploaded file does not contain any test records.');
+      } else {
+        toast.info(
+          'File Analyzed',
+          `Parsed ${data.totalRows} rows: ${data.validCount} valid, ${data.duplicateCount} duplicates, ${data.errorCount} invalid.`
+        );
+      }
+    } catch (err: any) {
+      toast.error('Analysis Failed', err.message || 'Failed to parse uploaded file');
+      setImportFile(null);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!previewData?.rows) return;
+    const validRows = previewData.rows.filter((r: any) => r.isValid && !r.isDuplicate && !r.isExistingDuplicate);
+    if (validRows.length === 0) {
+      toast.info('No Valid Tests', 'There are no valid tests to import.');
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const result = await labApi.importTests(validRows);
+      setImportSummary(result.summary);
+      toast.success('Import Successful', result.message || `Successfully imported ${result.summary?.imported || 0} tests.`);
+      queryClient.invalidateQueries({ queryKey: ['technician-lab-tests'] });
+    } catch (err: any) {
+      toast.error('Import Failed', err.message || 'Failed to import lab tests into catalog');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      toast.info('Exporting Catalog', `Generating ${exportFormat.toUpperCase()} file...`);
+      await labApi.exportTests({
+        format: exportFormat,
+        category: exportCategory === 'ALL' ? undefined : exportCategory,
+        department: exportDepartment === 'ALL' ? undefined : exportDepartment,
+        status: exportStatus === 'ALL' ? undefined : exportStatus,
+      });
+      toast.success('Export Complete', 'Laboratory tests exported successfully.');
+      setIsExportModalOpen(false);
+    } catch (err: any) {
+      toast.error('Export Failed', err.message || 'Failed to export laboratory tests');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // Fetch lab requests
   const { data: requests, isLoading: isRequestsLoading, refetch: refetchRequests } = useQuery({
@@ -205,7 +305,7 @@ export const LabTechnicianDashboardPage: React.FC = () => {
     onSuccess: () => {
       toast.success('Test Created', 'Diagnostic test added to laboratory catalog');
       setIsAddTestOpen(false);
-      setNewTest({ name: '', code: '', category: 'Biochemistry', description: '', tatHours: 24, price: 500 });
+      setNewTest({ name: '', code: '', category: 'Biochemistry', description: '', department: '', tatHours: 24, price: 500 });
       queryClient.invalidateQueries({ queryKey: ['technician-lab-tests'] });
     },
     onError: (err: any) => {
@@ -605,7 +705,28 @@ export const LabTechnicianDashboardPage: React.FC = () => {
                 </p>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setIsImportModalOpen(true);
+                    setImportFile(null);
+                    setPreviewData(null);
+                    setImportSummary(null);
+                  }}
+                  className="border-purple-300 text-purple-700 hover:bg-purple-50 text-xs font-semibold"
+                >
+                  <Upload className="w-3.5 h-3.5 mr-1.5" /> Bulk Import
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsExportModalOpen(true)}
+                  className="border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold"
+                >
+                  <Download className="w-3.5 h-3.5 mr-1.5" /> Export Tests
+                </Button>
                 <Button
                   size="sm"
                   onClick={() => setIsAddTestOpen(true)}
@@ -1057,15 +1178,28 @@ export const LabTechnicianDashboardPage: React.FC = () => {
               </div>
             </div>
 
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Description / Specimen</label>
-              <textarea
-                rows={2}
-                value={newTest.description}
-                onChange={(e) => setNewTest({ ...newTest, description: e.target.value })}
-                placeholder="Sample requirements, fasting status, or test details..."
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Department</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Pathology, Biochemistry, Radiology"
+                  value={newTest.department}
+                  onChange={(e) => setNewTest({ ...newTest, department: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Description / Specimen</label>
+                <input
+                  type="text"
+                  value={newTest.description}
+                  onChange={(e) => setNewTest({ ...newTest, description: e.target.value })}
+                  placeholder="Sample requirements, fasting status..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                />
+              </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
@@ -1102,6 +1236,7 @@ export const LabTechnicianDashboardPage: React.FC = () => {
                   name: editingTest.name.trim(),
                   code: editingTest.code?.trim(),
                   category: editingTest.category,
+                  department: editingTest.department?.trim() || undefined,
                   description: editingTest.description,
                   tatHours: Number(editingTest.tatHours) || 24,
                   price: Number(editingTest.price) || 0,
@@ -1170,14 +1305,27 @@ export const LabTechnicianDashboardPage: React.FC = () => {
               </div>
             </div>
 
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1">Description / Specimen</label>
-              <textarea
-                rows={2}
-                value={editingTest.description || ''}
-                onChange={(e) => setEditingTest({ ...editingTest, description: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Department</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Pathology, Biochemistry, Radiology"
+                  value={editingTest.department || ''}
+                  onChange={(e) => setEditingTest({ ...editingTest, department: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Description / Specimen</label>
+                <input
+                  type="text"
+                  value={editingTest.description || ''}
+                  onChange={(e) => setEditingTest({ ...editingTest, description: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+                />
+              </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
@@ -1194,6 +1342,395 @@ export const LabTechnicianDashboardPage: React.FC = () => {
               </Button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* BULK IMPORT LAB TESTS MODAL */}
+      {isImportModalOpen && (
+        <Modal
+          isOpen={isImportModalOpen}
+          onClose={() => {
+            setIsImportModalOpen(false);
+            setImportFile(null);
+            setPreviewData(null);
+            setImportSummary(null);
+          }}
+          title="Bulk Import Diagnostic Tests"
+          maxWidth="2xl"
+        >
+          <div className="space-y-4 text-xs">
+            {/* Step 1: Download Sample Templates */}
+            <div className="p-3.5 bg-purple-50 rounded-2xl border border-purple-200">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h4 className="font-bold text-purple-900 text-sm">Download Pre-Formatted Template</h4>
+                  <p className="text-[11px] text-purple-700 mt-0.5">
+                    Use our verified template with columns: <span className="font-mono font-bold">Test Name, Test Code, Category, Description, Price, Department</span>.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleDownloadTemplate('xlsx')}
+                    className="bg-white border-purple-300 text-purple-800 hover:bg-purple-100 text-xs font-bold"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 mr-1 text-emerald-600" /> Excel (.xlsx)
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleDownloadTemplate('csv')}
+                    className="bg-white border-purple-300 text-purple-800 hover:bg-purple-100 text-xs font-bold"
+                  >
+                    <FileText className="w-3.5 h-3.5 mr-1 text-blue-600" /> CSV (.csv)
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Step 2: Upload File Dropzone */}
+            {!importSummary && (
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1.5">
+                  Select Excel or CSV File to Upload
+                </label>
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const files = e.dataTransfer.files;
+                    if (files && files.length > 0) {
+                      handleSelectImportFile(files[0]);
+                    }
+                  }}
+                  className={`border-2 border-dashed rounded-2xl p-5 text-center transition-all bg-slate-50/70 hover:bg-purple-50/30 ${
+                    isPreviewLoading ? 'border-purple-400 pointer-events-none' : 'border-slate-300 hover:border-purple-400'
+                  }`}
+                >
+                  <input
+                    type="file"
+                    id="lab-tests-import-file-input"
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const files = e.target.files;
+                      if (files && files.length > 0) {
+                        handleSelectImportFile(files[0]);
+                      }
+                    }}
+                    disabled={isPreviewLoading || isImporting}
+                  />
+
+                  {isPreviewLoading ? (
+                    <div className="flex flex-col items-center justify-center py-2 space-y-2">
+                      <InlineSpinner size="lg" className="text-purple-600" />
+                      <p className="font-bold text-slate-700">Validating & parsing spreadsheet data...</p>
+                      <p className="text-[11px] text-slate-400">Checking for duplicate test codes, missing columns, and pricing integrity.</p>
+                    </div>
+                  ) : importFile ? (
+                    <div className="flex items-center justify-between p-2 bg-purple-50 rounded-xl border border-purple-200">
+                      <div className="flex items-center gap-2">
+                        <FileSpreadsheet className="w-6 h-6 text-purple-700" />
+                        <div className="text-left">
+                          <span className="font-bold text-slate-900 block">{importFile.name}</span>
+                          <span className="text-[10px] text-slate-500">{(importFile.size / 1024).toFixed(1)} KB</span>
+                        </div>
+                      </div>
+                      <label
+                        htmlFor="lab-tests-import-file-input"
+                        className="cursor-pointer text-xs font-bold text-purple-700 hover:underline"
+                      >
+                        Change File
+                      </label>
+                    </div>
+                  ) : (
+                    <label
+                      htmlFor="lab-tests-import-file-input"
+                      className="cursor-pointer flex flex-col items-center justify-center space-y-2"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 shadow-sm">
+                        <Upload className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <span className="font-bold text-purple-700 hover:underline">Click to browse</span> or drag and drop your spreadsheet here
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Supports Excel (.xlsx, .xls) and CSV (.csv) files
+                      </p>
+                    </label>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Step 3: Validation Preview Table */}
+            {previewData && !importSummary && (
+              <div className="space-y-3">
+                {/* Metrics Badges */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-center">
+                    <span className="text-[10px] text-slate-500 block font-bold uppercase">Total Rows</span>
+                    <span className="text-lg font-black text-slate-900">{previewData.totalRows}</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-center">
+                    <span className="text-[10px] text-emerald-700 block font-bold uppercase">Ready to Import</span>
+                    <span className="text-lg font-black text-emerald-800">{previewData.validCount}</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-center">
+                    <span className="text-[10px] text-amber-700 block font-bold uppercase">Duplicates (Skipped)</span>
+                    <span className="text-lg font-black text-amber-800">{previewData.duplicateCount}</span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-center">
+                    <span className="text-[10px] text-rose-700 block font-bold uppercase">Errors</span>
+                    <span className="text-lg font-black text-rose-800">{previewData.errorCount}</span>
+                  </div>
+                </div>
+
+                {previewData.duplicateCount > 0 && (
+                  <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 flex items-center gap-2 text-amber-800 text-[11px]">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                    <span>
+                      {previewData.duplicateCount} duplicate test records found in file or existing in catalog. To protect medical data integrity, duplicate tests will be skipped automatically.
+                    </span>
+                  </div>
+                )}
+
+                {/* Table Preview */}
+                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
+                  <table className="w-full text-[11px] text-left">
+                    <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 sticky top-0 font-bold">
+                      <tr>
+                        <th className="py-2 px-2.5">Row</th>
+                        <th className="py-2 px-2.5">Code</th>
+                        <th className="py-2 px-2.5">Test Name</th>
+                        <th className="py-2 px-2.5">Category</th>
+                        <th className="py-2 px-2.5">Department</th>
+                        <th className="py-2 px-2.5">Price</th>
+                        <th className="py-2 px-2.5">Status / Remarks</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(previewData.rows || []).map((row: any) => {
+                        const isImportable = row.isValid && !row.isDuplicate && !row.isExistingDuplicate;
+                        return (
+                          <tr
+                            key={row.rowNumber}
+                            className={
+                              !row.isValid
+                                ? 'bg-rose-50/50'
+                                : row.isDuplicate || row.isExistingDuplicate
+                                ? 'bg-amber-50/50'
+                                : 'hover:bg-slate-50/50'
+                            }
+                          >
+                            <td className="py-1.5 px-2.5 font-mono text-slate-400">#{row.rowNumber}</td>
+                            <td className="py-1.5 px-2.5 font-mono font-bold text-purple-700">{row.code || '—'}</td>
+                            <td className="py-1.5 px-2.5 font-bold text-slate-900">{row.name || '—'}</td>
+                            <td className="py-1.5 px-2.5 text-slate-600">{row.category}</td>
+                            <td className="py-1.5 px-2.5 text-slate-600">{row.department || '—'}</td>
+                            <td className="py-1.5 px-2.5 font-semibold text-slate-900">₹{row.price}</td>
+                            <td className="py-1.5 px-2.5">
+                              {isImportable ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                                  Valid
+                                </span>
+                              ) : row.isExistingDuplicate ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800" title="Already exists in lab catalog">
+                                  Catalog Duplicate
+                                </span>
+                              ) : row.isDuplicate ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800" title="Duplicate code inside file">
+                                  File Duplicate
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800" title={row.errors?.join(', ')}>
+                                  {row.errors?.[0] || 'Invalid'}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Step 4: Import Complete Summary */}
+            {importSummary && (
+              <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 text-center space-y-2">
+                <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto shadow-sm">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+                <h4 className="font-bold text-slate-900 text-sm">Bulk Import Completed Successfully</h4>
+                <div className="grid grid-cols-3 gap-2 pt-2 max-w-sm mx-auto text-center">
+                  <div className="p-2 bg-white rounded-xl border border-emerald-200">
+                    <span className="text-[10px] text-slate-500 block uppercase font-bold">Imported</span>
+                    <span className="text-base font-black text-emerald-700">{importSummary.imported}</span>
+                  </div>
+                  <div className="p-2 bg-white rounded-xl border border-emerald-200">
+                    <span className="text-[10px] text-slate-500 block uppercase font-bold">Skipped</span>
+                    <span className="text-base font-black text-amber-700">{importSummary.duplicatesSkipped}</span>
+                  </div>
+                  <div className="p-2 bg-white rounded-xl border border-emerald-200">
+                    <span className="text-[10px] text-slate-500 block uppercase font-bold">Errors</span>
+                    <span className="text-base font-black text-rose-700">{importSummary.errorsCount}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setImportFile(null);
+                  setPreviewData(null);
+                  setImportSummary(null);
+                }}
+              >
+                {importSummary ? 'Close' : 'Cancel'}
+              </Button>
+
+              {previewData && !importSummary && (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleConfirmImport}
+                  isLoading={isImporting}
+                  disabled={previewData.validCount === 0 || isImporting}
+                  className="bg-purple-600 hover:bg-purple-700 text-white font-bold"
+                >
+                  <Upload className="w-3.5 h-3.5 mr-1" /> Import {previewData.validCount} Tests
+                </Button>
+              )}
+
+              {importSummary && (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    setIsImportModalOpen(false);
+                    setImportFile(null);
+                    setPreviewData(null);
+                    setImportSummary(null);
+                  }}
+                  className="bg-purple-600 hover:bg-purple-700 text-white font-bold"
+                >
+                  Done
+                </Button>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* EXPORT LAB TESTS MODAL */}
+      {isExportModalOpen && (
+        <Modal
+          isOpen={isExportModalOpen}
+          onClose={() => setIsExportModalOpen(false)}
+          title="Export Laboratory Test Master Catalog"
+          maxWidth="md"
+        >
+          <div className="space-y-4 text-xs">
+            <p className="text-slate-600">
+              Export your diagnostic tests into Excel (.xlsx) or CSV (.csv) format. Filter by category, department, or status before exporting.
+            </p>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1.5">Export Format</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setExportFormat('xlsx')}
+                  className={`p-3 rounded-xl border text-center font-bold flex items-center justify-center gap-2 transition-all ${
+                    exportFormat === 'xlsx'
+                      ? 'border-purple-600 bg-purple-50 text-purple-700 shadow-sm'
+                      : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  Excel (.xlsx)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExportFormat('csv')}
+                  className={`p-3 rounded-xl border text-center font-bold flex items-center justify-center gap-2 transition-all ${
+                    exportFormat === 'csv'
+                      ? 'border-purple-600 bg-purple-50 text-purple-700 shadow-sm'
+                      : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  <FileText className="w-4 h-4 text-blue-600" />
+                  CSV (.csv)
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Filter by Category</label>
+              <select
+                value={exportCategory}
+                onChange={(e) => setExportCategory(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white font-medium"
+              >
+                {categories.map((c) => (
+                  <option key={c} value={c}>{c === 'ALL' ? 'All Categories' : c}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Filter by Department</label>
+              <input
+                type="text"
+                placeholder="All departments or type department name (e.g., Pathology)"
+                value={exportDepartment === 'ALL' ? '' : exportDepartment}
+                onChange={(e) => setExportDepartment(e.target.value || 'ALL')}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Filter by Status</label>
+              <select
+                value={exportStatus}
+                onChange={(e) => setExportStatus(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white font-medium"
+              >
+                <option value="ALL">All Statuses (Active & Disabled)</option>
+                <option value="ACTIVE">Active Tests Only</option>
+                <option value="INACTIVE">Disabled / Inactive Tests Only</option>
+              </select>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <Button variant="ghost" size="sm" onClick={() => setIsExportModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleExport}
+                isLoading={isExporting}
+                className="bg-purple-600 hover:bg-purple-700 text-white font-bold"
+              >
+                <Download className="w-3.5 h-3.5 mr-1" /> Download Export File
+              </Button>
+            </div>
+          </div>
         </Modal>
       )}
     </div>

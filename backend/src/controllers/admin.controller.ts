@@ -325,6 +325,30 @@ export class AdminController {
     }
   }
 
+  static async getHospitalBranding(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const branding = await AdminService.getHospitalBranding(hospitalId);
+      return successResponse(res, branding, 'Hospital branding retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch hospital branding', 500);
+    }
+  }
+
+  static async updateHospitalBranding(req: Request, res: Response) {
+    try {
+      const hospitalId = req.user?.hospitalId;
+      if (!hospitalId) return errorResponse(res, 'Hospital not associated', 400);
+
+      const updated = await AdminService.updateHospitalBranding(hospitalId, req.body, req.user?.id);
+      return successResponse(res, updated, 'Hospital branding updated successfully');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to update hospital branding', 400);
+    }
+  }
+
   static async getNotifications(req: Request, res: Response) {
     try {
       const hospitalId = req.user?.hospitalId;

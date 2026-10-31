@@ -65,11 +65,16 @@ export class PharmacyService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return prescriptions.map((p) => ({
-      ...p,
-      vitals: resolveConsultationVitals(p),
-      medicinesList: sortMedicinesByPriority(JSON.parse(p.medicines || '[]')),
-    }));
+    return prescriptions.map((p) => {
+      const workingMeds = p.pharmacyMedicines !== null && p.pharmacyMedicines !== undefined
+        ? p.pharmacyMedicines
+        : p.medicines;
+      return {
+        ...p,
+        vitals: resolveConsultationVitals(p),
+        medicinesList: sortMedicinesByPriority(JSON.parse(workingMeds || '[]')),
+      };
+    });
   }
 
   static async updateStatus(
@@ -168,7 +173,10 @@ export class PharmacyService {
 
     let medicinesList: any[] = [];
     try {
-      medicinesList = JSON.parse(existing.medicines || '[]');
+      const raw = existing.pharmacyMedicines !== null && existing.pharmacyMedicines !== undefined
+        ? existing.pharmacyMedicines
+        : existing.medicines;
+      medicinesList = JSON.parse(raw || '[]');
     } catch {
       medicinesList = [];
     }
@@ -207,7 +215,7 @@ export class PharmacyService {
     medicinesList = sortMedicinesByPriority(medicinesList);
 
     const updateData: any = {
-      medicines: JSON.stringify(medicinesList),
+      pharmacyMedicines: JSON.stringify(medicinesList),
     };
 
     if (pharmacyId && !existing.pharmacyId) {
@@ -269,6 +277,100 @@ export class PharmacyService {
     };
   }
 
+  static async deleteMedicine(
+    prescriptionId: string,
+    pharmacyId: string | undefined,
+    medicineIndex: number,
+    staffUserId: string,
+    staffName: string,
+    reason?: string
+  ) {
+    const existing = await prisma.prescription.findUnique({
+      where: { id: prescriptionId },
+      include: {
+        appointment: true,
+        patient: true,
+        doctor: true,
+        hospital: true,
+      },
+    });
+
+    if (!existing) {
+      throw new Error('Prescription not found');
+    }
+
+    if (existing.pharmacyStatus === 'COMPLETED') {
+      throw new Error('Cannot delete medicines from an already completed/dispensed prescription.');
+    }
+
+    // Determine working pharmacy medicines list: use pharmacyMedicines if set, otherwise start from doctor's prescription.medicines
+    let currentPharmacyMeds: any[] = [];
+    try {
+      const raw = existing.pharmacyMedicines !== null && existing.pharmacyMedicines !== undefined
+        ? existing.pharmacyMedicines
+        : existing.medicines;
+      currentPharmacyMeds = JSON.parse(raw || '[]');
+    } catch {
+      currentPharmacyMeds = [];
+    }
+
+    if (medicineIndex < 0 || medicineIndex >= currentPharmacyMeds.length) {
+      throw new Error(`Invalid medicine index: ${medicineIndex}. Available medicines: ${currentPharmacyMeds.length}`);
+    }
+
+    const deletedMed = currentPharmacyMeds[medicineIndex];
+
+    // Remove the selected medicine from the pharmacy's working list
+    currentPharmacyMeds.splice(medicineIndex, 1);
+    const updatedPharmacyMeds = sortMedicinesByPriority(currentPharmacyMeds);
+
+    const updateData: any = {
+      pharmacyMedicines: JSON.stringify(updatedPharmacyMeds),
+    };
+
+    if (pharmacyId && !existing.pharmacyId) {
+      updateData.pharmacyId = pharmacyId;
+    }
+
+    if (existing.pharmacyStatus === 'SENT') {
+      updateData.pharmacyStatus = 'ACCEPTED';
+    }
+
+    // CRITICAL REQUIREMENT: existing.medicines (the doctor's original prescription) is NOT modified!
+    const updated = await prisma.prescription.update({
+      where: { id: prescriptionId },
+      data: updateData,
+      include: {
+        appointment: true,
+        patient: true,
+        doctor: true,
+        hospital: true,
+      },
+    });
+
+    await AuditService.log({
+      userId: staffUserId,
+      action: 'DELETE_PHARMACY_PRESCRIPTION_MEDICINE',
+      entity: 'Prescription',
+      entityId: prescriptionId,
+      details: {
+        prescriptionId,
+        appointmentNumber: existing.appointment?.appointmentNumber,
+        deletedMedicine: deletedMed.name,
+        dosage: deletedMed.dosage,
+        reason: reason || 'Deleted by pharmacy technician prior to dispensing',
+        deletedBy: staffName,
+        patientName: existing.patient?.fullName,
+        doctorName: existing.doctor?.name,
+      },
+    });
+
+    return {
+      ...updated,
+      medicinesList: updatedPharmacyMeds,
+    };
+  }
+
   static async generatePrescriptionPdf(prescriptionId: string): Promise<Buffer> {
     const rx = await prisma.prescription.findUnique({
       where: { id: prescriptionId },
@@ -290,7 +392,11 @@ export class PharmacyService {
             department: true,
           },
         },
-        hospital: true,
+        hospital: {
+          include: {
+            branding: true,
+          },
+        },
       },
     });
 
@@ -300,7 +406,10 @@ export class PharmacyService {
 
     let parsedMedicines: any[] = [];
     try {
-      parsedMedicines = sortMedicinesByPriority(JSON.parse(rx.medicines || '[]'));
+      const raw = rx.pharmacyMedicines !== null && rx.pharmacyMedicines !== undefined
+        ? rx.pharmacyMedicines
+        : rx.medicines;
+      parsedMedicines = sortMedicinesByPriority(JSON.parse(raw || '[]'));
     } catch {
       parsedMedicines = [];
     }
@@ -339,6 +448,7 @@ export class PharmacyService {
       consultationDate: rx.appointment?.appointmentDate || new Date(rx.createdAt).toISOString().split('T')[0],
       tokenNumber: rx.appointment?.tokenNumber || 1,
       letterheadHeight: (rx.hospital as any)?.letterheadHeight || 144,
+      branding: (rx.hospital as any)?.branding || null,
       hospital: {
         name: rx.hospital?.name || 'RocketWheel MedPulse Hospital',
         address: rx.hospital?.address || 'Hospital Road',
@@ -351,6 +461,8 @@ export class PharmacyService {
         qualification: rx.doctor.qualification,
         specialization: rx.doctor.specialization,
         department: rx.doctor.department?.name,
+        headerImageUrl: (rx.doctor as any)?.headerImageUrl || null,
+        footerImageUrl: (rx.doctor as any)?.footerImageUrl || null,
       },
       patient: {
         fullName: rx.patient?.fullName || 'Walk-in Patient',

@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, getApiBaseUrl } from './client';
 import { LabTestRequest, LabReport } from '../types';
 
 export const labApi = {
@@ -53,6 +53,84 @@ export const labApi = {
   toggleTest: (testId: string) => api.patch<any>(`/lab/tests/${testId}/toggle`),
 
   deleteTest: (testId: string) => api.delete<any>(`/lab/tests/${testId}`),
+
+  // Bulk Import & Export of Lab Tests
+  downloadSampleTemplate: async (format: 'xlsx' | 'csv' = 'xlsx'): Promise<Blob> => {
+    const token =
+      localStorage.getItem('rocketwheel_access_token') ||
+      localStorage.getItem('medipulse_access_token');
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const baseUrl = getApiBaseUrl();
+    const res = await fetch(`${baseUrl}/lab/tests/sample-template?format=${format}`, {
+      method: 'GET',
+      headers,
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to download sample template (${res.status})`);
+    }
+    return res.blob();
+  },
+
+  previewImportTests: async (fileOrData: File | { fileData?: string; fileName?: string; rows?: any[] }) => {
+    if (fileOrData instanceof File) {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(fileOrData);
+      });
+      const res = await api.post<any>('/lab/tests/import-preview', {
+        fileData: base64,
+        fileName: fileOrData.name,
+      });
+      return res.data;
+    }
+    const res = await api.post<any>('/lab/tests/import-preview', fileOrData);
+    return res.data;
+  },
+
+  importTests: async (tests: any[]) => {
+    const res = await api.post<any>('/lab/tests/import', { tests });
+    return res.data;
+  },
+
+  exportTests: async (filters: {
+    category?: string;
+    department?: string;
+    status?: string;
+    testIds?: string[];
+    search?: string;
+    format?: 'xlsx' | 'csv';
+  }): Promise<Blob> => {
+    const token =
+      localStorage.getItem('rocketwheel_access_token') ||
+      localStorage.getItem('medipulse_access_token');
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const params = new URLSearchParams();
+    if (filters.format) params.append('format', filters.format);
+    if (filters.category && filters.category !== 'ALL') params.append('category', filters.category);
+    if (filters.department && filters.department !== 'ALL') params.append('department', filters.department);
+    if (filters.status && filters.status !== 'ALL') params.append('status', filters.status);
+    if (filters.search) params.append('search', filters.search);
+    if (filters.testIds && filters.testIds.length > 0) {
+      params.append('testIds', filters.testIds.join(','));
+    }
+
+    const baseUrl = getApiBaseUrl();
+    const qs = params.toString();
+    const res = await fetch(`${baseUrl}/lab/tests/export${qs ? `?${qs}` : ''}`, {
+      method: 'GET',
+      headers,
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to export lab tests (${res.status})`);
+    }
+    return res.blob();
+  },
 
   // Public & Customer-Facing Lab APIs
   getActiveLabs: (hospitalId?: string) =>

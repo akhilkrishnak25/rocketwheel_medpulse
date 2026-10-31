@@ -11,6 +11,7 @@ import {
   createLabRequestSchema,
   updateDoctorAssignedStaffSchema,
   doctorOwnProfileUpdateSchema,
+  doctorBrandingUpdateSchema,
 } from '../validators/schemas';
 
 export class DoctorDashboardController {
@@ -56,6 +57,35 @@ export class DoctorDashboardController {
       return successResponse(res, updated, 'Doctor profile updated successfully');
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to update profile', 400);
+    }
+  }
+
+  static async getBranding(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) {
+        return errorResponse(res, 'Doctor account not linked to this session', 400);
+      }
+
+      const branding = await DoctorDashboardService.getDoctorBranding(doctorId);
+      return successResponse(res, branding, 'Doctor branding configuration retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch doctor branding', 500);
+    }
+  }
+
+  static async updateBranding(req: Request, res: Response) {
+    try {
+      const doctorId = req.user?.doctorId;
+      if (!doctorId) {
+        return errorResponse(res, 'Doctor account not linked to this session', 400);
+      }
+
+      const validated = doctorBrandingUpdateSchema.parse(req.body);
+      const updated = await DoctorDashboardService.updateDoctorBranding(doctorId, validated, req.user?.id);
+      return successResponse(res, updated, 'Doctor header and footer branding saved successfully');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to update doctor branding', 400);
     }
   }
 

@@ -1,5 +1,7 @@
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
+import path from 'path';
+import fs from 'fs';
 import {
   formatBP,
   formatPulse,
@@ -233,11 +235,65 @@ export const generateDigitalOpPdf = async (data: DigitalOpPdfData): Promise<Buff
   });
 };
 
+export interface HospitalBrandingData {
+  headerImageUrl?: string | null; // Full hospital header banner/letterhead image
+  footerImageUrl?: string | null; // Full hospital footer banner/disclaimer image
+  headerLogoUrl?: string | null;
+  logoUrl?: string | null;
+  hospitalName?: string | null;
+  address?: string | null;
+  contactPhone?: string | null;
+  contactEmail?: string | null;
+  website?: string | null;
+  regDetails?: string | null;
+  headerStyle?: string | null; // CLASSIC, MODERN, MINIMAL
+  footerText?: string | null;
+  footerPhone?: string | null;
+  footerEmail?: string | null;
+  disclaimer?: string | null;
+  showPageNumbers?: boolean;
+  watermarkEnabled?: boolean;
+  watermarkType?: string; // TEXT, IMAGE
+  watermarkText?: string | null;
+  watermarkImageUrl?: string | null;
+  watermarkOpacity?: number;
+  watermarkSize?: number;
+  watermarkPosition?: string;
+  watermarkRotation?: number;
+}
+
+export function resolveImageBuffer(imgSrc?: string | null): Buffer | null {
+  if (!imgSrc || typeof imgSrc !== 'string') return null;
+  try {
+    if (imgSrc.startsWith('data:image/')) {
+      const b64 = imgSrc.replace(/^data:image\/\w+;base64,/, '');
+      return Buffer.from(b64, 'base64');
+    }
+    const cleanPath = imgSrc.replace(/^\//, '');
+    const candidatePaths = [
+      imgSrc,
+      path.join(process.cwd(), cleanPath),
+      path.join(process.cwd(), 'backend', cleanPath),
+      path.join(__dirname, '..', '..', cleanPath),
+      path.join(__dirname, '..', '..', '..', cleanPath),
+    ];
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+        return fs.readFileSync(p);
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 export interface ClinicalConsultationPdfData {
   appointmentNumber: string;
   consultationDate: string;
   tokenNumber?: number;
   letterheadHeight?: number; // Configurable blank hospital letterhead height in points (default: 144 = 2 inches)
+  branding?: HospitalBrandingData | null;
   hospital: {
     name: string;
     address: string;
@@ -251,6 +307,8 @@ export interface ClinicalConsultationPdfData {
     specialization?: string;
     department?: string;
     registrationNumber?: string;
+    headerImageUrl?: string | null;
+    footerImageUrl?: string | null;
   };
   patient: {
     fullName: string;
@@ -352,42 +410,262 @@ export const generateClinicalConsultationPdf = async (data: ClinicalConsultation
 
       let pageNumber = 1;
 
-      const renderPageFooter = () => {
-        doc.moveTo(40, 770).lineTo(555, 770).strokeColor('#e2e8f0').stroke();
-        doc.fillColor('#94a3b8').fontSize(7).font('Helvetica')
-           .text(
-             'Rocket Wheel MedPulse Clinical Documentation System • Valid without physical signature under IT Act 2000.',
-             40,
-             776,
-             { width: 515, align: 'center' }
-           )
-           .text(
-             `Generated on: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`,
-             40,
-             786,
-             { width: 515, align: 'center' }
-           );
+      // Fallback Logic for Consultation PDF Header & Footer Images:
+      // Priority 1: Respective Doctor's configured custom header/footer images
+      // Priority 2 (Fallback): Hospital Admin's configured branding header/footer images
+      // Priority 3: null (generate without image, fallback to standard letterhead / text footer)
+      const effectiveHeaderSrc = data.doctor?.headerImageUrl || data.branding?.headerImageUrl || null;
+      const headerBuffer = resolveImageBuffer(effectiveHeaderSrc);
+
+      const effectiveFooterSrc = data.doctor?.footerImageUrl || data.branding?.footerImageUrl || null;
+      const footerBuffer = resolveImageBuffer(effectiveFooterSrc);
+
+      // Calculate Header Image dimensions preserving aspect ratio without distortion
+      let headerRenderH = 80;
+      let headerRenderW = 515;
+      let headerRenderX = 40;
+      let headerRenderY = 20;
+
+      if (headerBuffer) {
+        try {
+          const hImg = (doc as any).openImage(headerBuffer);
+          if (hImg && hImg.width && hImg.height) {
+            const aspect = hImg.width / hImg.height;
+            let w = 515;
+            let h = w / aspect;
+            if (h > 125) {
+              h = 125;
+              w = h * aspect;
+            }
+            headerRenderW = w;
+            headerRenderH = h;
+            headerRenderX = 40 + (515 - w) / 2;
+          }
+        } catch {
+          headerRenderH = 80;
+          headerRenderW = 515;
+          headerRenderX = 40;
+        }
+      }
+
+      // Calculate Footer Image dimensions preserving aspect ratio without distortion
+      let footerRenderH = 45;
+      let footerRenderW = 515;
+      let footerRenderX = 40;
+      let footerRenderY = 841.89 - 20 - 45;
+
+      if (footerBuffer) {
+        try {
+          const fImg = (doc as any).openImage(footerBuffer);
+          if (fImg && fImg.width && fImg.height) {
+            const aspect = fImg.width / fImg.height;
+            let w = 515;
+            let h = w / aspect;
+            if (h > 75) {
+              h = 75;
+              w = h * aspect;
+            }
+            footerRenderW = w;
+            footerRenderH = h;
+            footerRenderX = 40 + (515 - w) / 2;
+            footerRenderY = 841.89 - 20 - h;
+          }
+        } catch {
+          footerRenderH = 45;
+          footerRenderW = 515;
+          footerRenderX = 40;
+          footerRenderY = 841.89 - 20 - 45;
+        }
+      }
+
+      const renderWatermark = () => {
+        const b = data.branding;
+        if (!b) return;
+        const isWmEnabled = b.watermarkEnabled !== undefined
+          ? b.watermarkEnabled
+          : Boolean(b.watermarkType && b.watermarkType !== 'NONE');
+        if (!isWmEnabled) return;
+        try {
+          doc.save();
+          const opacity = typeof b.watermarkOpacity === 'number' ? b.watermarkOpacity : 0.08;
+          doc.opacity(Math.max(0.01, Math.min(1, opacity)));
+
+          const centerX = 297.64; // A4 width 595.28 / 2
+          const centerY = 420.95; // A4 height 841.89 / 2
+          const rotation = typeof b.watermarkRotation === 'number' ? b.watermarkRotation : -30;
+
+          if (b.watermarkType === 'IMAGE' && b.watermarkImageUrl) {
+            const imgBuffer = resolveImageBuffer(b.watermarkImageUrl);
+            if (imgBuffer) {
+              doc.rotate(rotation, { origin: [centerX, centerY] });
+              const scale = b.watermarkSize || 50;
+              const imgW = Math.max(80, Math.min(450, scale * 4));
+              doc.image(imgBuffer, centerX - imgW / 2, centerY - imgW / 2, { width: imgW });
+            }
+          } else {
+            const wmText = (
+              b.watermarkText ||
+              b.hospitalName ||
+              data.hospital.name ||
+              'CONFIDENTIAL'
+            ).toUpperCase();
+            const fontSize = Math.max(16, Math.min(84, b.watermarkSize || 48));
+            doc.rotate(rotation, { origin: [centerX, centerY] });
+            doc.fontSize(fontSize).font('Helvetica-Bold').fillColor('#64748b');
+            const textWidth = doc.widthOfString(wmText);
+            doc.text(wmText, centerX - textWidth / 2, centerY - fontSize / 2, { lineBreak: false });
+          }
+          doc.restore();
+        } catch {
+          // ignore watermark rendering error
+        }
       };
 
-      const checkPageBreak = (neededHeight: number, isFinalContent = false): boolean => {
-        const threshold = isFinalContent ? 670 : 715;
-        if (curY + neededHeight > threshold) {
+      const renderPageFooter = () => {
+        if (footerBuffer) {
+          try {
+            doc.image(footerBuffer, footerRenderX, footerRenderY, {
+              width: footerRenderW,
+              height: footerRenderH,
+            });
+          } catch (e) {
+            console.warn('Failed to render footer image in PDF:', e);
+          }
+        } else {
+          doc.moveTo(40, 768).lineTo(555, 768).strokeColor('#e2e8f0').stroke();
+          const footerText = data.branding?.footerText || 'Rocket Wheel MedPulse Clinical Documentation System • Valid without physical signature under IT Act 2000.';
+          doc.fillColor('#64748b').fontSize(7).font('Helvetica')
+             .text(footerText, 40, 774, { width: 515, align: 'center' });
+
+          if (data.branding?.disclaimer) {
+            doc.fillColor('#94a3b8').fontSize(6.5).font('Helvetica')
+               .text(data.branding.disclaimer, 40, 784, { width: 515, align: 'center' });
+          }
+
+          const genTime = `Generated: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`;
+          const contactInfo = [
+            data.branding?.footerPhone ? `Helpline: ${data.branding.footerPhone}` : '',
+            data.branding?.footerEmail ? `Email: ${data.branding.footerEmail}` : '',
+          ].filter(Boolean).join(' | ');
+
+          const pageStr = data.branding?.showPageNumbers !== false ? `Page ${pageNumber}` : '';
+          const bottomLine = [contactInfo, genTime, pageStr].filter(Boolean).join(' • ');
+
+          doc.fillColor('#94a3b8').fontSize(6.5).font('Helvetica')
+             .text(bottomLine, 40, data.branding?.disclaimer ? 794 : 784, { width: 515, align: 'center' });
+        }
+      };
+
+      const renderRunningHeader = () => {
+        const hospName = data.branding?.hospitalName || data.hospital.name;
+        doc.fillColor('#1E20E0').fontSize(8).font('Helvetica-Bold')
+           .text(hospName, 40, 36, { width: 250 });
+        doc.fillColor('#64748b').fontSize(7.5).font('Helvetica')
+           .text(
+             `Clinical Consultation • Patient: ${data.patient.fullName} (${data.patient.patientIdNumber || 'OPD'}) • OP #${data.appointmentNumber}`,
+             40,
+             36,
+             { width: 515, align: 'right' }
+           );
+        doc.moveTo(40, 48).lineTo(555, 48).strokeColor('#e2e8f0').stroke();
+      };
+
+      const pageBottomLimit = footerBuffer ? (footerRenderY - 8) : 758;
+      const checkPageBreak = (neededHeight: number): boolean => {
+        if (curY + neededHeight > pageBottomLimit) {
           renderPageFooter();
           doc.addPage({ size: 'A4', margin: 40 });
           pageNumber++;
-          curY = 40;
+          renderWatermark();
+          if (headerBuffer) {
+            try {
+              doc.image(headerBuffer, headerRenderX, headerRenderY, {
+                width: headerRenderW,
+                height: headerRenderH,
+              });
+            } catch {}
+            curY = headerRenderY + headerRenderH + 12;
+          } else {
+            renderRunningHeader();
+            curY = 56;
+          }
           return true;
         }
         return false;
       };
 
       // ----------------------------------------------------------------------
-      // 1. HOSPITAL LETTERHEAD SPACE (Page 1 Top Reserved Area)
+      // 1. HOSPITAL BRANDING & LETTERHEAD HEADER (Page 1)
       // ----------------------------------------------------------------------
-      const letterheadHeight = typeof data.letterheadHeight === 'number' && data.letterheadHeight >= 0
-        ? data.letterheadHeight
-        : 144; // Default 144 points = 2 inches
-      const infoTop = letterheadHeight;
+      renderWatermark();
+
+      let infoTop = 144;
+      if (headerBuffer) {
+        try {
+          doc.image(headerBuffer, headerRenderX, headerRenderY, {
+            width: headerRenderW,
+            height: headerRenderH,
+          });
+        } catch (e) {
+          console.warn('Failed to render header image in PDF:', e);
+        }
+        infoTop = headerRenderY + headerRenderH + 12;
+      } else if (data.branding) {
+        const hospName = data.branding.hospitalName || data.hospital.name;
+        const hospAddr = data.branding.address || `${data.hospital.address}, ${data.hospital.city}`;
+        const hospPhone = data.branding.contactPhone || (data.branding as any).phone || data.hospital.phone;
+        const hospEmail = data.branding.contactEmail || (data.branding as any).email || data.hospital.email;
+        const hospWeb = data.branding.website;
+        const hospReg = data.branding.regDetails;
+
+        // Top decorative accent bar
+        doc.rect(40, 28, 360, 4).fill('#1E20E0');
+        doc.rect(400, 28, 155, 4).fill('#FF1D6B');
+
+        const logoBuffer = resolveImageBuffer(data.branding.headerLogoUrl || (data.branding as any).logoUrl);
+        const hasLogo = !!logoBuffer;
+        const textStartX = hasLogo ? 104 : 40;
+        const textWidth = hasLogo ? 451 : 515;
+
+        if (hasLogo && logoBuffer) {
+          try {
+            doc.image(logoBuffer, 40, 38, { fit: [54, 54], align: 'center', valign: 'center' });
+          } catch {
+            // safely ignore if logo image parsing fails
+          }
+        }
+
+        doc.fillColor('#1E20E0').fontSize(14).font('Helvetica-Bold')
+           .text(hospName, textStartX, 38, { width: textWidth });
+
+        doc.fillColor('#475569').fontSize(8).font('Helvetica')
+           .text(hospAddr, textStartX, 54, { width: textWidth });
+
+        const contactParts = [
+          hospPhone ? `Tel: ${hospPhone}` : '',
+          hospEmail ? `Email: ${hospEmail}` : '',
+          hospWeb ? `Web: ${hospWeb}` : '',
+        ].filter(Boolean).join(' | ');
+
+        if (contactParts) {
+          doc.fillColor('#64748b').fontSize(7.5).font('Helvetica')
+             .text(contactParts, textStartX, 66, { width: textWidth });
+        }
+
+        if (hospReg) {
+          doc.fillColor('#0284c7').fontSize(7.5).font('Helvetica-Bold')
+             .text(hospReg, textStartX, contactParts ? 77 : 66, { width: textWidth });
+        }
+
+        const headerBottom = hospReg && contactParts ? 94 : (contactParts ? 84 : 76);
+        doc.moveTo(40, headerBottom).lineTo(555, headerBottom).strokeColor('#cbd5e1').stroke();
+        infoTop = headerBottom + 10;
+      } else {
+        const letterheadHeight = typeof data.letterheadHeight === 'number' && data.letterheadHeight >= 0
+          ? data.letterheadHeight
+          : 144;
+        infoTop = letterheadHeight;
+      }
 
       // ----------------------------------------------------------------------
       // 2. HIGHLIGHT DOCTOR AND PATIENT DETAILS USING SEPARATE BOXES
@@ -398,7 +676,9 @@ export const generateClinicalConsultationPdf = async (data: ClinicalConsultation
 
       // Doctor Box Content
       const doctorTitle = 'CONSULTING PHYSICIAN';
-      const doctorName = data.doctor.name.startsWith('Dr.') ? data.doctor.name : `Dr. ${data.doctor.name}`;
+      const rawDocName = (data.doctor.name || '').trim();
+      const cleanDocName = rawDocName.replace(/^(dr\.?|doctor)\s+/i, '');
+      const doctorName = `Dr. ${cleanDocName || 'Physician'}`;
       const docQualSpec = [data.doctor.qualification, data.doctor.specialization].filter(Boolean).join(' • ') || 'General Practitioner';
       const docDept = `Dept: ${data.doctor.department || 'General Medicine'}`;
       const docReg = data.doctor.registrationNumber ? `Reg No: ${data.doctor.registrationNumber}` : null;
@@ -676,29 +956,42 @@ export const generateClinicalConsultationPdf = async (data: ClinicalConsultation
       // ----------------------------------------------------------------------
       if (data.followUpDate && data.followUpDate.trim()) {
         const formattedDate = formatPdfFollowUpDate(data.followUpDate);
-        checkPageBreak(32);
+        checkPageBreak(30);
 
-        doc.roundedRect(40, curY, 515, 26, 4).fill('#f8fafc');
-        doc.roundedRect(40, curY, 515, 26, 4).strokeColor('#cbd5e1').stroke();
+        doc.roundedRect(40, curY, 515, 24, 4).fill('#f8fafc');
+        doc.roundedRect(40, curY, 515, 24, 4).strokeColor('#cbd5e1').stroke();
 
         doc.fillColor('#1E20E0').fontSize(8.5).font('Helvetica-Bold')
-           .text('FOLLOW-UP REVIEW DATE:', 48, curY + 8);
+           .text('FOLLOW-UP REVIEW DATE:', 48, curY + 7);
         doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold')
-           .text(formattedDate, 205, curY + 8);
+           .text(formattedDate, 205, curY + 7);
 
-        curY += 34;
+        curY += 28;
       }
 
       // ----------------------------------------------------------------------
-      // DOCTOR SIGNATURE AREA
+      // DOCTOR SIGNATURE AREA (Rendered above footer)
       // ----------------------------------------------------------------------
-      checkPageBreak(65, true);
-      const sigTop = Math.max(curY + 15, 695);
-      doc.moveTo(380, sigTop).lineTo(540, sigTop).strokeColor('#94a3b8').stroke();
-      doc.fillColor('#0f172a').fontSize(9).font('Helvetica-Bold')
-         .text(doctorName, 380, sigTop + 6, { width: 160, align: 'center' });
-      doc.fillColor('#64748b').fontSize(7.5).font('Helvetica')
-         .text('Authorized Medical Officer', 380, sigTop + 18, { width: 160, align: 'center' });
+      const sigBlockH = docQualSpec ? 42 : 32;
+      checkPageBreak(sigBlockH + 10);
+
+      // Anchor doctor signature directly above the page footer on the right side
+      const sigTop = Math.max(curY + 12, pageBottomLimit - sigBlockH - 12);
+      const sigLeft = 370;
+      const sigWidth = 185;
+
+      doc.moveTo(sigLeft, sigTop).lineTo(sigLeft + sigWidth, sigTop).strokeColor('#94a3b8').stroke();
+      doc.fillColor('#0f172a').fontSize(9.5).font('Helvetica-Bold')
+         .text(doctorName, sigLeft, sigTop + 5, { width: sigWidth, align: 'center' });
+
+      if (docQualSpec) {
+        doc.fillColor('#334155').fontSize(7.5).font('Helvetica')
+           .text(docQualSpec, sigLeft, sigTop + 17, { width: sigWidth, align: 'center' });
+      }
+
+      const sigRoleText = docReg ? `${docReg} • Authorized Signatory` : 'Authorized Medical Practitioner';
+      doc.fillColor('#64748b').fontSize(7).font('Helvetica')
+         .text(sigRoleText, sigLeft, sigTop + (docQualSpec ? 28 : 17), { width: sigWidth, align: 'center' });
 
       // Render footer on the final page
       renderPageFooter();

@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import ExcelJS from 'exceljs';
 import prisma from '../config/prisma';
 import { AuditService } from '../utils/audit';
 import { NotificationService } from './notification.service';
@@ -359,6 +360,621 @@ export class LabService {
     });
 
     return { success: true };
+  }
+
+  // -------------------------------------------------------------
+  // BULK IMPORT & EXPORT OF LAB TESTS (MASTER CATALOG)
+  // -------------------------------------------------------------
+
+  /**
+   * Helper to resolve labId for Lab Technician, Hospital Admin, or Super Admin
+   */
+  static async resolveLabForUser(user: any): Promise<string> {
+    if (user?.labId) return user.labId;
+
+    if (user?.hospitalId) {
+      let lab = await prisma.lab.findFirst({
+        where: { hospitalId: user.hospitalId },
+      });
+      if (!lab) {
+        const hospital = await prisma.hospital.findUnique({ where: { id: user.hospitalId } });
+        lab = await prisma.lab.create({
+          data: {
+            hospitalId: user.hospitalId,
+            name: `${hospital?.name || 'Hospital'} Diagnostic Laboratory`,
+            type: 'HOSPITAL',
+            email: hospital?.email || 'lab@hospital.com',
+            phone: hospital?.phone || '0000000000',
+            status: 'APPROVED',
+            visibility: 'PUBLIC',
+          },
+        });
+      }
+      return lab.id;
+    }
+
+    // Fallback to first available approved lab
+    const firstLab = await prisma.lab.findFirst({ where: { status: { in: ['APPROVED', 'ACTIVE'] } } });
+    if (firstLab) return firstLab.id;
+
+    throw new Error('No laboratory or hospital affiliation found for your session.');
+  }
+
+  /**
+   * Generate downloadable sample Excel/CSV template for bulk test import
+   */
+  static async generateSampleTemplate(format: 'xlsx' | 'csv' = 'xlsx'): Promise<{ buffer: Buffer; contentType: string; filename: string }> {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'RocketWheel MedPulse Platform';
+    workbook.created = new Date();
+
+    const sheet = workbook.addWorksheet('Lab Tests Template');
+    sheet.columns = [
+      { header: 'Test Name', key: 'name', width: 34 },
+      { header: 'Test Code', key: 'code', width: 16 },
+      { header: 'Category', key: 'category', width: 22 },
+      { header: 'Department', key: 'department', width: 22 },
+      { header: 'Description', key: 'description', width: 45 },
+      { header: 'Price', key: 'price', width: 16 },
+    ];
+
+    // Apply clean header styling
+    const headerRow = sheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF7C3AED' }, // MedPulse Purple
+    };
+    headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+    headerRow.height = 28;
+
+    // Sample diagnostic master records
+    const sampleTests = [
+      {
+        name: 'Complete Blood Count (CBC)',
+        code: 'CBC-01',
+        category: 'Hematology',
+        department: 'Pathology',
+        description: 'Comprehensive blood cell count with differential, platelets, and RBC indices',
+        price: 350,
+      },
+      {
+        name: 'Lipid Profile Complete',
+        code: 'LIPID-01',
+        category: 'Biochemistry',
+        department: 'Clinical Biochemistry',
+        description: 'Measures Total Cholesterol, Triglycerides, HDL, LDL, and VLDL ratios',
+        price: 650,
+      },
+      {
+        name: 'Liver Function Test (LFT)',
+        code: 'LFT-01',
+        category: 'Biochemistry',
+        department: 'Clinical Biochemistry',
+        description: 'Evaluates Bilirubin, SGOT/AST, SGPT/ALT, Alkaline Phosphatase, and Total Protein',
+        price: 750,
+      },
+      {
+        name: 'Fasting Blood Sugar (FBS)',
+        code: 'FBS-01',
+        category: 'Clinical Pathology',
+        department: 'Pathology',
+        description: 'Plasma glucose test measured after an 8 to 12 hour overnight fast',
+        price: 120,
+      },
+      {
+        name: 'Thyroid Profile Total (T3, T4, TSH)',
+        code: 'THY-01',
+        category: 'Endocrinology',
+        department: 'Clinical Biochemistry',
+        description: 'Complete quantitative evaluation of thyroid hormones via chemiluminescence',
+        price: 600,
+      },
+      {
+        name: 'Urine Routine & Microscopic Examination',
+        code: 'URINE-01',
+        category: 'Pathology',
+        department: 'Microbiology',
+        description: 'Physical, chemical, and microscopic examination of clean-catch urine specimen',
+        price: 150,
+      },
+    ];
+
+    sampleTests.forEach((t) => {
+      const row = sheet.addRow(t);
+      row.alignment = { vertical: 'middle', horizontal: 'left' };
+      row.font = { size: 9.5 };
+    });
+
+    if (format === 'csv') {
+      const csvBuffer = await workbook.csv.writeBuffer();
+      return {
+        buffer: Buffer.from(csvBuffer),
+        contentType: 'text/csv',
+        filename: 'Lab_Tests_Sample_Template.csv',
+      };
+    }
+
+    const xlsxBuffer = await workbook.xlsx.writeBuffer();
+    return {
+      buffer: Buffer.from(xlsxBuffer),
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      filename: 'Lab_Tests_Sample_Template.xlsx',
+    };
+  }
+
+  /**
+   * Parse uploaded Excel (.xlsx, .xls) or CSV buffer into structured raw rows
+   */
+  static async parseUploadedLabTestFile(buffer: Buffer, fileName: string): Promise<any[]> {
+    const isCsv = fileName.toLowerCase().endsWith('.csv');
+
+    if (isCsv) {
+      const text = buffer.toString('utf8');
+      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      if (lines.length <= 1) return [];
+
+      // Parse CSV line supporting quotes
+      const parseCsvLine = (line: string): string[] => {
+        const result: string[] = [];
+        let cur = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"' || char === "'") {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            result.push(cur.trim().replace(/^["']|["']$/g, ''));
+            cur = '';
+          } else {
+            cur += char;
+          }
+        }
+        result.push(cur.trim().replace(/^["']|["']$/g, ''));
+        return result;
+      };
+
+      const headerCells = parseCsvLine(lines[0]).map((h) => h.toLowerCase().trim());
+      const nameIdx = headerCells.findIndex((h) => h.includes('name') || h === 'test');
+      const codeIdx = headerCells.findIndex((h) => h.includes('code'));
+      const catIdx = headerCells.findIndex((h) => h.includes('category'));
+      const deptIdx = headerCells.findIndex((h) => h.includes('dept') || h.includes('department'));
+      const descIdx = headerCells.findIndex((h) => h.includes('desc') || h.includes('detail'));
+      const priceIdx = headerCells.findIndex((h) => h.includes('price') || h.includes('fee') || h.includes('cost') || h.includes('rate'));
+
+      const rows: any[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cells = parseCsvLine(lines[i]);
+        if (cells.length === 0 || cells.every((c) => !c)) continue;
+        rows.push({
+          rowNumber: i + 1,
+          name: nameIdx !== -1 ? cells[nameIdx] : cells[0] || '',
+          code: codeIdx !== -1 ? cells[codeIdx] : cells[1] || '',
+          category: catIdx !== -1 ? cells[catIdx] : cells[2] || '',
+          department: deptIdx !== -1 ? cells[deptIdx] : cells[3] || '',
+          description: descIdx !== -1 ? cells[descIdx] : cells[4] || '',
+          price: priceIdx !== -1 ? cells[priceIdx] : cells[5] || 0,
+        });
+      }
+      return rows;
+    }
+
+    // Excel workbook parsing (.xlsx / .xls)
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer as any);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) return [];
+
+    const headerRow = sheet.getRow(1);
+    const headerMap: Record<string, number> = {};
+    headerRow.eachCell((cell, colNumber) => {
+      const val = String(cell.value || '').toLowerCase().trim();
+      if (val.includes('name') || val === 'test') headerMap.name = colNumber;
+      if (val.includes('code')) headerMap.code = colNumber;
+      if (val.includes('category')) headerMap.category = colNumber;
+      if (val.includes('dept') || val.includes('department')) headerMap.department = colNumber;
+      if (val.includes('desc') || val.includes('detail')) headerMap.description = colNumber;
+      if (val.includes('price') || val.includes('fee') || val.includes('cost') || val.includes('rate')) headerMap.price = colNumber;
+    });
+
+    const rows: any[] = [];
+    sheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return; // Skip header row
+      const getVal = (col?: number) => {
+        if (!col) return '';
+        const c = row.getCell(col);
+        if (c.value === null || c.value === undefined) return '';
+        if (typeof c.value === 'object' && 'result' in c.value) return String(c.value.result ?? '');
+        if (typeof c.value === 'object' && 'text' in c.value) return String(c.value.text ?? '');
+        return String(c.value).trim();
+      };
+
+      const name = getVal(headerMap.name || 1);
+      const code = getVal(headerMap.code || 2);
+      const category = getVal(headerMap.category || 3);
+      const department = getVal(headerMap.department || 4);
+      const description = getVal(headerMap.description || 5);
+      const priceRaw = getVal(headerMap.price || 6);
+
+      if (!name && !code && !priceRaw) return; // Skip empty row
+
+      rows.push({
+        rowNumber,
+        name,
+        code,
+        category,
+        department,
+        description,
+        price: priceRaw,
+      });
+    });
+
+    return rows;
+  }
+
+  /**
+   * Validate uploaded lab test rows, identify duplicates, and generate preview
+   */
+  static async validateAndPreviewImport(labId: string, rawRows: any[]): Promise<{
+    records: any[];
+    rows?: any[];
+    summary: {
+      total: number;
+      valid: number;
+      duplicates: number;
+      errors: number;
+      canImport: boolean;
+    };
+    totalRows?: number;
+    validRows?: number;
+    duplicateRows?: number;
+    errorRows?: number;
+    validCount?: number;
+    duplicateCount?: number;
+    errorCount?: number;
+    canImport?: boolean;
+  }> {
+    // Fetch all existing tests in this laboratory to check against database duplicates
+    const existingTests = await prisma.labTest.findMany({
+      where: { labId },
+      select: { id: true, name: true, code: true },
+    });
+
+    const existingNames = new Set(existingTests.map((t) => t.name.trim().toLowerCase()));
+    const existingCodes = new Set(
+      existingTests.map((t) => (t.code ? t.code.trim().toUpperCase() : '')).filter(Boolean)
+    );
+
+    const fileCodes = new Map<string, number>(); // code -> first rowNumber seen
+    const fileNames = new Map<string, number>(); // name -> first rowNumber seen
+
+    let validCount = 0;
+    let duplicateCount = 0;
+    let errorCount = 0;
+
+    const previewRecords = rawRows.map((row, index) => {
+      const rowNum = row.rowNumber || index + 2;
+      const rawName = String(row.name || '').trim();
+      const rawCode = String(row.code || '').trim().toUpperCase();
+      const rawCategory = String(row.category || '').trim() || 'Pathology';
+      const rawDepartment = String(row.department || '').trim() || rawCategory || 'General Diagnostics';
+      const rawDescription = String(row.description || '').trim();
+      const parsedPrice = parseFloat(String(row.price).replace(/[^0-9.-]+/g, ''));
+
+      const errors: string[] = [];
+      let isDuplicate = false;
+      let duplicateType: 'FILE' | 'DATABASE' | undefined;
+
+      // 1. Mandatory Name Validation
+      if (!rawName) {
+        errors.push('Test Name is required and cannot be blank.');
+      }
+
+      // 2. Mandatory Price Validation
+      if (isNaN(parsedPrice) || parsedPrice < 0) {
+        errors.push(`Invalid price "${row.price}". Must be a valid positive number.`);
+      }
+
+      // 3. Duplicate checks within uploaded file
+      if (rawCode) {
+        if (fileCodes.has(rawCode)) {
+          isDuplicate = true;
+          duplicateType = 'FILE';
+          errors.push(`Duplicate Test Code "${rawCode}" in file (matches Row ${fileCodes.get(rawCode)}).`);
+        } else {
+          fileCodes.set(rawCode, rowNum);
+        }
+      }
+
+      if (rawName) {
+        const lowerName = rawName.toLowerCase();
+        if (fileNames.has(lowerName)) {
+          isDuplicate = true;
+          duplicateType = 'FILE';
+          errors.push(`Duplicate Test Name "${rawName}" in file (matches Row ${fileNames.get(lowerName)}).`);
+        } else {
+          fileNames.set(lowerName, rowNum);
+        }
+      }
+
+      // 4. Duplicate checks against existing Database records
+      if (rawCode && existingCodes.has(rawCode)) {
+        isDuplicate = true;
+        duplicateType = 'DATABASE';
+        errors.push(`Test Code "${rawCode}" already exists in your laboratory catalog.`);
+      }
+
+      if (rawName && existingNames.has(rawName.toLowerCase())) {
+        isDuplicate = true;
+        duplicateType = 'DATABASE';
+        errors.push(`Test Name "${rawName}" already exists in your laboratory catalog.`);
+      }
+
+      let rowStatus: 'VALID' | 'DUPLICATE' | 'ERROR' = 'VALID';
+      if (errors.length > 0) {
+        if (isDuplicate) {
+          rowStatus = 'DUPLICATE';
+          duplicateCount++;
+        } else {
+          rowStatus = 'ERROR';
+          errorCount++;
+        }
+      } else {
+        validCount++;
+      }
+
+      return {
+        rowNumber: rowNum,
+        name: rawName,
+        code: rawCode || null,
+        category: rawCategory,
+        department: rawDepartment,
+        description: rawDescription || null,
+        price: isNaN(parsedPrice) ? 0 : parsedPrice,
+        status: rowStatus,
+        errors,
+        isDuplicate,
+        duplicateType,
+        isValid: rowStatus === 'VALID',
+        isExistingDuplicate: isDuplicate && duplicateType === 'DATABASE',
+      };
+    });
+
+    return {
+      records: previewRecords,
+      rows: previewRecords,
+      summary: {
+        total: previewRecords.length,
+        valid: validCount,
+        duplicates: duplicateCount,
+        errors: errorCount,
+        canImport: validCount > 0,
+      },
+      totalRows: previewRecords.length,
+      validCount,
+      duplicateCount,
+      errorCount,
+      canImport: validCount > 0,
+    };
+  }
+
+  /**
+   * Execute bulk import of validated lab tests
+   */
+  static async importLabTests(
+    labId: string,
+    testsToImport: Array<{
+      name: string;
+      code?: string | null;
+      category?: string | null;
+      department?: string | null;
+      description?: string | null;
+      price: number;
+    }>,
+    requestingUserId?: string
+  ): Promise<{
+    importedCount: number;
+    skippedCount: number;
+    failedCount: number;
+    results: any[];
+    summary?: any;
+  }> {
+    const lab = await prisma.lab.findUnique({ where: { id: labId } });
+    if (!lab) throw new Error('Laboratory not found');
+
+    if (!Array.isArray(testsToImport) || testsToImport.length === 0) {
+      throw new Error('No valid tests provided for bulk import');
+    }
+
+    // Final database safety check: fetch existing names & codes
+    const existingTests = await prisma.labTest.findMany({
+      where: { labId },
+      select: { name: true, code: true },
+    });
+    const existingNames = new Set(existingTests.map((t) => t.name.trim().toLowerCase()));
+    const existingCodes = new Set(
+      existingTests.map((t) => (t.code ? t.code.trim().toUpperCase() : '')).filter(Boolean)
+    );
+
+    const validNewTests: any[] = [];
+    let skippedCount = 0;
+
+    for (const test of testsToImport) {
+      const cleanName = (test.name || '').trim();
+      const cleanCode = test.code
+        ? test.code.trim().toUpperCase()
+        : `LT-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+
+      if (!cleanName || existingNames.has(cleanName.toLowerCase()) || existingCodes.has(cleanCode)) {
+        skippedCount++;
+        continue;
+      }
+
+      existingNames.add(cleanName.toLowerCase());
+      existingCodes.add(cleanCode);
+
+      validNewTests.push({
+        labId,
+        hospitalId: lab.hospitalId,
+        name: cleanName,
+        code: cleanCode,
+        category: (test.category || '').trim() || 'Pathology',
+        department: (test.department || '').trim() || null,
+        description: (test.description || '').trim() || null,
+        price: Number(test.price) >= 0 ? Number(test.price) : 0,
+        status: 'ACTIVE',
+        tatHours: 24,
+      });
+    }
+
+    if (validNewTests.length === 0) {
+      return {
+        importedCount: 0,
+        skippedCount,
+        failedCount: 0,
+        results: [],
+      };
+    }
+
+    // Insert all valid tests in a single transaction
+    const created = await prisma.$transaction(
+      validNewTests.map((t) => prisma.labTest.create({ data: t }))
+    );
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'BULK_IMPORT_LAB_TESTS',
+      entity: 'LabTest',
+      entityId: labId,
+      details: {
+        importedCount: created.length,
+        skippedCount,
+      },
+    });
+
+    return {
+      importedCount: created.length,
+      skippedCount,
+      failedCount: 0,
+      results: created,
+      summary: {
+        imported: created.length,
+        duplicatesSkipped: skippedCount,
+        errorsCount: 0,
+      },
+    };
+  }
+
+  /**
+   * Export lab tests catalog with filtering options into Excel (.xlsx) or CSV (.csv)
+   */
+  static async exportLabTests(
+    labId: string,
+    filters: {
+      category?: string;
+      department?: string;
+      status?: string;
+      testIds?: string[];
+      search?: string;
+      format?: string;
+    },
+    format: 'xlsx' | 'csv' = 'xlsx'
+  ): Promise<{ buffer: Buffer; contentType: string; filename: string; totalExported: number }> {
+    const where: any = { labId };
+
+    if (filters.category && filters.category !== 'ALL') {
+      where.category = filters.category;
+    }
+
+    if (filters.department && filters.department !== 'ALL') {
+      where.department = filters.department;
+    }
+
+    if (filters.status && filters.status !== 'ALL') {
+      where.status = filters.status;
+    }
+
+    if (filters.testIds && filters.testIds.length > 0) {
+      where.id = { in: filters.testIds };
+    }
+
+    if (filters.search) {
+      where.OR = [
+        { name: { contains: filters.search } },
+        { code: { contains: filters.search } },
+        { description: { contains: filters.search } },
+      ];
+    }
+
+    const tests = await prisma.labTest.findMany({
+      where,
+      orderBy: [{ department: 'asc' }, { category: 'asc' }, { name: 'asc' }],
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'RocketWheel MedPulse Platform';
+    workbook.created = new Date();
+
+    const sheet = workbook.addWorksheet('Diagnostic Test Catalog');
+    sheet.columns = [
+      { header: 'Test Code', key: 'code', width: 16 },
+      { header: 'Test Name', key: 'name', width: 34 },
+      { header: 'Category', key: 'category', width: 22 },
+      { header: 'Department', key: 'department', width: 22 },
+      { header: 'Description', key: 'description', width: 45 },
+      { header: 'Price (INR)', key: 'price', width: 16 },
+      { header: 'Status', key: 'status', width: 14 },
+      { header: 'Turnaround Time (Hours)', key: 'tatHours', width: 25 },
+      { header: 'Created Date', key: 'createdAt', width: 20 },
+    ];
+
+    // Header styling
+    const headerRow = sheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF6B21A8' }, // Rich Purple
+    };
+    headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+    headerRow.height = 28;
+
+    tests.forEach((t) => {
+      const row = sheet.addRow({
+        code: t.code || '—',
+        name: t.name,
+        category: t.category || 'Pathology',
+        department: t.department || t.category || 'Pathology',
+        description: t.description || '—',
+        price: t.price,
+        status: t.status,
+        tatHours: t.tatHours || 24,
+        createdAt: new Date(t.createdAt).toLocaleDateString('en-IN'),
+      });
+      row.alignment = { vertical: 'middle', horizontal: 'left' };
+      row.font = { size: 9.5 };
+    });
+
+    const dateTag = new Date().toISOString().split('T')[0];
+    const resolvedFormat = (filters.format || format || 'xlsx').toLowerCase();
+    if (resolvedFormat === 'csv') {
+      const csvBuffer = await workbook.csv.writeBuffer();
+      return {
+        buffer: Buffer.from(csvBuffer),
+        contentType: 'text/csv',
+        filename: `Lab_Tests_Export_${dateTag}.csv`,
+        totalExported: tests.length,
+      };
+    }
+
+    const xlsxBuffer = await workbook.xlsx.writeBuffer();
+    return {
+      buffer: Buffer.from(xlsxBuffer),
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      filename: `Lab_Tests_Export_${dateTag}.xlsx`,
+      totalExported: tests.length,
+    };
   }
 
   // -------------------------------------------------------------

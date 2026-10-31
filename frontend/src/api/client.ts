@@ -151,4 +151,10 @@ export const uploadApi = {
       body: JSON.stringify({ fileData, assetType, hospitalId }),
     });
   },
+  uploadDoctorAsset: async (fileData: string, assetType: 'header' | 'footer' = 'header') => {
+    return apiClient<{ url: string; doctor: any }>('/upload/doctor-asset', {
+      method: 'POST',
+      body: JSON.stringify({ fileData, assetType }),
+    });
+  },
 };

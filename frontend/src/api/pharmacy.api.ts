@@ -28,6 +28,9 @@ export const pharmacyApi = {
     }
   ) => api.patch<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/replace-medicine`, data),
 
+  deleteMedicine: (prescriptionId: string, medicineIndex: number, reason?: string) =>
+    api.delete<Prescription>(`/pharmacy/prescriptions/${prescriptionId}/medicines/${medicineIndex}${reason ? `?reason=${encodeURIComponent(reason)}` : ''}`),
+
   downloadPrescriptionPdf: async (prescriptionId: string): Promise<Blob> => {
     const token =
       localStorage.getItem('rocketwheel_access_token') ||

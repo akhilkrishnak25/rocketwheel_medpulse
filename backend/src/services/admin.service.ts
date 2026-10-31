@@ -2250,5 +2250,128 @@ export class AdminService {
     await workbook.xlsx.write(res);
     res.end();
   }
+
+  // -------------------------------------------------------------
+  // HOSPITAL PDF BRANDING MANAGEMENT
+  // -------------------------------------------------------------
+  static async getHospitalBranding(hospitalId: string) {
+    let branding = await prisma.hospitalBranding.findUnique({
+      where: { hospitalId },
+    });
+
+    if (!branding) {
+      const hospital = await prisma.hospital.findUnique({
+        where: { id: hospitalId },
+      });
+      branding = await prisma.hospitalBranding.create({
+        data: {
+          hospitalId,
+          hospitalName: hospital?.name || 'RocketWheel MedPulse Hospital',
+          address: hospital ? `${hospital.address}, ${hospital.city}` : 'Hospital Address',
+          phone: hospital?.phone || '',
+          email: hospital?.email || '',
+          logoUrl: hospital?.logoUrl || null,
+          headerStyle: 'CLASSIC',
+          footerText: `${hospital?.name || 'RocketWheel MedPulse'} Clinical Documentation System • Valid without physical signature under IT Act 2000.`,
+          contactInfo: hospital?.phone ? `Helpline: ${hospital.phone}` : '',
+          disclaimer: 'This is an electronically generated and verified medical document. For critical emergency care, please visit the emergency triage department immediately.',
+          showPageNumbers: true,
+          watermarkType: 'NONE',
+          watermarkText: hospital?.name || 'HOSPITAL CONSULTATION',
+          watermarkOpacity: 0.08,
+          watermarkSize: 48,
+          watermarkPosition: 'CENTER',
+          watermarkRotation: -30,
+        },
+      });
+    }
+
+    return {
+      ...branding,
+      headerImageUrl: branding.headerImageUrl || null,
+      footerImageUrl: branding.footerImageUrl || null,
+      headerLogoUrl: branding.logoUrl,
+      contactPhone: branding.phone,
+      contactEmail: branding.email,
+      watermarkEnabled: branding.watermarkType !== 'NONE',
+    };
+  }
+
+  static async updateHospitalBranding(
+    hospitalId: string,
+    data: any,
+    requestingUserId?: string
+  ) {
+    const hospital = await prisma.hospital.findUnique({ where: { id: hospitalId } });
+    if (!hospital) throw new Error('Hospital not found');
+
+    const watermarkEnabled = data.watermarkEnabled !== undefined ? Boolean(data.watermarkEnabled) : undefined;
+    const resolvedWatermarkType = watermarkEnabled === false ? 'NONE' : (data.watermarkType || 'TEXT');
+
+    const updateData: any = {
+      headerImageUrl: data.headerImageUrl !== undefined ? (data.headerImageUrl || null) : undefined,
+      footerImageUrl: data.footerImageUrl !== undefined ? (data.footerImageUrl || null) : undefined,
+      logoUrl: data.headerLogoUrl !== undefined ? data.headerLogoUrl : (data.logoUrl !== undefined ? data.logoUrl : undefined),
+      hospitalName: data.hospitalName !== undefined ? data.hospitalName : undefined,
+      address: data.address !== undefined ? data.address : undefined,
+      phone: data.contactPhone !== undefined ? data.contactPhone : (data.phone !== undefined ? data.phone : undefined),
+      email: data.contactEmail !== undefined ? data.contactEmail : (data.email !== undefined ? data.email : undefined),
+      website: data.website !== undefined ? data.website : undefined,
+      regDetails: data.regDetails !== undefined ? data.regDetails : undefined,
+      headerStyle: data.headerStyle !== undefined ? data.headerStyle : undefined,
+
+      footerText: data.footerText !== undefined ? data.footerText : undefined,
+      contactInfo: data.contactInfo !== undefined ? data.contactInfo : (data.footerPhone ? `Helpline: ${data.footerPhone}` : undefined),
+      disclaimer: data.disclaimer !== undefined ? data.disclaimer : undefined,
+      showPageNumbers: data.showPageNumbers !== undefined ? Boolean(data.showPageNumbers) : undefined,
+
+      watermarkType: data.watermarkEnabled !== undefined || data.watermarkType !== undefined ? resolvedWatermarkType : undefined,
+      watermarkText: data.watermarkText !== undefined ? data.watermarkText : undefined,
+      watermarkImageUrl: data.watermarkImageUrl !== undefined ? data.watermarkImageUrl : undefined,
+      watermarkOpacity: data.watermarkOpacity !== undefined ? Number(data.watermarkOpacity) : undefined,
+      watermarkSize: data.watermarkSize !== undefined ? Number(data.watermarkSize) : undefined,
+      watermarkPosition: data.watermarkPosition !== undefined ? data.watermarkPosition : undefined,
+      watermarkRotation: data.watermarkRotation !== undefined ? Number(data.watermarkRotation) : undefined,
+    };
+
+    // Clean undefined keys
+    Object.keys(updateData).forEach((key) => {
+      if (updateData[key] === undefined) delete updateData[key];
+    });
+
+    const branding = await prisma.hospitalBranding.upsert({
+      where: { hospitalId },
+      create: {
+        hospitalId,
+        ...updateData,
+      },
+      update: updateData,
+    });
+
+    // If headerLogoUrl or hospitalName changed, also sync hospital table if provided
+    const logoToSync = data.headerLogoUrl || data.logoUrl;
+    if (logoToSync) {
+      await prisma.hospital.update({
+        where: { id: hospitalId },
+        data: { logoUrl: logoToSync },
+      });
+    }
+
+    await AuditService.log({
+      userId: requestingUserId,
+      action: 'UPDATE_HOSPITAL_PDF_BRANDING',
+      entity: 'HospitalBranding',
+      entityId: branding.id,
+      details: { hospitalId, watermarkType: branding.watermarkType },
+    });
+
+    return {
+      ...branding,
+      headerLogoUrl: branding.logoUrl,
+      contactPhone: branding.phone,
+      contactEmail: branding.email,
+      watermarkEnabled: branding.watermarkType !== 'NONE',
+    };
+  }
 }
 

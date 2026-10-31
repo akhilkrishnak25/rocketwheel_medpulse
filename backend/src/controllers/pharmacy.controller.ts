@@ -78,6 +78,34 @@ export class PharmacyController {
     }
   }
 
+  static async deleteMedicine(req: Request, res: Response) {
+    try {
+      const pharmacyId = req.user?.pharmacyId;
+      const prescriptionId = req.params.prescriptionId as string;
+      const medicineIndex = req.params.medicineIndex !== undefined 
+        ? req.params.medicineIndex 
+        : req.body.medicineIndex;
+      const reason = req.body.reason || req.query.reason;
+
+      if (medicineIndex === undefined || isNaN(Number(medicineIndex))) {
+        return errorResponse(res, 'Valid medicine index is required for deletion', 400);
+      }
+
+      const updated = await PharmacyService.deleteMedicine(
+        prescriptionId,
+        pharmacyId,
+        Number(medicineIndex),
+        req.user?.userId || req.user?.id || 'pharmacy-staff',
+        req.user?.email || 'Pharmacy Staff',
+        reason ? String(reason) : undefined
+      );
+
+      return successResponse(res, updated, 'Medicine removed from pharmacy dispensing list');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to delete medicine', 400);
+    }
+  }
+
   static async downloadPrescriptionPdf(req: Request, res: Response) {
     try {
       const prescriptionId = req.params.prescriptionId as string;
