@@ -6,20 +6,82 @@ import { NotificationService } from './notification.service';
 
 export class LabService {
   /**
-   * Fetch lab test requests scoped to a laboratory, with optional status filter
+   * Fetch lab test requests scoped to a laboratory, with optional status, source, date, and search filters
    */
-  static async getTestRequests(labId: string, status?: string) {
+  static async getTestRequests(
+    labId: string,
+    filters?: {
+      status?: string;
+      source?: string;
+      search?: string;
+      startDate?: string;
+      endDate?: string;
+      testName?: string;
+    } | string
+  ) {
+    const opts = typeof filters === 'string' ? { status: filters } : (filters || {});
     const where: any = { labId };
 
-    if (status && status !== 'ALL') {
-      const upper = status.toUpperCase();
+    if (opts.status && opts.status !== 'ALL') {
+      const upper = opts.status.toUpperCase().trim();
       if (upper === 'RECEIVED' || upper === 'ACCEPTED') {
         where.status = { in: ['ACCEPTED', 'RECEIVED', 'APPROVED'] };
       } else if (upper === 'CANCELLED' || upper === 'REJECTED') {
         where.status = { in: ['CANCELLED', 'REJECTED'] };
+      } else if (upper === 'PENDING' || upper === 'REQUESTED') {
+        where.status = { in: ['REQUESTED', 'PENDING'] };
+      } else if (upper === 'SAMPLE_COLLECTED' || upper === 'SAMPLE COLLECTED') {
+        where.status = 'SAMPLE_COLLECTED';
       } else {
         where.status = upper;
       }
+    }
+
+    if (opts.source && opts.source !== 'ALL') {
+      const srcUpper = opts.source.toUpperCase().trim();
+      if (srcUpper === 'HOSPITAL' || srcUpper === 'HOSPITAL_SENT') {
+        where.OR = [
+          { bookingSource: 'HOSPITAL' },
+          { doctorId: { not: null } },
+          { appointmentId: { not: null } },
+        ];
+      } else if (srcUpper === 'DIRECT_PATIENT' || srcUpper === 'PATIENT' || srcUpper === 'DIRECT') {
+        where.bookingSource = 'DIRECT_PATIENT';
+        where.doctorId = null;
+        where.appointmentId = null;
+      }
+    }
+
+    if (opts.startDate || opts.endDate) {
+      where.createdAt = {};
+      if (opts.startDate) {
+        where.createdAt.gte = new Date(opts.startDate);
+      }
+      if (opts.endDate) {
+        const end = new Date(opts.endDate);
+        end.setHours(23, 59, 59, 999);
+        where.createdAt.lte = end;
+      }
+    }
+
+    if (opts.testName && opts.testName.trim()) {
+      where.tests = { contains: opts.testName.trim(), mode: 'insensitive' };
+    }
+
+    if (opts.search && opts.search.trim()) {
+      const q = opts.search.trim();
+      where.AND = [
+        ...(where.AND || []),
+        {
+          OR: [
+            { requestNumber: { contains: q, mode: 'insensitive' } },
+            { patient: { fullName: { contains: q, mode: 'insensitive' } } },
+            { patient: { mobileNumber: { contains: q } } },
+            { patient: { patientIdNumber: { contains: q, mode: 'insensitive' } } },
+            { tests: { contains: q, mode: 'insensitive' } },
+          ],
+        },
+      ];
     }
 
     where.NOT = {
@@ -40,6 +102,8 @@ export class LabService {
             gender: true,
             dateOfBirth: true,
             bloodGroup: true,
+            age: true,
+            address: true,
           },
         },
         doctor: { select: { id: true, name: true, specialization: true } },
@@ -56,21 +120,155 @@ export class LabService {
       } catch {
         parsedTests = [{ name: r.tests }];
       }
+      const isHospital = Boolean(r.doctorId || r.appointmentId || r.bookingSource === 'HOSPITAL');
       return {
         ...r,
+        bookingSource: isHospital ? 'HOSPITAL' : 'DIRECT_PATIENT',
         testsList: parsedTests,
       };
     });
   }
 
   /**
-   * Update request status (supports ACCEPTED, RECEIVED, PROCESSING, CANCELLED, REJECTED)
+   * Summary KPI metrics for Lab Admin Dashboard
+   */
+  static async getLabStats(labId: string) {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const [
+      totalHospitalRequests,
+      pendingHospitalRequests,
+      directPatientBookings,
+      todayBookings,
+      testsInProgress,
+      completedTests,
+    ] = await Promise.all([
+      prisma.labTestRequest.count({
+        where: {
+          labId,
+          OR: [
+            { bookingSource: 'HOSPITAL' },
+            { doctorId: { not: null } },
+            { appointmentId: { not: null } },
+          ],
+          NOT: { appointment: { status: 'DRAFT' } },
+        },
+      }),
+      prisma.labTestRequest.count({
+        where: {
+          labId,
+          OR: [
+            { bookingSource: 'HOSPITAL' },
+            { doctorId: { not: null } },
+            { appointmentId: { not: null } },
+          ],
+          status: { in: ['REQUESTED', 'PENDING'] },
+          NOT: { appointment: { status: 'DRAFT' } },
+        },
+      }),
+      prisma.labTestRequest.count({
+        where: {
+          labId,
+          bookingSource: 'DIRECT_PATIENT',
+          doctorId: null,
+          appointmentId: null,
+        },
+      }),
+      prisma.labTestRequest.count({
+        where: {
+          labId,
+          createdAt: { gte: todayStart },
+          NOT: { appointment: { status: 'DRAFT' } },
+        },
+      }),
+      prisma.labTestRequest.count({
+        where: {
+          labId,
+          status: { in: ['PROCESSING', 'SAMPLE_COLLECTED'] },
+        },
+      }),
+      prisma.labTestRequest.count({
+        where: {
+          labId,
+          status: 'COMPLETED',
+        },
+      }),
+    ]);
+
+    return {
+      totalHospitalRequests,
+      pendingHospitalRequests,
+      directPatientBookings,
+      todayBookings,
+      testsInProgress,
+      completedTests,
+    };
+  }
+
+  /**
+   * Get laboratory profile & settings (including price visibility)
+   */
+  static async getLabSettings(labId: string) {
+    const lab = await prisma.lab.findUnique({
+      where: { id: labId },
+      include: {
+        hospital: { select: { id: true, name: true, city: true } },
+      },
+    });
+    if (!lab) throw new Error('Laboratory not found');
+    return {
+      id: lab.id,
+      name: lab.name,
+      type: lab.type,
+      email: lab.email,
+      phone: lab.phone,
+      address: lab.address,
+      city: lab.city,
+      licenseNumber: lab.licenseNumber,
+      visibility: lab.visibility,
+      showPrices: lab.showPrices ?? true,
+      hospital: lab.hospital,
+    };
+  }
+
+  /**
+   * Toggle Show Prices / Hide Prices for direct patients
+   */
+  static async updatePriceVisibility(labId: string, showPrices: boolean, userId?: string) {
+    const updated = await prisma.lab.update({
+      where: { id: labId },
+      data: { showPrices: Boolean(showPrices) },
+    });
+
+    try {
+      await AuditService.log({
+        userId,
+        action: 'UPDATE_LAB_PRICE_VISIBILITY',
+        entity: 'Lab',
+        entityId: labId,
+        details: { showPrices: Boolean(showPrices) },
+      });
+    } catch (err) {
+      console.warn('AuditLog creation skipped in updatePriceVisibility:', err);
+    }
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      showPrices: updated.showPrices,
+    };
+  }
+
+  /**
+   * Update request status (supports ACCEPTED, SAMPLE_COLLECTED, PROCESSING, COMPLETED, CANCELLED)
    */
   static async updateRequestStatus(
     labId: string,
     requestId: string,
     rawStatus: string,
-    technicianUserId?: string
+    technicianUserId?: string,
+    paymentStatus?: string
   ) {
     const request = await prisma.labTestRequest.findFirst({
       where: { id: requestId, labId },
@@ -90,17 +288,31 @@ export class LabService {
       normalizedStatus = 'ACCEPTED';
     } else if (upper === 'REJECTED' || upper === 'CANCELLED') {
       normalizedStatus = 'CANCELLED';
+    } else if (upper === 'SAMPLE_COLLECTED' || upper === 'SAMPLE COLLECTED') {
+      normalizedStatus = 'SAMPLE_COLLECTED';
     } else if (upper === 'PROCESSING') {
       normalizedStatus = 'PROCESSING';
     } else if (upper === 'COMPLETED') {
       normalizedStatus = 'COMPLETED';
+    } else if (upper === 'PENDING' || upper === 'REQUESTED') {
+      normalizedStatus = 'REQUESTED';
     } else {
-      throw new Error(`Invalid status transition to '${rawStatus}'. Allowed: ACCEPTED, PROCESSING, CANCELLED.`);
+      throw new Error(
+        `Invalid status transition to '${rawStatus}'. Allowed: ACCEPTED, SAMPLE_COLLECTED, PROCESSING, COMPLETED, CANCELLED.`
+      );
+    }
+
+    const updateData: any = { status: normalizedStatus };
+    if (paymentStatus) {
+      const payUpper = paymentStatus.toUpperCase().trim();
+      if (['PENDING', 'PAID', 'COMPLETED'].includes(payUpper)) {
+        updateData.paymentStatus = payUpper;
+      }
     }
 
     const updated = await prisma.labTestRequest.update({
       where: { id: requestId },
-      data: { status: normalizedStatus },
+      data: updateData,
       include: { patient: true, doctor: true, report: true },
     });
 
@@ -112,6 +324,7 @@ export class LabService {
       details: {
         rawStatus,
         normalizedStatus,
+        paymentStatus,
         requestNumber: request.requestNumber,
         patientName: request.patient.fullName,
       },
@@ -1024,6 +1237,7 @@ export class LabService {
       licenseNumber: l.licenseNumber,
       status: l.status,
       visibility: l.visibility,
+      showPrices: l.showPrices ?? true,
       hospital: l.hospital,
       testsCount: l._count.tests,
       requestsCount: l._count.testRequests,
@@ -1059,13 +1273,13 @@ export class LabService {
     if (search && search.trim()) {
       const q = search.trim();
       where.OR = [
-        { name: { contains: q } },
-        { code: { contains: q } },
-        { description: { contains: q } },
+        { name: { contains: q, mode: 'insensitive' } },
+        { code: { contains: q, mode: 'insensitive' } },
+        { description: { contains: q, mode: 'insensitive' } },
       ];
     }
 
-    return prisma.labTest.findMany({
+    const tests = await prisma.labTest.findMany({
       where,
       include: {
         lab: {
@@ -1074,11 +1288,23 @@ export class LabService {
             name: true,
             type: true,
             visibility: true,
+            showPrices: true,
             hospital: { select: { id: true, name: true, city: true } },
           },
         },
       },
       orderBy: [{ category: 'asc' }, { name: 'asc' }],
+    });
+
+    const isHospitalStaff = Boolean(userHospitalId);
+    return tests.map((t) => {
+      const isPriceVisible = isHospitalStaff || (t.lab?.showPrices !== false);
+      return {
+        ...t,
+        isPriceVisible,
+        price: isPriceVisible ? t.price : 0,
+        displayPrice: isPriceVisible ? `₹${t.price}` : 'Price on Request',
+      };
     });
   }
 
@@ -1192,6 +1418,8 @@ export class LabService {
         labId,
         hospitalId: lab.hospitalId || undefined,
         patientId: patient.id,
+        bookingSource: 'DIRECT_PATIENT',
+        paymentStatus: 'PENDING',
         tests: JSON.stringify(formattedTests),
         clinicalNotes: notes?.trim() || 'Direct Customer Online Booking',
         priority: 'NORMAL',
@@ -1201,7 +1429,7 @@ export class LabService {
       },
       include: {
         patient: true,
-        lab: { select: { id: true, name: true, type: true } },
+        lab: { select: { id: true, name: true, type: true, showPrices: true } },
       },
     });
 
@@ -1217,14 +1445,22 @@ export class LabService {
       },
     });
 
+    const isPriceVisible = lab.showPrices ?? true;
+
     return {
       success: true,
       requestNumber: booking.requestNumber,
       id: booking.id,
       patientName: patient.fullName,
       labName: lab.name,
-      tests: formattedTests,
-      totalAmount,
+      tests: formattedTests.map((t) => ({
+        ...t,
+        isPriceVisible,
+        price: isPriceVisible ? t.price : 0,
+        displayPrice: isPriceVisible ? `₹${t.price}` : 'Price on Request',
+      })),
+      totalAmount: isPriceVisible ? totalAmount : undefined,
+      showPrices: isPriceVisible,
       preferredDate,
       status: booking.status,
     };
@@ -1240,7 +1476,7 @@ export class LabService {
       },
       include: {
         patient: { select: { fullName: true, mobileNumber: true, patientIdNumber: true } },
-        lab: { select: { id: true, name: true, type: true } },
+        lab: { select: { id: true, name: true, type: true, showPrices: true } },
         hospital: { select: { name: true, city: true } },
         report: true,
       },
@@ -1248,9 +1484,22 @@ export class LabService {
 
     if (!booking) throw new Error('Requisition record not found.');
 
+    const isPriceVisible = booking.lab?.showPrices !== false;
+    let testsList = JSON.parse(booking.tests || '[]');
+    if (!isPriceVisible) {
+      testsList = testsList.map((t: any) => ({
+        ...t,
+        isPriceVisible: false,
+        price: 0,
+        displayPrice: 'Price on Request',
+      }));
+    }
+
     return {
       ...booking,
-      testsList: JSON.parse(booking.tests || '[]'),
+      isPriceVisible,
+      totalAmount: isPriceVisible ? booking.totalAmount : undefined,
+      testsList,
     };
   }
 }

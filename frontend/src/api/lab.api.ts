@@ -2,12 +2,43 @@ import { api, getApiBaseUrl } from './client';
 import { LabTestRequest, LabReport } from '../types';
 
 export const labApi = {
-  // Technician Requisitions & Reports
-  getRequests: (status?: string) =>
-    api.get<LabTestRequest[]>(`/lab/requests${status ? `?status=${status}` : ''}`),
+  // Lab Admin Dashboard Metrics & Settings
+  getStats: () => api.get<any>('/lab/stats'),
 
-  updateStatus: (requestId: string, status: string) =>
-    api.patch<LabTestRequest>(`/lab/requests/${requestId}/status`, { status }),
+  getSettings: () => api.get<any>('/lab/settings'),
+
+  updatePriceVisibility: (showPrices: boolean) =>
+    api.patch<any>('/lab/settings/price-visibility', { showPrices }),
+
+  // Technician / Lab Admin Requisitions & Reports
+  getRequests: (
+    params?:
+      | {
+          status?: string;
+          source?: string;
+          search?: string;
+          startDate?: string;
+          endDate?: string;
+          testName?: string;
+        }
+      | string
+  ) => {
+    if (typeof params === 'string') {
+      return api.get<LabTestRequest[]>(`/lab/requests${params ? `?status=${params}` : ''}`);
+    }
+    const query = new URLSearchParams();
+    if (params?.status && params.status !== 'ALL') query.append('status', params.status);
+    if (params?.source && params.source !== 'ALL') query.append('source', params.source);
+    if (params?.search) query.append('search', params.search);
+    if (params?.startDate) query.append('startDate', params.startDate);
+    if (params?.endDate) query.append('endDate', params.endDate);
+    if (params?.testName) query.append('testName', params.testName);
+    const qs = query.toString();
+    return api.get<LabTestRequest[]>(`/lab/requests${qs ? `?${qs}` : ''}`);
+  },
+
+  updateStatus: (requestId: string, status: string, paymentStatus?: string) =>
+    api.patch<LabTestRequest>(`/lab/requests/${requestId}/status`, { status, paymentStatus }),
 
   submitReport: (
     requestId: string,

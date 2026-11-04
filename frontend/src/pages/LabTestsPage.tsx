@@ -235,7 +235,13 @@ export const LabTestsPage: React.FC = () => {
               </div>
               <div>
                 <span className="text-slate-500 block">Total Amount Payable at Center</span>
-                <strong className="text-emerald-700 font-black text-base">₹{bookingConfirmation.totalAmount}</strong>
+                {bookingConfirmation.showPrices !== false && bookingConfirmation.totalAmount !== undefined ? (
+                  <strong className="text-emerald-700 font-black text-base">₹{bookingConfirmation.totalAmount}</strong>
+                ) : (
+                  <strong className="text-slate-700 font-bold text-sm bg-slate-100 px-2.5 py-0.5 rounded-lg inline-block">
+                    Fee upon arrival at center
+                  </strong>
+                )}
               </div>
             </div>
 
@@ -245,7 +251,13 @@ export const LabTestsPage: React.FC = () => {
                 {(bookingConfirmation.tests || []).map((t: any, i: number) => (
                   <div key={i} className="p-2.5 bg-white rounded-xl border border-slate-200 flex justify-between items-center text-xs">
                     <span className="font-semibold text-slate-800">• {t.name}</span>
-                    <span className="font-bold text-purple-700">₹{t.price}</span>
+                    {t.isPriceVisible !== false && t.price ? (
+                      <span className="font-bold text-purple-700">₹{t.price}</span>
+                    ) : (
+                      <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                        Price on Request
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -448,10 +460,21 @@ export const LabTestsPage: React.FC = () => {
 
                         <div className="flex sm:flex-col items-center sm:items-end justify-between gap-3 shrink-0 pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100">
                           <div className="text-left sm:text-right">
-                            <span className="text-[10px] text-slate-400 block font-medium">Fixed Lab Fee</span>
-                            <span className="text-xl font-black text-slate-900">
-                              ₹{test.price}
-                            </span>
+                            {test.isPriceVisible !== false && test.lab?.showPrices !== false ? (
+                              <>
+                                <span className="text-[10px] text-slate-400 block font-medium">Fixed Lab Fee</span>
+                                <span className="text-xl font-black text-slate-900">
+                                  ₹{test.price}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-[10px] text-slate-400 block font-medium">Pricing</span>
+                                <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg inline-block">
+                                  Price on Request
+                                </span>
+                              </>
+                            )}
                           </div>
 
                           {isInCart ? (
@@ -515,7 +538,13 @@ export const LabTestsPage: React.FC = () => {
                           <span className="text-[10px] text-slate-400">{t.category}</span>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <span className="font-bold text-purple-700">₹{t.price}</span>
+                          {t.isPriceVisible !== false && t.lab?.showPrices !== false ? (
+                            <span className="font-bold text-purple-700">₹{t.price}</span>
+                          ) : (
+                            <span className="text-[10px] font-semibold text-slate-500 bg-slate-200/70 px-2 py-0.5 rounded">
+                              Price on Request
+                            </span>
+                          )}
                           <button
                             type="button"
                             onClick={() => handleRemoveFromCart(t.id)}
@@ -531,7 +560,13 @@ export const LabTestsPage: React.FC = () => {
 
                   <div className="pt-3 border-t border-slate-100 flex items-center justify-between font-bold">
                     <span className="text-slate-700 text-xs">Total Estimated Fee:</span>
-                    <span className="text-xl font-black text-purple-900">₹{totalCartAmount}</span>
+                    {cartTests.some((t) => t.isPriceVisible !== false && t.lab?.showPrices !== false) ? (
+                      <span className="text-xl font-black text-purple-900">₹{totalCartAmount}</span>
+                    ) : (
+                      <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg">
+                        Fee upon arrival at center
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
@@ -645,7 +680,9 @@ export const LabTestsPage: React.FC = () => {
                   isLoading={bookMutation.isPending}
                   className="w-full bg-purple-600 hover:bg-purple-700 text-white font-extrabold py-3 rounded-xl shadow-md text-sm"
                 >
-                  Confirm Diagnostic Booking (₹{totalCartAmount})
+                  {cartTests.some((t) => t.isPriceVisible !== false && t.lab?.showPrices !== false)
+                    ? `Confirm Diagnostic Booking (₹${totalCartAmount})`
+                    : 'Confirm Diagnostic Booking'}
                 </Button>
               </form>
             </Card>

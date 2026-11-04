@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import prisma from '../config/prisma';
 import authRoutes from './auth.routes';
 import hospitalRoutes from './hospital.routes';
 import doctorRoutes from './doctor.routes';
@@ -31,13 +32,25 @@ router.use('/labs', publicLabRoutes);
 router.use('/pharmacy', pharmacyRoutes);
 router.use('/upload', uploadRoutes);
 
-// Health check endpoint
-router.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    service: 'MediPulse Multi-Hospital Core API',
-  });
+// Health check endpoint with database ping
+router.get('/health', async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1 as db_health`;
+    res.json({
+      status: 'healthy',
+      database: 'connected',
+      timestamp: new Date().toISOString(),
+      service: 'MediPulse Multi-Hospital Core API',
+    });
+  } catch (error: any) {
+    res.status(503).json({
+      status: 'degraded',
+      database: 'disconnected',
+      error: error.message || 'Database connection error',
+      timestamp: new Date().toISOString(),
+      service: 'MediPulse Multi-Hospital Core API',
+    });
+  }
 });
 
 // API Root Index

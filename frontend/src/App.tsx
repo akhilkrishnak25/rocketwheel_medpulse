@@ -90,6 +90,9 @@ export const App: React.FC = () => {
 
       {/* Diagnostic Lab Portal */}
       <Route path="/lab/queue" element={<LabTechnicianDashboardPage />} />
+      <Route path="/lab" element={<Navigate to="/lab/queue" replace />} />
+      <Route path="/lab/dashboard" element={<Navigate to="/lab/queue" replace />} />
+      <Route path="/lab-admin" element={<Navigate to="/lab/queue" replace />} />
 
       {/* Pharmacy Portal */}
       <Route path="/pharmacy/queue" element={<PharmacyDashboardPage />} />

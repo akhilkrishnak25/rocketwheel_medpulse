@@ -7,6 +7,11 @@ const router = Router();
 // Protect for LAB_TECHNICIAN, HOSPITAL_ADMIN, or SUPER_ADMIN
 router.use(authenticate, requireRole(['LAB_TECHNICIAN', 'HOSPITAL_ADMIN', 'SUPER_ADMIN']));
 
+// Lab Admin Dashboard & Metrics
+router.get('/stats', LabController.getStats);
+router.get('/settings', LabController.getSettings);
+router.patch('/settings/price-visibility', LabController.updatePriceVisibility);
+
 // Requisitions & Reports
 router.get('/requests', LabController.getRequests);
 router.patch('/requests/:requestId/status', LabController.updateStatus);

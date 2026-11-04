@@ -442,6 +442,7 @@ model Lab {
   licenseNumber String?
   status        String           @default("PENDING") // PENDING, APPROVED, ACTIVE, REJECTED, SUSPENDED
   visibility    String           @default("PUBLIC") // PUBLIC or PRIVATE (Hospital Admin controllable)
+  showPrices    Boolean          @default(true) // Configurable by Lab Admin: Show Prices / Hide Prices to direct patients
   technicians   LabTechnician[]
   testRequests  LabTestRequest[]
   tests         LabTest[]
@@ -496,10 +497,12 @@ model LabTestRequest {
   appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   labId         String?
   lab           Lab?         @relation(fields: [labId], references: [id], onDelete: SetNull)
+  bookingSource String       @default("HOSPITAL") // HOSPITAL, DIRECT_PATIENT
+  paymentStatus String       @default("PENDING")  // PENDING, PAID, COMPLETED
   tests         String       // JSON array of [{ name, code?, price?, notes? }]
   clinicalNotes String?     
   priority      String       @default("NORMAL") // NORMAL, URGENT
-  status        String       @default("REQUESTED") // REQUESTED, ACCEPTED, PROCESSING, COMPLETED, CANCELLED
+  status        String       @default("REQUESTED") // REQUESTED, ACCEPTED, SAMPLE_COLLECTED, PROCESSING, COMPLETED, CANCELLED
   report        LabReport?
   preferredDate String?
   totalAmount   Float?       @default(0)
@@ -508,6 +511,7 @@ model LabTestRequest {
 
   @@index([hospitalId, status])
   @@index([labId, status])
+  @@index([bookingSource])
 }
 
 model LabReport {

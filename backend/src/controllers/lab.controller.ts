@@ -5,17 +5,75 @@ import { submitLabReportSchema } from '../validators/schemas';
 
 export class LabController {
   // -------------------------------------------------------------
-  // REQUISITIONS MANAGEMENT (TECHNICIAN / HOSPITAL ADMIN)
+  // REQUISITIONS MANAGEMENT & LAB ADMIN DASHBOARD
   // -------------------------------------------------------------
-  static async getRequests(req: Request, res: Response) {
+  static async getStats(req: Request, res: Response) {
     try {
-      const labId = req.user?.labId;
+      const labId = await LabService.resolveLabForUser(req.user);
       if (!labId) {
         return errorResponse(res, 'Laboratory affiliation missing from session', 400);
       }
 
-      const { status } = req.query;
-      const requests = await LabService.getTestRequests(labId, status as string);
+      const stats = await LabService.getLabStats(labId);
+      return successResponse(res, stats, 'Laboratory summary metrics retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch laboratory stats', 500);
+    }
+  }
+
+  static async getSettings(req: Request, res: Response) {
+    try {
+      const labId = await LabService.resolveLabForUser(req.user);
+      if (!labId) {
+        return errorResponse(res, 'Laboratory affiliation missing from session', 400);
+      }
+
+      const settings = await LabService.getLabSettings(labId);
+      return successResponse(res, settings, 'Laboratory profile and settings retrieved');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to fetch laboratory settings', 500);
+    }
+  }
+
+  static async updatePriceVisibility(req: Request, res: Response) {
+    try {
+      const labId = await LabService.resolveLabForUser(req.user);
+      if (!labId) {
+        return errorResponse(res, 'Laboratory affiliation missing from session', 400);
+      }
+
+      const { showPrices } = req.body;
+      if (typeof showPrices !== 'boolean') {
+        return errorResponse(res, 'showPrices must be a boolean value', 400);
+      }
+
+      const updated = await LabService.updatePriceVisibility(labId, showPrices, req.user?.id);
+      return successResponse(
+        res,
+        updated,
+        `Price visibility to direct patients set to ${showPrices ? 'VISIBLE' : 'HIDDEN'}`
+      );
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to update price visibility', 400);
+    }
+  }
+
+  static async getRequests(req: Request, res: Response) {
+    try {
+      const labId = await LabService.resolveLabForUser(req.user);
+      if (!labId) {
+        return errorResponse(res, 'Laboratory affiliation missing from session', 400);
+      }
+
+      const { status, source, search, startDate, endDate, testName } = req.query;
+      const requests = await LabService.getTestRequests(labId, {
+        status: status as string,
+        source: source as string,
+        search: search as string,
+        startDate: startDate as string,
+        endDate: endDate as string,
+        testName: testName as string,
+      });
       return successResponse(res, requests, 'Diagnostic test requests retrieved');
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to fetch test requests', 500);
@@ -24,16 +82,22 @@ export class LabController {
 
   static async updateStatus(req: Request, res: Response) {
     try {
-      const labId = req.user?.labId;
+      const labId = await LabService.resolveLabForUser(req.user);
       if (!labId) return errorResponse(res, 'Laboratory session required', 400);
 
       const requestId = req.params.requestId as string;
-      const { status } = req.body;
-      if (!status) {
-        return errorResponse(res, 'Status is required', 400);
+      const { status, paymentStatus } = req.body;
+      if (!status && !paymentStatus) {
+        return errorResponse(res, 'Status or paymentStatus is required', 400);
       }
 
-      const updated = await LabService.updateRequestStatus(labId, requestId, status, req.user?.id);
+      const updated = await LabService.updateRequestStatus(
+        labId,
+        requestId,
+        status || 'ACCEPTED',
+        req.user?.id,
+        paymentStatus
+      );
       return successResponse(res, updated, `Test request status set to ${updated.status}`);
     } catch (error: any) {
       return errorResponse(res, error.message || 'Failed to update request status', 400);
@@ -42,7 +106,7 @@ export class LabController {
 
   static async submitReport(req: Request, res: Response) {
     try {
-      const labId = req.user?.labId;
+      const labId = await LabService.resolveLabForUser(req.user);
       if (!labId) return errorResponse(res, 'Laboratory session required', 400);
 
       const requestId = req.params.requestId as string;
@@ -67,7 +131,7 @@ export class LabController {
   // -------------------------------------------------------------
   static async getTests(req: Request, res: Response) {
     try {
-      const labId = req.user?.labId;
+      const labId = await LabService.resolveLabForUser(req.user);
       if (!labId) return errorResponse(res, 'Laboratory session required', 400);
 
       const { category, search } = req.query;
@@ -80,7 +144,7 @@ export class LabController {
 
   static async createTest(req: Request, res: Response) {
     try {
-      const labId = req.user?.labId;
+      const labId = await LabService.resolveLabForUser(req.user);
       if (!labId) return errorResponse(res, 'Laboratory session required', 400);
 
       const { code, testCode, name, testName, category, description, tatHours, price, status } = req.body;
@@ -112,7 +176,7 @@ export class LabController {
 
   static async updateTest(req: Request, res: Response) {
     try {
-      const labId = req.user?.labId;
+      const labId = await LabService.resolveLabForUser(req.user);
       if (!labId) return errorResponse(res, 'Laboratory session required', 400);
 
       const testId = req.params.testId as string;
@@ -140,7 +204,7 @@ export class LabController {
 
   static async toggleTest(req: Request, res: Response) {
     try {
-      const labId = req.user?.labId;
+      const labId = await LabService.resolveLabForUser(req.user);
       if (!labId) return errorResponse(res, 'Laboratory session required', 400);
 
       const testId = req.params.testId as string;
@@ -153,7 +217,7 @@ export class LabController {
 
   static async deleteTest(req: Request, res: Response) {
     try {
-      const labId = req.user?.labId;
+      const labId = await LabService.resolveLabForUser(req.user);
       if (!labId) return errorResponse(res, 'Laboratory session required', 400);
 
       const testId = req.params.testId as string;

@@ -26,6 +26,14 @@ import {
   Tag,
   ToggleLeft,
   ToggleRight,
+  Building2,
+  Users,
+  Settings,
+  Eye,
+  EyeOff,
+  RotateCcw,
+  ShieldCheck,
+  CreditCard,
 } from 'lucide-react';
 import { labApi } from '../api/lab.api';
 import { uploadApi, getMediaUrl } from '../api/client';
@@ -44,12 +52,16 @@ export const LabTechnicianDashboardPage: React.FC = () => {
   const toast = useToast();
   const { user, logout } = useAuth();
 
-  // Primary Tab: 'requests' | 'tests'
-  const [activeMainTab, setActiveMainTab] = useState<'requests' | 'tests'>('requests');
+  // Primary Tab: 'hospital' | 'direct' | 'all' | 'tests' | 'settings'
+  const [activeMainTab, setActiveMainTab] = useState<'hospital' | 'direct' | 'all' | 'tests' | 'settings'>('hospital');
 
-  // Requisitions States
+  // Unified Requisitions & Booking Filters
+  const [sourceFilter, setSourceFilter] = useState<'ALL' | 'HOSPITAL' | 'DIRECT_PATIENT'>('HOSPITAL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const [testNameFilter, setTestNameFilter] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [selectedRequest, setSelectedRequest] = useState<LabTestRequest | null>(null);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [viewingReportRequest, setViewingReportRequest] = useState<LabTestRequest | null>(null);
@@ -235,15 +247,61 @@ export const LabTechnicianDashboardPage: React.FC = () => {
     }
   };
 
-  // Fetch lab requests
-  const { data: requests, isLoading: isRequestsLoading, refetch: refetchRequests } = useQuery({
-    queryKey: ['lab-requests', statusFilter],
-    queryFn: () => labApi.getRequests(statusFilter === 'ALL' ? undefined : statusFilter),
-    refetchInterval: 10000,
-    enabled: activeMainTab === 'requests',
+  const effectiveSource =
+    activeMainTab === 'hospital'
+      ? 'HOSPITAL'
+      : activeMainTab === 'direct'
+      ? 'DIRECT_PATIENT'
+      : sourceFilter;
+
+  // Summary KPI Metrics Query
+  const { data: stats, refetch: refetchStats } = useQuery({
+    queryKey: ['lab-stats'],
+    queryFn: () => labApi.getStats(),
+    refetchInterval: 12000,
   });
 
-  // Immediate popup/toast notifications when new lab requests arrive (Requirement 13)
+  // Lab Settings & Price Visibility Query
+  const { data: settings, refetch: refetchSettings } = useQuery({
+    queryKey: ['lab-settings'],
+    queryFn: () => labApi.getSettings(),
+  });
+
+  // Toggle Price Visibility to Direct Patients Mutation (Requirement 1)
+  const updatePriceVisibilityMutation = useMutation({
+    mutationFn: (showPrices: boolean) => labApi.updatePriceVisibility(showPrices),
+    onSuccess: (_, vars) => {
+      toast.success(
+        'Price Visibility Updated',
+        vars
+          ? 'Diagnostic test prices are now visible to patients on direct booking.'
+          : 'Diagnostic test prices are now hidden from patients on direct booking.'
+      );
+      queryClient.invalidateQueries({ queryKey: ['lab-settings'] });
+      queryClient.invalidateQueries({ queryKey: ['public-lab-tests'] });
+    },
+    onError: (err: any) => {
+      toast.error('Failed to update price visibility', err.message);
+    },
+  });
+
+  // Fetch lab requests with unified server-side filters
+  const { data: requests = [], isLoading: isRequestsLoading, refetch: refetchRequests } = useQuery({
+    queryKey: ['lab-requests', effectiveSource, statusFilter, searchQuery, testNameFilter, startDate, endDate],
+    queryFn: () =>
+      labApi.getRequests({
+        source: effectiveSource === 'ALL' ? undefined : effectiveSource,
+        status: statusFilter === 'ALL' ? undefined : statusFilter,
+        search: searchQuery.trim() || undefined,
+        testName: testNameFilter.trim() || undefined,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+      }),
+    refetchInterval: 10000,
+    enabled: ['hospital', 'direct', 'all'].includes(activeMainTab),
+  });
+
+  // Immediate popup/toast notifications when new lab requests arrive
   const prevReqIdsRef = useRef<Set<string>>(new Set());
   const isInitialReqMount = useRef(true);
 
@@ -267,19 +325,20 @@ export const LabTechnicianDashboardPage: React.FC = () => {
   }, [requests, toast]);
 
   // Fetch lab tests catalog
-  const { data: labTests, isLoading: isTestsLoading, refetch: refetchLabTests } = useQuery({
+  const { data: labTests = [], isLoading: isTestsLoading, refetch: refetchLabTests } = useQuery({
     queryKey: ['technician-lab-tests', testCategoryFilter, testSearch],
     queryFn: () => labApi.getTests(testCategoryFilter === 'ALL' ? undefined : testCategoryFilter, testSearch || undefined),
     enabled: activeMainTab === 'tests',
   });
 
-  // Status update mutation (handles ACCEPTED, RECEIVED, PROCESSING, COMPLETED, CANCELLED)
+  // Status & payment update mutation
   const updateStatusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      labApi.updateStatus(id, status),
+    mutationFn: ({ id, status, paymentStatus }: { id: string; status: string; paymentStatus?: string }) =>
+      labApi.updateStatus(id, status, paymentStatus),
     onSuccess: (_, vars) => {
       toast.success('Status Updated', `Test requisition status set to ${vars.status}`);
       queryClient.invalidateQueries({ queryKey: ['lab-requests'] });
+      queryClient.invalidateQueries({ queryKey: ['lab-stats'] });
     },
     onError: (err: any) => {
       toast.error('Status Update Failed', err.message);
@@ -290,9 +349,10 @@ export const LabTechnicianDashboardPage: React.FC = () => {
   const submitReportMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => labApi.submitReport(id, data),
     onSuccess: () => {
-      toast.success('Lab Report Published', 'Diagnostic report saved and dispatched to patient and doctor');
+      toast.success('Lab Report Published', 'Diagnostic report saved and dispatched to patient and requesting hospital');
       resetReportForm();
       queryClient.invalidateQueries({ queryKey: ['lab-requests'] });
+      queryClient.invalidateQueries({ queryKey: ['lab-stats'] });
     },
     onError: (err: any) => {
       toast.error('Submission Failed', err.message);
@@ -347,7 +407,7 @@ export const LabTechnicianDashboardPage: React.FC = () => {
     },
   });
 
-  const filteredRequests = (requests || []).filter((req) => {
+  const filteredRequests = (requests || []).filter((req: any) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -379,19 +439,37 @@ export const LabTechnicianDashboardPage: React.FC = () => {
           <RocketWheelLogo size="sm" />
           <div className="border-l border-slate-700 pl-3">
             <span className="text-xs font-bold text-purple-400 block tracking-wider uppercase">
-              Diagnostic Laboratory Portal
+              Lab Admin & Pathology Operations Portal
             </span>
             <span className="text-sm font-extrabold text-white">
-              {user?.lab?.name || user?.hospital?.name || 'Accredited Pathology & Diagnostic Lab'}
+              {settings?.name || user?.lab?.name || user?.hospital?.name || 'Diagnostic Laboratory'}
             </span>
           </div>
         </div>
 
         <div className="flex items-center gap-4 text-xs">
+          {/* Price Visibility Quick Indicator (Requirement 1) */}
+          <div
+            onClick={() => setActiveMainTab('settings')}
+            className="hidden md:flex items-center gap-2 px-3 py-1 rounded-xl bg-slate-800/80 border border-slate-700/60 cursor-pointer hover:bg-slate-800 transition"
+            title="Click to configure patient price visibility"
+          >
+            <span className="text-[11px] text-slate-400">Patient Prices:</span>
+            {settings?.showPrices ? (
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400">
+                <Eye className="w-3.5 h-3.5" /> Visible
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-400">
+                <EyeOff className="w-3.5 h-3.5" /> Hidden
+              </span>
+            )}
+          </div>
+
           <div className="hidden sm:block text-right">
             <div className="font-bold text-slate-200">{user?.name}</div>
             <div className="text-[11px] text-purple-400 font-mono">
-              License: {user?.lab?.licenseNumber || 'ACCREDITED'}
+              License: {settings?.licenseNumber || user?.lab?.licenseNumber || 'ACCREDITED'}
             </div>
           </div>
           <Button
@@ -408,28 +486,65 @@ export const LabTechnicianDashboardPage: React.FC = () => {
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
         {/* Navigation Tabs */}
-        <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200 pb-3 gap-3">
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
+            {/* Tab 1: Hospital-Sent Tests */}
             <button
-              onClick={() => setActiveMainTab('requests')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-                activeMainTab === 'requests'
+              onClick={() => {
+                setActiveMainTab('hospital');
+                setSourceFilter('HOSPITAL');
+              }}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+                activeMainTab === 'hospital'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200'
+              }`}
+            >
+              <Building2 className="w-4 h-4" />
+              Hospital-Sent Tests
+              {(stats?.pendingHospitalRequests || 0) > 0 && (
+                <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+                  {stats?.pendingHospitalRequests} pending
+                </span>
+              )}
+            </button>
+
+            {/* Tab 2: Direct Patient Bookings */}
+            <button
+              onClick={() => {
+                setActiveMainTab('direct');
+                setSourceFilter('DIRECT_PATIENT');
+              }}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+                activeMainTab === 'direct'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200'
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              Direct Patient Bookings ({stats?.directPatientBookings || 0})
+            </button>
+
+            {/* Tab 3: Unified Queue */}
+            <button
+              onClick={() => {
+                setActiveMainTab('all');
+                setSourceFilter('ALL');
+              }}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+                activeMainTab === 'all'
                   ? 'bg-purple-600 text-white shadow-sm'
                   : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200'
               }`}
             >
               <FlaskConical className="w-4 h-4" />
-              Requisitions Queue
-              {(requests || []).filter((r: any) => r.status === 'REQUESTED').length > 0 && (
-                <span className="bg-rose-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">
-                  {(requests || []).filter((r: any) => r.status === 'REQUESTED').length}
-                </span>
-              )}
+              Unified Queue
             </button>
 
+            {/* Tab 4: Lab Tests & Pricing */}
             <button
               onClick={() => setActiveMainTab('tests')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
                 activeMainTab === 'tests'
                   ? 'bg-purple-600 text-white shadow-sm'
                   : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200'
@@ -438,193 +553,504 @@ export const LabTechnicianDashboardPage: React.FC = () => {
               <Tag className="w-4 h-4" />
               Lab Tests & Pricing ({(labTests || []).length})
             </button>
+
+            {/* Tab 5: Settings & Price Visibility */}
+            <button
+              onClick={() => setActiveMainTab('settings')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+                activeMainTab === 'settings'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200'
+              }`}
+            >
+              <Settings className="w-4 h-4" />
+              Settings & Price Visibility
+            </button>
           </div>
         </div>
 
+        {/* 3. DASHBOARD SUMMARY CARDS (Requirement 3) */}
+        {['hospital', 'direct', 'all'].includes(activeMainTab) && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+            {/* Card 1: Total Hospital Test Requests */}
+            <Card
+              onClick={() => {
+                setActiveMainTab('hospital');
+                setSourceFilter('HOSPITAL');
+                setStatusFilter('ALL');
+              }}
+              className="p-4 rounded-2xl border-slate-200 bg-white hover:border-blue-400 hover:shadow-md cursor-pointer transition-all"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Hospital Requests</span>
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                  <Building2 className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl font-black text-slate-900">{stats?.totalHospitalRequests ?? 0}</div>
+              <span className="text-[10px] text-blue-600 font-semibold">From OPD & Wards</span>
+            </Card>
+
+            {/* Card 2: Pending Hospital Requests */}
+            <Card
+              onClick={() => {
+                setActiveMainTab('hospital');
+                setSourceFilter('HOSPITAL');
+                setStatusFilter('REQUESTED');
+              }}
+              className="p-4 rounded-2xl border-slate-200 bg-white hover:border-amber-400 hover:shadow-md cursor-pointer transition-all"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Pending Hospital</span>
+                <div className="p-2 bg-amber-50 text-amber-600 rounded-xl">
+                  <Clock className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl font-black text-amber-700">{stats?.pendingHospitalRequests ?? 0}</div>
+              <span className="text-[10px] text-amber-600 font-semibold">Requires acceptance</span>
+            </Card>
+
+            {/* Card 3: Direct Patient Bookings */}
+            <Card
+              onClick={() => {
+                setActiveMainTab('direct');
+                setSourceFilter('DIRECT_PATIENT');
+                setStatusFilter('ALL');
+              }}
+              className="p-4 rounded-2xl border-slate-200 bg-white hover:border-purple-400 hover:shadow-md cursor-pointer transition-all"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Direct Bookings</span>
+                <div className="p-2 bg-purple-50 text-purple-600 rounded-xl">
+                  <Users className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl font-black text-purple-900">{stats?.directPatientBookings ?? 0}</div>
+              <span className="text-[10px] text-purple-600 font-semibold">Online Patient Portal</span>
+            </Card>
+
+            {/* Card 4: Today's Bookings */}
+            <Card
+              onClick={() => {
+                const todayStr = new Date().toISOString().split('T')[0];
+                setStartDate(todayStr);
+                setEndDate(todayStr);
+              }}
+              className="p-4 rounded-2xl border-slate-200 bg-white hover:border-emerald-400 hover:shadow-md cursor-pointer transition-all"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Today's Bookings</span>
+                <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
+                  <Calendar className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl font-black text-emerald-700">{stats?.todayBookings ?? 0}</div>
+              <span className="text-[10px] text-emerald-600 font-semibold">Received Today</span>
+            </Card>
+
+            {/* Card 5: Tests In Progress */}
+            <Card
+              onClick={() => {
+                setStatusFilter('PROCESSING');
+              }}
+              className="p-4 rounded-2xl border-slate-200 bg-white hover:border-cyan-400 hover:shadow-md cursor-pointer transition-all"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">In Progress</span>
+                <div className="p-2 bg-cyan-50 text-cyan-600 rounded-xl">
+                  <Activity className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl font-black text-cyan-700">{stats?.testsInProgress ?? 0}</div>
+              <span className="text-[10px] text-cyan-600 font-semibold">Sampling & Analysis</span>
+            </Card>
+
+            {/* Card 6: Completed Tests */}
+            <Card
+              onClick={() => {
+                setStatusFilter('COMPLETED');
+              }}
+              className="p-4 rounded-2xl border-slate-200 bg-white hover:border-teal-400 hover:shadow-md cursor-pointer transition-all"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Completed Tests</span>
+                <div className="p-2 bg-teal-50 text-teal-600 rounded-xl">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl font-black text-teal-700">{stats?.completedTests ?? 0}</div>
+              <span className="text-[10px] text-teal-600 font-semibold">Reports Delivered</span>
+            </Card>
+          </div>
+        )}
+
         {/* ======================================================== */}
-        {/* TAB 1: REQUISITIONS QUEUE */}
+        {/* TABS 1, 2, 3: HOSPITAL-SENT, DIRECT, AND UNIFIED REQUISITIONS */}
         {/* ======================================================== */}
-        {activeMainTab === 'requests' && (
+        {['hospital', 'direct', 'all'].includes(activeMainTab) && (
           <div className="space-y-6">
             {/* Title & Controls */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
-                  <FlaskConical className="w-6 h-6 text-purple-600" />
-                  Diagnostic Test Requests & Processing Queue
+                  {activeMainTab === 'hospital' ? (
+                    <>
+                      <Building2 className="w-6 h-6 text-blue-600" />
+                      Hospital-Sent Diagnostic Test Requests
+                    </>
+                  ) : activeMainTab === 'direct' ? (
+                    <>
+                      <Users className="w-6 h-6 text-purple-600" />
+                      Direct Patient Online Bookings
+                    </>
+                  ) : (
+                    <>
+                      <FlaskConical className="w-6 h-6 text-purple-600" />
+                      Unified Diagnostic Test Queue
+                    </>
+                  )}
                 </h1>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Receive patient test orders from OPD doctors and direct bookings, process specimens, and publish diagnostic findings
+                  {activeMainTab === 'hospital'
+                    ? 'Manage clinical diagnostic test orders received from hospital doctors, OPDs, and in-patient wards'
+                    : activeMainTab === 'direct'
+                    ? 'Manage self-scheduled lab appointments placed directly by patients through the MedPulse platform'
+                    : 'Manage both hospital-sent lab requests and direct patient online bookings in a unified workspace'}
                 </p>
               </div>
 
-              <div className="flex items-center gap-3">
-                <div className="relative min-w-[240px]">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Search requisition #, MRN, patient..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  />
-                </div>
-                <Button variant="outline" size="sm" onClick={() => refetchRequests()} className="text-xs shrink-0">
-                  Refresh
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => { refetchRequests(); refetchStats(); }} className="text-xs shrink-0">
+                  <RotateCcw className="w-3.5 h-3.5 mr-1" /> Refresh
                 </Button>
               </div>
             </div>
 
-            {/* Status Filter Tabs */}
-            <div className="flex bg-slate-200/80 p-1 rounded-xl text-xs font-bold overflow-x-auto no-scrollbar whitespace-nowrap max-w-fit">
-              {['ALL', 'REQUESTED', 'ACCEPTED', 'PROCESSING', 'COMPLETED', 'CANCELLED'].map((status) => (
-                <button
-                  key={status}
-                  onClick={() => setStatusFilter(status)}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${
-                    statusFilter === status
-                      ? 'bg-white text-purple-900 shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  {status === 'ALL' ? 'All Orders' : status}
-                </button>
-              ))}
-            </div>
+            {/* 4. FILTERS AND SEARCH (Requirement 4) */}
+            <Card className="p-4 rounded-2xl border-slate-200 bg-white shadow-xs space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 text-xs">
+                {/* Source Filter (when in Unified view) */}
+                {activeMainTab === 'all' && (
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">Booking Source</label>
+                    <select
+                      value={sourceFilter}
+                      onChange={(e) => setSourceFilter(e.target.value as any)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-medium focus:ring-2 focus:ring-purple-500"
+                    >
+                      <option value="ALL">All Sources</option>
+                      <option value="HOSPITAL">Hospital-Sent Tests</option>
+                      <option value="DIRECT_PATIENT">Direct Patient Bookings</option>
+                    </select>
+                  </div>
+                )}
 
-            {/* Requisitions Table */}
-            <Card className="rounded-2xl border-slate-200 shadow-sm overflow-hidden">
+                {/* Status Filter */}
+                <div className={activeMainTab === 'all' ? '' : 'sm:col-span-1'}>
+                  <label className="block font-semibold text-slate-700 mb-1">Test Status</label>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-medium focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="ALL">All Statuses</option>
+                    <option value="REQUESTED">Pending / Requested</option>
+                    <option value="ACCEPTED">Accepted</option>
+                    <option value="SAMPLE_COLLECTED">Sample Collected</option>
+                    <option value="PROCESSING">Processing / Testing</option>
+                    <option value="COMPLETED">Completed</option>
+                    <option value="CANCELLED">Cancelled / Rejected</option>
+                  </select>
+                </div>
+
+                {/* Search Patient or Booking ID */}
+                <div className="sm:col-span-2">
+                  <label className="block font-semibold text-slate-700 mb-1">Search Patient or Booking ID</label>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Requisition #, patient name, MRN, phone..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-8 pr-3 py-2 rounded-xl border border-slate-200 bg-white font-medium focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Filter by Test Name */}
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Filter by Test Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. CBC, Lipid, Thyroid..."
+                    value={testNameFilter}
+                    onChange={(e) => setTestNameFilter(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-medium focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+
+                {/* Date Range */}
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Date Range</label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="w-full px-2 py-2 rounded-xl border border-slate-200 text-[11px] bg-white font-medium"
+                    />
+                    <span className="text-slate-400 text-xs">to</span>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="w-full px-2 py-2 rounded-xl border border-slate-200 text-[11px] bg-white font-medium"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Clear Active Filters */}
+              {(statusFilter !== 'ALL' || searchQuery || testNameFilter || startDate || endDate || (activeMainTab === 'all' && sourceFilter !== 'ALL')) && (
+                <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs">
+                  <span className="text-slate-500 text-[11px]">Active filters applied</span>
+                  <button
+                    onClick={() => {
+                      setStatusFilter('ALL');
+                      setSearchQuery('');
+                      setTestNameFilter('');
+                      setStartDate('');
+                      setEndDate('');
+                      if (activeMainTab === 'all') setSourceFilter('ALL');
+                    }}
+                    className="text-purple-600 hover:text-purple-800 font-bold flex items-center gap-1 text-[11px]"
+                  >
+                    <RotateCcw className="w-3 h-3" /> Clear All Filters
+                  </button>
+                </div>
+              )}
+            </Card>
+
+            {/* 5. UNIFIED TEST MANAGEMENT TABLE (Requirement 5) */}
+            <Card className="rounded-2xl border-slate-200 shadow-sm overflow-hidden bg-white">
               <div className="overflow-x-auto">
                 <table className="w-full text-xs text-left">
                   <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
                     <tr>
-                      <th className="px-5 py-3.5">Requisition #</th>
+                      <th className="px-5 py-3.5">Requisition / Source</th>
                       <th className="px-5 py-3.5">Patient Details</th>
-                      <th className="px-5 py-3.5">Ordered Tests</th>
-                      <th className="px-5 py-3.5">Ordering Doctor / Hospital</th>
-                      <th className="px-5 py-3.5">Priority</th>
+                      <th className="px-5 py-3.5">Requested Tests</th>
+                      <th className="px-5 py-3.5">Referral / Booking Info</th>
+                      <th className="px-5 py-3.5">Pricing & Payment</th>
                       <th className="px-5 py-3.5">Status</th>
-                      <th className="px-5 py-3.5 text-right">Actions</th>
+                      <th className="px-5 py-3.5 text-right">Actions & Delivery</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     {isRequestsLoading ? (
                       <tr>
                         <td colSpan={7} className="text-center py-12 text-slate-400">
-                          Loading diagnostic requisitions...
+                          <div className="flex flex-col items-center justify-center gap-2">
+                            <InlineSpinner size="md" />
+                            <span>Loading diagnostic requisitions...</span>
+                          </div>
                         </td>
                       </tr>
-                    ) : filteredRequests.length === 0 ? (
+                    ) : requests.length === 0 ? (
                       <tr>
                         <td colSpan={7} className="text-center py-12 text-slate-400">
-                          No diagnostic requests found in this view.
+                          <div className="space-y-1">
+                            <p className="font-semibold text-slate-600">No diagnostic requisitions found</p>
+                            <p className="text-[11px] text-slate-400">
+                              {activeMainTab === 'hospital'
+                                ? 'No hospital-sent test requests match the current filters.'
+                                : activeMainTab === 'direct'
+                                ? 'No direct patient online bookings match the current filters.'
+                                : 'No requisitions found in this view.'}
+                            </p>
+                          </div>
                         </td>
                       </tr>
                     ) : (
-                      filteredRequests.map((req) => {
+                      requests.map((req: any) => {
                         const parsedTests = req.testsList || [];
+                        const isHospital = req.bookingSource === 'HOSPITAL' || Boolean(req.doctorId || req.appointmentId);
+                        const isPaid = req.paymentStatus === 'PAID' || req.paymentStatus === 'COMPLETED';
+
                         return (
-                          <tr key={req.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-5 py-3.5">
-                              <span className="font-mono font-bold text-purple-700 block">
+                          <tr key={req.id} className="hover:bg-slate-50/80 transition-colors">
+                            {/* Requisition Number & Source Badge */}
+                            <td className="px-5 py-3.5 align-top">
+                              <span className="font-mono font-bold text-purple-700 block text-xs">
                                 {req.requestNumber}
                               </span>
-                              <span className="text-[10px] text-slate-400">
+                              <div className="mt-1">
+                                {isHospital ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                                    <Building2 className="w-2.5 h-2.5" /> Hospital-Sent
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                                    <Users className="w-2.5 h-2.5" /> Direct Patient
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-slate-400 block mt-1">
                                 {new Date(req.createdAt).toLocaleDateString()} {new Date(req.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </span>
-                              {req.totalAmount ? (
-                                <span className="text-[10px] font-bold text-emerald-700 block">
-                                  ₹{req.totalAmount}
-                                </span>
-                              ) : null}
                             </td>
 
-                            <td className="px-5 py-3.5">
-                              <div className="font-bold text-slate-900">{req.patient?.fullName}</div>
+                            {/* Patient Details */}
+                            <td className="px-5 py-3.5 align-top">
+                              <div className="font-bold text-slate-900 text-xs">{req.patient?.fullName}</div>
                               <div className="text-[10px] text-slate-500 font-mono">
                                 MRN: {req.patient?.patientIdNumber || 'OPD'}
                               </div>
-                              <div className="text-[10px] text-slate-400">
-                                +91 {req.patient?.mobileNumber} • {req.patient?.gender}
+                              <div className="text-[10px] text-slate-500">
+                                +91 {req.patient?.mobileNumber}
                               </div>
+                              <div className="text-[10px] text-slate-400">
+                                {req.patient?.gender || 'N/A'} {req.patient?.age ? `• ${req.patient.age} Yrs` : ''}
+                              </div>
+                              {req.patient?.address && (
+                                <div className="text-[10px] text-slate-400 truncate max-w-[160px]" title={req.patient.address}>
+                                  {req.patient.address}
+                                </div>
+                              )}
                             </td>
 
-                            <td className="px-5 py-3.5">
-                              <div className="space-y-1 max-w-xs">
+                            {/* Ordered Tests (Multiple tests supported) */}
+                            <td className="px-5 py-3.5 align-top">
+                              <div className="space-y-1.5 max-w-xs">
                                 {parsedTests.map((t: any, idx: number) => (
                                   <div
                                     key={idx}
-                                    className="p-1.5 bg-slate-100 rounded-lg text-[11px] font-semibold text-slate-800 flex items-center justify-between"
+                                    className="p-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] font-semibold text-slate-800 flex items-center justify-between"
                                   >
-                                    <span>• {t.name}</span>
-                                    {t.price && <span className="text-purple-600 font-mono text-[10px]">₹{t.price}</span>}
+                                    <div className="truncate pr-1">
+                                      <span>• {t.name}</span>
+                                      {t.code && <span className="text-[9px] text-slate-400 font-mono block">Code: {t.code}</span>}
+                                    </div>
+                                    {t.price !== undefined && (
+                                      <span className="text-purple-700 font-bold font-mono text-[10px] shrink-0">
+                                        ₹{t.price}
+                                      </span>
+                                    )}
                                   </div>
                                 ))}
                                 {req.clinicalNotes && (
-                                  <div className="text-[10px] text-slate-500 italic pt-0.5">
+                                  <div className="text-[10px] text-slate-500 italic bg-amber-50/50 p-1.5 rounded-lg border border-amber-100">
                                     Notes: "{req.clinicalNotes}"
                                   </div>
                                 )}
                               </div>
                             </td>
 
-                            <td className="px-5 py-3.5">
-                              {req.doctor ? (
-                                <>
-                                  <div className="font-semibold text-slate-800">{req.doctor.name}</div>
-                                  <div className="text-[10px] text-slate-500">{req.hospital?.name}</div>
-                                </>
+                            {/* Referral / Booking Details */}
+                            <td className="px-5 py-3.5 align-top">
+                              {isHospital ? (
+                                <div className="space-y-0.5">
+                                  <div className="font-semibold text-slate-900 text-xs flex items-center gap-1">
+                                    <User className="w-3 h-3 text-slate-400" />
+                                    {req.doctor?.name || 'Hospital Doctor'}
+                                  </div>
+                                  <div className="text-[11px] text-slate-600 font-medium flex items-center gap-1">
+                                    <Building2 className="w-3 h-3 text-slate-400" />
+                                    {req.hospital?.name || 'Affiliated Hospital'}
+                                  </div>
+                                  {req.doctor?.specialization && (
+                                    <div className="text-[10px] text-slate-400">{req.doctor.specialization}</div>
+                                  )}
+                                </div>
                               ) : (
-                                <span className="text-slate-500 italic">Direct Online Booking</span>
+                                <div className="space-y-0.5">
+                                  <div className="font-semibold text-purple-900 text-xs">Direct Patient Booking</div>
+                                  <div className="text-[11px] text-slate-500">
+                                    Appointment: {req.preferredDate ? new Date(req.preferredDate).toLocaleDateString() : 'Next Available'}
+                                  </div>
+                                  <div className="text-[10px] text-slate-400">Specimen Collection / Walk-in</div>
+                                </div>
                               )}
                             </td>
 
-                            <td className="px-5 py-3.5">
-                              <Badge
-                                variant={req.priority === 'URGENT' ? 'danger' : 'outline'}
-                                className="text-[10px]"
-                              >
-                                {req.priority}
-                              </Badge>
+                            {/* Pricing & Payment Information */}
+                            <td className="px-5 py-3.5 align-top">
+                              <div className="space-y-1">
+                                <div className="text-sm font-black text-slate-900 font-mono">
+                                  ₹{req.totalAmount || 0}
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <span
+                                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                      isPaid
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : 'bg-amber-100 text-amber-800'
+                                    }`}
+                                  >
+                                    {isPaid ? 'PAID' : 'PAYMENT PENDING'}
+                                  </span>
+                                  {!isPaid && (
+                                    <button
+                                      type="button"
+                                      onClick={() => updateStatusMutation.mutate({ id: req.id, status: req.status, paymentStatus: 'PAID' })}
+                                      className="text-[10px] text-purple-700 hover:text-purple-900 font-bold underline cursor-pointer"
+                                      title="Mark payment as received at center counter"
+                                    >
+                                      Mark Paid
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
                             </td>
 
-                            <td className="px-5 py-3.5">
+                            {/* Status Tracking */}
+                            <td className="px-5 py-3.5 align-top">
                               <Badge
                                 variant={
                                   req.status === 'COMPLETED'
                                     ? 'success'
                                     : req.status === 'PROCESSING'
                                     ? 'purple'
+                                    : req.status === 'SAMPLE_COLLECTED'
+                                    ? 'royal'
                                     : req.status === 'ACCEPTED' || req.status === 'RECEIVED'
                                     ? 'info'
                                     : req.status === 'CANCELLED' || req.status === 'REJECTED'
                                     ? 'danger'
                                     : 'warning'
                                 }
-                                className="text-[10px]"
+                                className="text-[10px] font-bold"
                               >
-                                {req.status}
+                                {req.status === 'REQUESTED' ? 'PENDING' : req.status}
                               </Badge>
+
+                              {req.priority === 'URGENT' && (
+                                <Badge variant="danger" className="text-[9px] block mt-1 w-fit">
+                                  URGENT
+                                </Badge>
+                              )}
                             </td>
 
-                            <td className="px-5 py-3.5 text-right space-x-2">
-                              {/* APPROVE / REJECT ACTIONS for REQUESTED status */}
-                              {req.status === 'REQUESTED' && (
-                                <div className="inline-flex items-center gap-1.5">
+                            {/* Actions & Report Upload / Delivery Options */}
+                            <td className="px-5 py-3.5 text-right align-top space-y-1.5">
+                              {/* 1. PENDING / REQUESTED: Accept or Reject */}
+                              {(req.status === 'REQUESTED' || req.status === 'PENDING') && (
+                                <div className="flex flex-col sm:flex-row items-end sm:items-center justify-end gap-1.5">
                                   <Button
                                     size="sm"
                                     className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
                                     onClick={() => updateStatusMutation.mutate({ id: req.id, status: 'ACCEPTED' })}
                                     isLoading={updateStatusMutation.isPending}
                                   >
-                                    <Check className="w-3.5 h-3.5 mr-1" /> Approve & Receive
+                                    <Check className="w-3.5 h-3.5 mr-1" /> Accept
                                   </Button>
                                   <Button
                                     size="sm"
                                     variant="outline"
                                     className="text-rose-600 border-rose-300 hover:bg-rose-50 font-bold text-xs"
                                     onClick={() => {
-                                      if (window.confirm('Reject this test requisition?')) {
+                                      if (window.confirm('Reject / Cancel this diagnostic test requisition?')) {
                                         updateStatusMutation.mutate({ id: req.id, status: 'CANCELLED' });
                                       }
                                     }}
@@ -635,19 +1061,42 @@ export const LabTechnicianDashboardPage: React.FC = () => {
                                 </div>
                               )}
 
-                              {/* START TESTING action for ACCEPTED / RECEIVED */}
+                              {/* 2. ACCEPTED: Sample Collected or Start Processing */}
                               {(req.status === 'ACCEPTED' || req.status === 'RECEIVED') && (
+                                <div className="flex flex-col sm:flex-row items-end sm:items-center justify-end gap-1.5">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-indigo-700 border-indigo-300 hover:bg-indigo-50 font-bold text-xs"
+                                    onClick={() => updateStatusMutation.mutate({ id: req.id, status: 'SAMPLE_COLLECTED' })}
+                                    isLoading={updateStatusMutation.isPending}
+                                  >
+                                    Sample Collected
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs"
+                                    onClick={() => updateStatusMutation.mutate({ id: req.id, status: 'PROCESSING' })}
+                                    isLoading={updateStatusMutation.isPending}
+                                  >
+                                    Start Testing
+                                  </Button>
+                                </div>
+                              )}
+
+                              {/* 3. SAMPLE_COLLECTED: Start Processing */}
+                              {req.status === 'SAMPLE_COLLECTED' && (
                                 <Button
                                   size="sm"
                                   className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs"
                                   onClick={() => updateStatusMutation.mutate({ id: req.id, status: 'PROCESSING' })}
                                   isLoading={updateStatusMutation.isPending}
                                 >
-                                  Start Testing
+                                  Start Processing
                                 </Button>
                               )}
 
-                              {/* SUBMIT REPORT action for PROCESSING */}
+                              {/* 4. PROCESSING: Upload Report & Complete */}
                               {req.status === 'PROCESSING' && (
                                 <Button
                                   size="sm"
@@ -657,23 +1106,36 @@ export const LabTechnicianDashboardPage: React.FC = () => {
                                     setIsReportModalOpen(true);
                                   }}
                                 >
-                                  <FileText className="w-3.5 h-3.5 mr-1" /> Submit Report
+                                  <Upload className="w-3.5 h-3.5 mr-1" /> Upload Report
                                 </Button>
                               )}
 
-                              {/* VIEW FINDINGS for COMPLETED */}
+                              {/* 5. COMPLETED: View Report & Delivery Status */}
                               {req.status === 'COMPLETED' && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 text-xs font-semibold"
-                                  onClick={() => setViewingReportRequest(req)}
-                                >
-                                  View Findings
-                                </Button>
+                                <div className="space-y-1">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 text-xs font-semibold"
+                                    onClick={() => setViewingReportRequest(req)}
+                                  >
+                                    <FileText className="w-3.5 h-3.5 mr-1" /> View Report
+                                  </Button>
+                                  <div>
+                                    {isHospital ? (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md">
+                                        <Building2 className="w-3 h-3" /> Sent to Hospital
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                                        <Check className="w-3 h-3" /> Available to Patient
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
                               )}
 
-                              {/* CANCELLED or REJECTED */}
+                              {/* 6. CANCELLED / REJECTED */}
                               {(req.status === 'CANCELLED' || req.status === 'REJECTED') && (
                                 <span className="text-rose-500 text-xs font-semibold">Cancelled</span>
                               )}
@@ -858,6 +1320,146 @@ export const LabTechnicianDashboardPage: React.FC = () => {
                 ))
               )}
             </div>
+          </div>
+        )}
+
+        {/* ======================================================== */}
+        {/* TAB 3: LAB SETTINGS & PRICE VISIBILITY CONFIGURATION */}
+        {/* ======================================================== */}
+        {activeMainTab === 'settings' && (
+          <div className="space-y-6 max-w-4xl mx-auto">
+            {/* Page Header */}
+            <div>
+              <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                <Settings className="w-6 h-6 text-purple-600" />
+                Laboratory Settings & Price Visibility
+              </h1>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Configure patient booking rules, test price transparency, and diagnostic facility credentials
+              </p>
+            </div>
+
+            {/* Requirement 1: Show Price / Hide Price Option */}
+            <Card className="rounded-3xl border-slate-200 shadow-sm p-6 sm:p-8 bg-white space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+                <div className="flex items-start gap-3.5">
+                  <div className="p-3 bg-purple-50 text-purple-700 rounded-2xl shrink-0">
+                    <DollarSign className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-black text-slate-900">Patient Test Price Visibility</h2>
+                    <p className="text-xs text-slate-500 mt-1 max-w-xl">
+                      Control whether diagnostic test prices are publicly displayed to patients on the MedPulse direct lab booking portal.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Toggle Button */}
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className={`text-xs font-bold ${settings?.showPrices ? 'text-emerald-700' : 'text-slate-500'}`}>
+                    {settings?.showPrices ? 'Show Prices (Enabled)' : 'Hide Prices (Disabled)'}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={updatePriceVisibilityMutation.isPending}
+                    onClick={() => updatePriceVisibilityMutation.mutate(!settings?.showPrices)}
+                    className={`relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      settings?.showPrices ? 'bg-emerald-600' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        settings?.showPrices ? 'translate-x-7' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              {/* Visibility Status Explanations */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                <div
+                  className={`p-4 rounded-2xl border transition-all ${
+                    settings?.showPrices
+                      ? 'bg-emerald-50/60 border-emerald-300 text-emerald-900 ring-2 ring-emerald-500/20'
+                      : 'bg-slate-50 border-slate-200 text-slate-500 opacity-60'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 font-bold mb-1.5">
+                    <Eye className="w-4 h-4 text-emerald-600" />
+                    <span>When Show Prices is Enabled</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed">
+                    Individual test prices and total estimated fees are clearly visible to patients during direct online booking. Patients see live test fees before submitting their appointment requisition.
+                  </p>
+                </div>
+
+                <div
+                  className={`p-4 rounded-2xl border transition-all ${
+                    !settings?.showPrices
+                      ? 'bg-amber-50/60 border-amber-300 text-amber-900 ring-2 ring-amber-500/20'
+                      : 'bg-slate-50 border-slate-200 text-slate-500 opacity-60'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 font-bold mb-1.5">
+                    <EyeOff className="w-4 h-4 text-amber-600" />
+                    <span>When Hide Prices is Enabled</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed">
+                    Test prices are masked and replaced with "Price on Request" on the direct patient booking page. Patients can book tests without seeing prices upfront, and fee settlement occurs at the center.
+                  </p>
+                </div>
+              </div>
+
+              {/* Requirement 1 Guarantees Box */}
+              <div className="p-4 bg-purple-50/60 rounded-2xl border border-purple-200/80 text-xs space-y-1.5 text-purple-950">
+                <div className="font-bold flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-purple-700" />
+                  <span>Important Pricing Safeguards:</span>
+                </div>
+                <ul className="list-disc list-inside space-y-1 text-[11px] text-purple-900/90 pl-1">
+                  <li>
+                    <strong>Prices Preserved in Database:</strong> Hiding prices does NOT remove, zero out, or modify actual test prices stored in the system.
+                  </li>
+                  <li>
+                    <strong>Hospital Admin & Doctor Access:</strong> Hospital Admins and Doctors continue to see prices according to their permissions and existing clinical consultation workflows.
+                  </li>
+                  <li>
+                    <strong>Individual Test Pricing:</strong> Lab Admin can configure and update prices for individual tests at any time in the <em>Lab Tests & Pricing</em> tab.
+                  </li>
+                </ul>
+              </div>
+            </Card>
+
+            {/* Laboratory Profile Card */}
+            <Card className="rounded-3xl border-slate-200 shadow-sm p-6 sm:p-8 bg-white space-y-4">
+              <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-purple-600" />
+                Laboratory Facility Details
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                  <span className="text-slate-500 block">Facility Name</span>
+                  <strong className="text-slate-900 font-bold text-sm">{settings?.name || user?.name}</strong>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                  <span className="text-slate-500 block">Facility Type</span>
+                  <strong className="text-slate-900 font-bold text-sm">{settings?.type || 'INDEPENDENT'}</strong>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                  <span className="text-slate-500 block">License / Accreditation #</span>
+                  <strong className="text-slate-900 font-bold text-sm font-mono">{settings?.licenseNumber || 'ACCREDITED'}</strong>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                  <span className="text-slate-500 block">Official Contact</span>
+                  <strong className="text-slate-900 font-bold text-sm">{settings?.email} • {settings?.phone}</strong>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 sm:col-span-2">
+                  <span className="text-slate-500 block">Facility Address</span>
+                  <strong className="text-slate-900 font-bold text-sm">{settings?.address || 'Not specified'}, {settings?.city || ''}</strong>
+                </div>
+              </div>
+            </Card>
           </div>
         )}
       </main>
@@ -1054,11 +1656,16 @@ export const LabTechnicianDashboardPage: React.FC = () => {
           maxWidth="md"
         >
           <div className="space-y-4 text-xs">
-            <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
-              <span className="font-bold text-emerald-950 block">{viewingReportRequest.patient?.fullName}</span>
-              <span className="text-[10px] text-emerald-700">
-                Completed on: {viewingReportRequest.report?.completedAt ? new Date(viewingReportRequest.report.completedAt).toLocaleString() : 'N/A'}
-              </span>
+            <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 space-y-1">
+              <span className="font-bold text-emerald-950 block text-sm">{viewingReportRequest.patient?.fullName}</span>
+              <div className="text-[10px] text-emerald-700 flex items-center justify-between">
+                <span>Completed on: {viewingReportRequest.report?.completedAt ? new Date(viewingReportRequest.report.completedAt).toLocaleString() : 'N/A'}</span>
+                {viewingReportRequest.bookingSource === 'HOSPITAL' || viewingReportRequest.doctorId ? (
+                  <span className="font-bold text-blue-700">Delivered to Requesting Hospital</span>
+                ) : (
+                  <span className="font-bold text-emerald-800">Published to Patient Portal</span>
+                )}
+              </div>
             </div>
 
             <div className="space-y-1">

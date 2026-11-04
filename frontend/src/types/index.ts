@@ -263,6 +263,8 @@ export interface Lab {
   city?: string;
   licenseNumber?: string;
   status: 'PENDING' | 'APPROVED' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED';
+  showPrices?: boolean;
+  visibility?: 'PUBLIC' | 'PRIVATE';
   _count?: { testRequests?: number };
 }
 
@@ -301,6 +303,8 @@ export interface LabTestRequest {
   doctorId?: string;
   appointmentId?: string;
   labId?: string;
+  bookingSource?: 'HOSPITAL' | 'DIRECT_PATIENT';
+  paymentStatus?: 'PENDING' | 'PAID' | 'COMPLETED';
   tests: string;
   testsList?: Array<{ id?: string; name: string; code?: string; price?: number; tatHours?: number; notes?: string }>;
   clinicalNotes?: string;
