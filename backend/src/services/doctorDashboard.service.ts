@@ -630,7 +630,7 @@ export class DoctorDashboardService {
       // 3. If consultation was already completed, also update Prescription & Medical Record
       if (apt.status === 'COMPLETED') {
         const sortedMedicines = sortMedicinesByPriority(JSON.parse(medicinesJson || '[]'));
-        await tx.prescription.upsert({
+        const rx = await tx.prescription.upsert({
           where: { appointmentId },
           update: {
             ...(diagnosisText ? { diagnosis: diagnosisText } : {}),
@@ -660,6 +660,27 @@ export class DoctorDashboardService {
           }
         });
 
+        // Sync individual PrescriptionItem records
+        await tx.prescriptionItem.deleteMany({
+          where: { prescriptionId: rx.id },
+        });
+        if (sortedMedicines.length > 0) {
+          await tx.prescriptionItem.createMany({
+            data: sortedMedicines.map((m: any, idx: number) => ({
+              prescriptionId: rx.id,
+              medicineName: m.name,
+              dosage: m.dosage || '1 tablet',
+              frequency: m.frequency || '1-0-1',
+              duration: m.duration || '5 days',
+              instructions: m.instructions || 'After food',
+              priority: typeof m.priority === 'number' && m.priority > 0 ? m.priority : idx + 1,
+              isSubstituted: Boolean(m.isSubstituted),
+              originalMedicine: m.originalMedicine || null,
+              substitutionReason: m.substitutionReason || null,
+            })),
+          });
+        }
+
         await tx.medicalRecord.upsert({
           where: { appointmentId },
           update: {
@@ -680,7 +701,7 @@ export class DoctorDashboardService {
       }
 
       return { appointment: updatedApt, draft };
-    });
+    }, { timeout: 20000, maxWait: 10000 });
 
     await AuditService.log({
       userId: requestingUserId,
@@ -805,6 +826,25 @@ export class DoctorDashboardService {
         },
       });
 
+      // 2b. Sync individual PrescriptionItem records
+      await tx.prescriptionItem.deleteMany({
+        where: { prescriptionId: prescription.id },
+      });
+      if (sortedMedicines.length > 0) {
+        await tx.prescriptionItem.createMany({
+          data: sortedMedicines.map((m, idx) => ({
+            prescriptionId: prescription.id,
+            medicineName: m.name,
+            dosage: m.dosage || '1 tablet',
+            frequency: m.frequency || '1-0-1',
+            duration: m.duration || '5 days',
+            instructions: m.instructions || 'After food',
+            priority: typeof m.priority === 'number' && m.priority > 0 ? m.priority : idx + 1,
+            isSubstituted: false,
+          })),
+        });
+      }
+
       // 3. Create Medical Record
       const medicalRecord = await tx.medicalRecord.upsert({
         where: { appointmentId },
@@ -830,7 +870,30 @@ export class DoctorDashboardService {
       });
 
       return { appointment: updatedApt, prescription, medicalRecord };
-    });
+    }, { timeout: 25000, maxWait: 10000 });
+
+    // Automatically register any newly prescribed medicines into the master Medicine catalogue
+    (async () => {
+      for (const m of sortedMedicines) {
+        if (m.name && m.name.trim()) {
+          try {
+            await prisma.medicine.upsert({
+              where: { name: m.name.trim() },
+              update: {},
+              create: {
+                name: m.name.trim(),
+                defaultDosage: m.dosage || '1 tablet',
+                defaultFrequency: m.frequency || '1-0-1',
+                defaultDuration: m.duration || '5 days',
+                defaultInstructions: m.instructions || 'After food',
+                category: 'Prescribed Medicine',
+                dosageForm: 'Tablet',
+              },
+            });
+          } catch {}
+        }
+      }
+    })().catch(() => {});
 
     await AuditService.log({
       userId: requestingUserId,
@@ -894,7 +957,11 @@ export class DoctorDashboardService {
         vitals: {
           orderBy: { createdAt: 'desc' },
         },
-        prescription: true,
+        prescription: {
+          include: {
+            items: { orderBy: { priority: 'asc' } },
+          },
+        },
         medicalRecord: true,
         draft: true,
         labRequests: {
@@ -917,6 +984,32 @@ export class DoctorDashboardService {
 
     const latestVital = apt.vitals[0] || null;
 
+    let activeMedicines: any[] = [];
+    if (apt.draft?.medicines) {
+      try {
+        const parsed = typeof apt.draft.medicines === 'string' ? JSON.parse(apt.draft.medicines) : apt.draft.medicines;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          activeMedicines = sortMedicinesByPriority(parsed);
+        }
+      } catch {}
+    } else if (apt.prescription?.items && apt.prescription.items.length > 0) {
+      activeMedicines = apt.prescription.items.map((it) => ({
+        name: it.medicineName,
+        dosage: it.dosage,
+        frequency: it.frequency,
+        duration: it.duration,
+        instructions: it.instructions || '',
+        priority: it.priority,
+        isSubstituted: it.isSubstituted,
+        originalMedicine: it.originalMedicine,
+        substitutionReason: it.substitutionReason,
+      }));
+    } else if (apt.prescription?.medicines) {
+      try {
+        activeMedicines = sortMedicinesByPriority(JSON.parse(apt.prescription.medicines));
+      } catch {}
+    }
+
     return {
       appointment: apt,
       patient: apt.patient,
@@ -925,6 +1018,7 @@ export class DoctorDashboardService {
       chiefComplaints: apt.draft?.chiefComplaints || apt.medicalRecord?.symptoms || null,
       examination: apt.draft?.examination || apt.medicalRecord?.examination || apt.prescription?.examination || null,
       draft: apt.draft || null,
+      medicines: activeMedicines,
       patientHistory: {
         previousAppointments: apt.patient.appointments,
         previousPrescriptions: apt.patient.prescriptions,
@@ -1085,6 +1179,70 @@ export class DoctorDashboardService {
 
     await prisma.prescriptionTemplate.delete({ where: { id: templateId } });
     return { success: true };
+  }
+
+  // -------------------------------------------------------------
+  // MEDICINE CATALOGUE & DYNAMIC SEARCH
+  // -------------------------------------------------------------
+  static async searchMedicines(query?: string, limit = 25) {
+    const trimmed = (query || '').trim();
+
+    let whereClause: any = { isActive: true };
+    if (trimmed) {
+      whereClause = {
+        isActive: true,
+        OR: [
+          { name: { contains: trimmed, mode: 'insensitive' } },
+          { genericName: { contains: trimmed, mode: 'insensitive' } },
+          { category: { contains: trimmed, mode: 'insensitive' } },
+          { dosageForm: { contains: trimmed, mode: 'insensitive' } },
+        ],
+      };
+    }
+
+    const dbMedicines = await prisma.medicine.findMany({
+      where: whereClause,
+      take: limit,
+      orderBy: [{ name: 'asc' }],
+    });
+
+    // Also include any custom medicines from PrescriptionItem matching the query that aren't already in Medicine
+    let customMeds: any[] = [];
+    if (trimmed && trimmed.length >= 2) {
+      const dbNamesLower = new Set(dbMedicines.map((m) => m.name.toLowerCase()));
+      const rxItems = await prisma.prescriptionItem.findMany({
+        where: {
+          medicineName: { contains: trimmed, mode: 'insensitive' },
+        },
+        select: {
+          medicineName: true,
+          dosage: true,
+          frequency: true,
+          duration: true,
+          instructions: true,
+        },
+        distinct: ['medicineName'],
+        take: 10,
+      });
+
+      customMeds = rxItems
+        .filter((r) => !dbNamesLower.has(r.medicineName.toLowerCase()))
+        .map((r, idx) => ({
+          id: `custom_${idx}_${Date.now()}`,
+          name: r.medicineName,
+          genericName: null,
+          category: 'Clinical History',
+          dosageForm: 'Prescription',
+          strength: null,
+          defaultDosage: r.dosage,
+          defaultFrequency: r.frequency,
+          defaultDuration: r.duration,
+          defaultInstructions: r.instructions,
+          isActive: true,
+        }));
+    }
+
+    return [...dbMedicines, ...customMeds];
   }
 
   // -------------------------------------------------------------
@@ -1314,7 +1472,11 @@ export class DoctorDashboardService {
       include: {
         patient: true,
         doctor: { include: { hospital: true, department: true } },
-        prescription: true,
+        prescription: {
+          include: {
+            items: { orderBy: { priority: 'asc' } },
+          },
+        },
         medicalRecord: true,
       },
     });
@@ -1323,11 +1485,27 @@ export class DoctorDashboardService {
       throw new Error('Prescription not found for this appointment');
     }
 
+    const items = apt.prescription.items || [];
+    const medicines = items.length > 0
+      ? items.map((it) => ({
+          name: it.medicineName,
+          dosage: it.dosage,
+          frequency: it.frequency,
+          duration: it.duration,
+          instructions: it.instructions || '',
+          priority: it.priority,
+          isSubstituted: it.isSubstituted,
+          originalMedicine: it.originalMedicine,
+          substitutionReason: it.substitutionReason,
+        }))
+      : JSON.parse(apt.prescription.medicines || '[]');
+
     return {
       appointment: apt,
       prescription: {
         ...apt.prescription,
-        medicines: JSON.parse(apt.prescription.medicines || '[]'),
+        items,
+        medicines,
       },
       medicalRecord: apt.medicalRecord
         ? {
@@ -1345,7 +1523,11 @@ export class DoctorDashboardService {
         hospital: true,
         doctor: { include: { department: true } },
         patient: true,
-        prescription: true,
+        prescription: {
+          include: {
+            items: { orderBy: { priority: 'asc' } },
+          },
+        },
         medicalRecord: true,
         vitals: { orderBy: { createdAt: 'desc' }, take: 1 },
         labRequests: { include: { report: true, lab: true } },
@@ -1355,7 +1537,19 @@ export class DoctorDashboardService {
     if (!apt) throw new Error('Consultation appointment not found');
 
     let parsedMedicines: any[] = [];
-    if (apt.prescription?.medicines) {
+    if (apt.prescription?.items && apt.prescription.items.length > 0) {
+      parsedMedicines = apt.prescription.items.map((it) => ({
+        name: it.medicineName,
+        dosage: it.dosage,
+        frequency: it.frequency,
+        duration: it.duration,
+        instructions: it.instructions || '',
+        priority: it.priority,
+        isSubstituted: it.isSubstituted,
+        originalMedicine: it.originalMedicine,
+        substitutionReason: it.substitutionReason,
+      }));
+    } else if (apt.prescription?.medicines) {
       try {
         parsedMedicines = sortMedicinesByPriority(JSON.parse(apt.prescription.medicines));
       } catch {

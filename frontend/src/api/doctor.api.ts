@@ -1,7 +1,11 @@
 import { api, API_BASE_URL } from './client';
-import { Appointment } from '../types';
+import { Appointment, MedicineCatalogItem } from '../types';
 
 export const doctorDashboardApi = {
+  // Medicine Catalogue Dynamic Search
+  searchMedicines: (query: string, limit = 20) =>
+    api.get<MedicineCatalogItem[]>(`/doctor/medicines/search?q=${encodeURIComponent(query)}&limit=${limit}`),
+
   getAppointments: (date?: string) =>
     api.get<Appointment[]>(`/doctor/appointments${date ? `?date=${date}` : ''}`),
 

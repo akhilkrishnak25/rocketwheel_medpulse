@@ -36,6 +36,7 @@ import {
   CalendarDays,
   RotateCcw,
   FileSpreadsheet,
+  X,
 } from 'lucide-react';
 import { doctorDashboardApi } from '../api/doctor.api';
 import { labApi } from '../api/lab.api';
@@ -47,7 +48,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card'
 import { Modal } from '../components/ui/Modal';
 import { useToast } from '../components/ui/Toast';
 import { InlineSpinner } from '../components/ui/Loading';
-import { Appointment } from '../types';
+import { Appointment, MedicineCatalogItem } from '../types';
 import { DoctorEditProfileSection } from '../components/DoctorEditProfileSection';
 import { DoctorLetterheadBrandingSection } from '../components/DoctorLetterheadBrandingSection';
 import {
@@ -183,6 +184,13 @@ export const DoctorDashboardPage: React.FC = () => {
       priority: 1,
     },
   ]);
+
+  // Dedicated Medicine Catalogue Dynamic Search State
+  const [medicineSearchQuery, setMedicineSearchQuery] = useState('');
+  const [isSearchingMedicines, setIsSearchingMedicines] = useState(false);
+  const [medicineSearchResults, setMedicineSearchResults] = useState<MedicineCatalogItem[]>([]);
+  const [isSearchDropdownOpen, setIsSearchDropdownOpen] = useState(false);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
 
   // Leave Management State
   const [isApplyLeaveOpen, setIsApplyLeaveOpen] = useState(false);
@@ -347,6 +355,9 @@ export const DoctorDashboardPage: React.FC = () => {
         priority: 1,
       },
     ]);
+    setMedicineSearchQuery('');
+    setMedicineSearchResults([]);
+    setIsSearchDropdownOpen(false);
     lastSavedSnapshotRef.current = '';
 
     // Reset section-level edit & snapshot states
@@ -518,7 +529,21 @@ export const DoctorDashboardPage: React.FC = () => {
         if (rx.diagnosis) setDiagnosis(rx.diagnosis);
         if (rx.instructions) setClinicalNotes(rx.instructions);
         if (rx.followUpDate) setFollowUpDate(rx.followUpDate);
-        if (rx.medicines) {
+        if (rx.items && rx.items.length > 0) {
+          restoredMeds = rx.items.map((it: any, idx: number) => ({
+            _id: `med_item_${it.id || idx}`,
+            name: it.medicineName || it.name || '',
+            dosage: it.dosage || '1 tablet',
+            frequency: it.frequency || 'TDS (Thrice daily)',
+            duration: it.duration || '5 days',
+            instructions: it.instructions || 'After food',
+            priority: typeof it.priority === 'number' && it.priority > 0 ? it.priority : idx + 1,
+            isSubstituted: Boolean(it.isSubstituted),
+            originalMedicine: it.originalMedicine,
+            substitutionReason: it.substitutionReason,
+          }));
+          setMedicines(sortMedicinesByPriority(restoredMeds));
+        } else if (rx.medicines) {
           try {
             const parsed = JSON.parse(rx.medicines);
             if (Array.isArray(parsed) && parsed.length > 0) {
@@ -1347,6 +1372,9 @@ export const DoctorDashboardPage: React.FC = () => {
         priority: 1,
       },
     ]);
+    setMedicineSearchQuery('');
+    setMedicineSearchResults([]);
+    setIsSearchDropdownOpen(false);
     lastSavedSnapshotRef.current = '';
 
     setIsVitalsEditing(true);
@@ -1463,6 +1491,84 @@ export const DoctorDashboardPage: React.FC = () => {
     } finally {
       setIsUploadingPhoto(false);
     }
+  };
+
+  // Close medicine search dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setIsSearchDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Debounced medicine catalogue search effect
+  useEffect(() => {
+    const q = medicineSearchQuery.trim();
+    if (!q) {
+      setMedicineSearchResults([]);
+      setIsSearchingMedicines(false);
+      setIsSearchDropdownOpen(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setIsSearchingMedicines(true);
+        const results = await doctorDashboardApi.searchMedicines(q);
+        setMedicineSearchResults(results || []);
+        setIsSearchDropdownOpen(true);
+      } catch (err) {
+        console.error('Failed to search medicines:', err);
+      } finally {
+        setIsSearchingMedicines(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [medicineSearchQuery]);
+
+  const handleSelectMedicineFromSearch = (item: MedicineCatalogItem) => {
+    // Check for duplicate in current prescription
+    const existingIndex = medicines.findIndex(
+      (m) => m.name.trim().toLowerCase() === item.name.trim().toLowerCase()
+    );
+
+    if (existingIndex !== -1) {
+      toast.info(
+        'Medicine Already Added',
+        `"${item.name}" is already in this prescription (Item #${existingIndex + 1}). You can edit its individual dosage or frequency directly below.`
+      );
+      return;
+    }
+
+    const existingPriorities = medicines
+      .map((m) => (typeof m.priority === 'number' && m.priority > 0 ? m.priority : 0))
+      .filter((p) => p > 0);
+    const nextPriority = existingPriorities.length > 0 ? Math.max(...existingPriorities) + 1 : medicines.length + 1;
+
+    const newMed: MedicineItem = {
+      _id: `med_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      name: item.name,
+      dosage: item.defaultDosage || '1 tablet',
+      frequency: item.defaultFrequency || 'BD (Twice daily)',
+      duration: item.defaultDuration || '5 days',
+      instructions: item.defaultInstructions || 'After food',
+      priority: nextPriority,
+    };
+
+    // If there is only 1 empty medicine row in the list, replace it
+    if (medicines.length === 1 && !medicines[0].name.trim()) {
+      setMedicines([newMed]);
+    } else {
+      setMedicines(sortMedicinesByPriority([...medicines, newMed]));
+    }
+
+    toast.success('Medicine Added', `"${item.name}" added to prescription.`);
+    setMedicineSearchQuery('');
+    setIsSearchDropdownOpen(false);
   };
 
   const addMedicine = () => {
@@ -3771,110 +3877,263 @@ export const DoctorDashboardPage: React.FC = () => {
             </div>
 
             {/* Prescription Medicines Builder */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <label className="font-bold text-slate-800 flex items-center gap-1.5">
+                  <label className="font-bold text-slate-800 flex items-center gap-1.5 text-sm">
                     <Pill className="w-4 h-4 text-pink-500" />
                     Prescribed Medicines
                   </label>
                   <span className="text-[11px] text-royal-700 bg-royal-50 font-semibold px-2 py-0.5 rounded-full border border-royal-200">
-                    Auto-sorted by Priority (Ascending)
+                    Auto-sorted by Priority
                   </span>
                 </div>
-                <Button variant="outline" size="sm" onClick={addMedicine} className="text-xs">
-                  <Plus className="w-3 h-3 mr-1" /> Add Medicine
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={addMedicine}
+                  className="text-xs border-dashed border-slate-300 hover:border-royal-400 hover:bg-royal-50/50"
+                  title="Add an empty medicine row for custom entry"
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1 text-royal-600" /> Add Custom Medicine
                 </Button>
               </div>
 
-              {medicines.map((med, idx) => {
-                const medKey = med._id || `med_${idx}`;
-                return (
-                  <div
-                    key={medKey}
-                    className="grid grid-cols-1 sm:grid-cols-12 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200 items-end hover:border-royal-300 transition-colors"
-                  >
-                    {/* Priority Number Input */}
-                    <div className="sm:col-span-2">
-                      <div className="flex items-center justify-between mb-0.5">
-                        <span className="text-[10px] font-bold text-royal-900 block">Priority #</span>
-                        <span className="text-[9px] text-slate-400 font-mono">#{idx + 1}</span>
+              {/* DEDICATED MEDICINE SEARCH BAR */}
+              <div ref={searchContainerRef} className="relative">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={medicineSearchQuery}
+                    onChange={(e) => {
+                      setMedicineSearchQuery(e.target.value);
+                      setIsSearchDropdownOpen(true);
+                    }}
+                    onFocus={() => {
+                      if (medicineSearchQuery.trim()) {
+                        setIsSearchDropdownOpen(true);
+                      }
+                    }}
+                    placeholder="Search medicine by name (e.g. Paracetamol, Amoxicillin, Pantoprazole, Azithromycin)..."
+                    className="w-full pl-9 pr-10 py-2.5 rounded-xl border border-royal-200 bg-white text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-royal-500 focus:border-royal-500 shadow-2xs"
+                  />
+                  {isSearchingMedicines ? (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <InlineSpinner className="w-4 h-4 text-royal-600" />
+                    </div>
+                  ) : medicineSearchQuery ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMedicineSearchQuery('');
+                        setIsSearchDropdownOpen(false);
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                      title="Clear search"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  ) : null}
+                </div>
+
+                {/* SEARCH RESULTS DROPDOWN */}
+                {isSearchDropdownOpen && (
+                  <div className="absolute z-30 left-0 right-0 mt-1.5 max-h-72 overflow-y-auto bg-white rounded-xl border border-slate-200 shadow-xl divide-y divide-slate-100">
+                    {medicineSearchResults.length > 0 ? (
+                      <div>
+                        <div className="px-3 py-1.5 bg-slate-50 text-[11px] font-semibold text-slate-500 flex items-center justify-between">
+                          <span>Matching Medicines ({medicineSearchResults.length})</span>
+                          <span className="text-[10px] text-slate-400">Click to add to prescription</span>
+                        </div>
+                        {medicineSearchResults.map((item) => {
+                          const isAlreadyAdded = medicines.some(
+                            (m) => m.name.trim().toLowerCase() === item.name.trim().toLowerCase()
+                          );
+                          return (
+                            <div
+                              key={item.id}
+                              onClick={() => handleSelectMedicineFromSearch(item)}
+                              className={`p-3 flex items-center justify-between gap-3 hover:bg-royal-50/60 cursor-pointer transition-colors ${
+                                isAlreadyAdded ? 'bg-amber-50/40' : ''
+                              }`}
+                            >
+                              <div className="space-y-0.5 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-bold text-slate-900 text-xs">{item.name}</span>
+                                  {item.dosageForm && (
+                                    <span className="text-[10px] px-1.5 py-0.2 bg-blue-50 text-blue-700 font-medium rounded border border-blue-200">
+                                      {item.dosageForm}
+                                    </span>
+                                  )}
+                                  {item.strength && (
+                                    <span className="text-[10px] px-1.5 py-0.2 bg-purple-50 text-purple-700 font-medium rounded border border-purple-200">
+                                      {item.strength}
+                                    </span>
+                                  )}
+                                  {item.category && (
+                                    <span className="text-[10px] px-1.5 py-0.2 bg-slate-100 text-slate-600 rounded">
+                                      {item.category}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap">
+                                  {item.genericName && <span>Gen: {item.genericName}</span>}
+                                  <span>•</span>
+                                  <span>Default: {item.defaultDosage || '1 Tab'} | {item.defaultFrequency || 'BD'} | {item.defaultDuration || '5 days'}</span>
+                                  {item.defaultInstructions && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="italic">{item.defaultInstructions}</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="shrink-0">
+                                {isAlreadyAdded ? (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-100/70 px-2 py-1 rounded-lg border border-amber-300">
+                                    <Check className="w-3 h-3" /> Added
+                                  </span>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    type="button"
+                                    className="text-xs h-7 px-2.5 text-royal-700 border-royal-300 hover:bg-royal-600 hover:text-white"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSelectMedicineFromSearch(item);
+                                    }}
+                                  >
+                                    <Plus className="w-3 h-3 mr-1" /> Add
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={med.priority ?? idx + 1}
-                        onChange={(e) => handleMedicinePriorityChange(medKey, e.target.value)}
-                        onBlur={() => handleMedicinePriorityBlur(medKey)}
-                        title="Numeric priority for sorting (1 = first, 2 = second, etc.)"
-                        placeholder={`${idx + 1}`}
-                        className="w-full text-xs font-bold text-center p-1.5 rounded-lg border border-royal-300 bg-white text-royal-900 focus:ring-1 focus:ring-royal-500 shadow-2xs"
-                      />
-                    </div>
+                    ) : (
+                      <div className="p-4 text-center text-xs text-slate-500">
+                        {isSearchingMedicines ? (
+                          'Searching medicine catalogue...'
+                        ) : (
+                          <div className="space-y-1">
+                            <p className="font-semibold text-slate-700">No exact match found for "{medicineSearchQuery}"</p>
+                            <p className="text-[11px] text-slate-400">
+                              You can click <strong>"Add Custom Medicine"</strong> to enter this medication manually.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
-                    {/* Medicine Name & Strength */}
-                    <div className="sm:col-span-4">
-                      <span className="text-[10px] text-slate-400 block mb-0.5">Medicine & Strength</span>
-                      <input
-                        type="text"
-                        value={med.name}
-                        onChange={(e) => updateMedicine(medKey, 'name', e.target.value)}
-                        placeholder="e.g. Tab Amoxicillin 500mg"
-                        className="w-full text-xs p-1.5 rounded-lg border border-slate-200 bg-white"
-                      />
-                    </div>
-
-                    {/* Frequency */}
-                    <div className="sm:col-span-2">
-                      <span className="text-[10px] text-slate-400 block mb-0.5">Frequency</span>
-                      <input
-                        type="text"
-                        value={med.frequency}
-                        onChange={(e) => updateMedicine(medKey, 'frequency', e.target.value)}
-                        placeholder="e.g. BD (Twice daily)"
-                        className="w-full text-xs p-1.5 rounded-lg border border-slate-200 bg-white"
-                      />
-                    </div>
-
-                    {/* Duration */}
-                    <div className="sm:col-span-2">
-                      <span className="text-[10px] text-slate-400 block mb-0.5">Duration</span>
-                      <input
-                        type="text"
-                        value={med.duration}
-                        onChange={(e) => updateMedicine(medKey, 'duration', e.target.value)}
-                        placeholder="e.g. 5 days"
-                        className="w-full text-xs p-1.5 rounded-lg border border-slate-200 bg-white"
-                      />
-                    </div>
-
-                    {/* Instructions & Remove */}
-                    <div className="sm:col-span-2 flex items-center gap-1">
-                      <div className="flex-1">
-                        <span className="text-[10px] text-slate-400 block mb-0.5">Instructions</span>
+              {/* MEDICINE ITEMS LIST */}
+              <div className="space-y-2.5">
+                {medicines.map((med, idx) => {
+                  const medKey = med._id || `med_${idx}`;
+                  return (
+                    <div
+                      key={medKey}
+                      className="grid grid-cols-1 sm:grid-cols-12 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200 items-end hover:border-royal-300 transition-colors shadow-2xs"
+                    >
+                      {/* Priority Number Input */}
+                      <div className="sm:col-span-1">
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-[10px] font-bold text-royal-900 block">P#</span>
+                          <span className="text-[9px] text-slate-400 font-mono">#{idx + 1}</span>
+                        </div>
                         <input
-                          type="text"
-                          value={med.instructions}
-                          onChange={(e) => updateMedicine(medKey, 'instructions', e.target.value)}
-                          placeholder="After food"
-                          className="w-full text-xs p-1.5 rounded-lg border border-slate-200 bg-white"
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={med.priority ?? idx + 1}
+                          onChange={(e) => handleMedicinePriorityChange(medKey, e.target.value)}
+                          onBlur={() => handleMedicinePriorityBlur(medKey)}
+                          title="Numeric priority for sorting (1 = first, 2 = second, etc.)"
+                          placeholder={`${idx + 1}`}
+                          className="w-full text-xs font-bold text-center p-1.5 rounded-lg border border-royal-300 bg-white text-royal-900 focus:ring-1 focus:ring-royal-500 shadow-2xs"
                         />
                       </div>
-                      {medicines.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeMedicine(medKey)}
-                          className="text-rose-500 hover:text-rose-700 p-1.5 hover:bg-rose-50 rounded-lg transition-colors"
-                          title="Remove medicine"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
+
+                      {/* Medicine Name & Strength */}
+                      <div className="sm:col-span-3">
+                        <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Medicine Name</span>
+                        <input
+                          type="text"
+                          value={med.name}
+                          onChange={(e) => updateMedicine(medKey, 'name', e.target.value)}
+                          placeholder="e.g. Tab Amoxicillin 500mg"
+                          className="w-full text-xs p-1.5 rounded-lg border border-slate-200 bg-white font-medium text-slate-900 focus:ring-1 focus:ring-royal-500"
+                        />
+                      </div>
+
+                      {/* Dosage */}
+                      <div className="sm:col-span-2">
+                        <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Dosage</span>
+                        <input
+                          type="text"
+                          value={med.dosage}
+                          onChange={(e) => updateMedicine(medKey, 'dosage', e.target.value)}
+                          placeholder="e.g. 1 Tab / 5ml"
+                          className="w-full text-xs p-1.5 rounded-lg border border-slate-200 bg-white text-slate-900 focus:ring-1 focus:ring-royal-500"
+                        />
+                      </div>
+
+                      {/* Frequency */}
+                      <div className="sm:col-span-2">
+                        <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Frequency</span>
+                        <input
+                          type="text"
+                          value={med.frequency}
+                          onChange={(e) => updateMedicine(medKey, 'frequency', e.target.value)}
+                          placeholder="e.g. 1-0-1 / TDS / BD"
+                          className="w-full text-xs p-1.5 rounded-lg border border-slate-200 bg-white text-slate-900 focus:ring-1 focus:ring-royal-500"
+                        />
+                      </div>
+
+                      {/* Duration */}
+                      <div className="sm:col-span-2">
+                        <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Duration</span>
+                        <input
+                          type="text"
+                          value={med.duration}
+                          onChange={(e) => updateMedicine(medKey, 'duration', e.target.value)}
+                          placeholder="e.g. 5 days / 1 week"
+                          className="w-full text-xs p-1.5 rounded-lg border border-slate-200 bg-white text-slate-900 focus:ring-1 focus:ring-royal-500"
+                        />
+                      </div>
+
+                      {/* Instructions & Remove */}
+                      <div className="sm:col-span-2 flex items-center gap-1.5">
+                        <div className="flex-1">
+                          <span className="text-[10px] font-bold text-slate-600 block mb-0.5">Instructions</span>
+                          <input
+                            type="text"
+                            value={med.instructions}
+                            onChange={(e) => updateMedicine(medKey, 'instructions', e.target.value)}
+                            placeholder="e.g. After food"
+                            className="w-full text-xs p-1.5 rounded-lg border border-slate-200 bg-white text-slate-900 focus:ring-1 focus:ring-royal-500"
+                          />
+                        </div>
+                        {medicines.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeMedicine(medKey)}
+                            className="text-rose-500 hover:text-rose-700 p-1.5 hover:bg-rose-50 rounded-lg transition-colors shrink-0"
+                            title="Remove medicine from prescription"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
 
             {/* Clinical Notes & Follow-up */}

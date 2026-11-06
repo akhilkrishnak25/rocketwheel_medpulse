@@ -184,6 +184,37 @@ export interface Payment {
   paymentMethod?: string;
 }
 
+export interface MedicineCatalogItem {
+  id: string;
+  name: string;
+  genericName?: string | null;
+  category?: string | null;
+  dosageForm?: string | null;
+  strength?: string | null;
+  defaultDosage?: string | null;
+  defaultFrequency?: string | null;
+  defaultDuration?: string | null;
+  defaultInstructions?: string | null;
+  isActive?: boolean;
+}
+
+export interface PrescriptionItem {
+  id: string;
+  prescriptionId: string;
+  medicineId?: string | null;
+  medicineName: string;
+  dosage: string;
+  frequency: string;
+  duration: string;
+  instructions?: string | null;
+  priority: number;
+  isSubstituted?: boolean;
+  originalMedicine?: string | null;
+  substitutionReason?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface Prescription {
   id: string;
   appointmentId?: string;
@@ -192,6 +223,7 @@ export interface Prescription {
   examination?: string;
   vitals?: any;
   medicines: string; // JSON string
+  items?: PrescriptionItem[];
   medicinesList?: Array<{
     name: string;
     dosage: string;

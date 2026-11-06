@@ -477,5 +477,20 @@ export class DoctorDashboardController {
       return errorResponse(res, error.message || 'Failed to export doctor data to Excel', 500);
     }
   }
+
+  // -------------------------------------------------------------
+  // MEDICINE CATALOGUE DYNAMIC SEARCH
+  // -------------------------------------------------------------
+  static async searchMedicines(req: Request, res: Response) {
+    try {
+      const { q, query, limit } = req.query;
+      const searchTerm = ((q || query || '') as string).trim();
+      const numLimit = limit ? parseInt(limit as string, 10) : 25;
+      const medicines = await DoctorDashboardService.searchMedicines(searchTerm, numLimit);
+      return successResponse(res, medicines, 'Medicine catalogue search results');
+    } catch (error: any) {
+      return errorResponse(res, error.message || 'Failed to search medicine catalogue', 500);
+    }
+  }
 }
 

@@ -372,31 +372,75 @@ model LabTestTemplate {
 }
 
 model Prescription {
-  id                 String       @id @default(uuid())
-  appointmentId      String       @unique
-  appointment        Appointment  @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  id                 String             @id @default(uuid())
+  appointmentId      String             @unique
+  appointment        Appointment        @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
   doctorId           String
-  doctor             Doctor       @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  doctor             Doctor             @relation(fields: [doctorId], references: [id], onDelete: Restrict)
   patientId          String?
-  patient            Patient?     @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  patient            Patient?           @relation(fields: [patientId], references: [id], onDelete: SetNull)
   hospitalId         String?
-  hospital           Hospital?    @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
+  hospital           Hospital?          @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
   pharmacyId         String?
-  pharmacy           Pharmacy?    @relation(fields: [pharmacyId], references: [id], onDelete: SetNull)
-  diagnosis          String       @db.Text
-  examination        String?      @db.Text
-  medicines          String       @db.Text
-  pharmacyMedicines  String?      @db.Text
-  instructions       String?      @db.Text
+  pharmacy           Pharmacy?          @relation(fields: [pharmacyId], references: [id], onDelete: SetNull)
+  diagnosis          String             @db.Text
+  examination        String?            @db.Text
+  medicines          String             @db.Text
+  items              PrescriptionItem[]
+  pharmacyMedicines  String?            @db.Text
+  instructions       String?            @db.Text
   followUpDate       String?
-  pharmacyStatus     String       @default("NONE") // NONE, SENT, ACCEPTED, PROCESSING, COMPLETED
+  pharmacyStatus     String             @default("NONE") // NONE, SENT, ACCEPTED, PROCESSING, COMPLETED
   sentToPharmacyAt   DateTime?
   dispensedAt        DateTime?
   dispensedBy        String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([pharmacyId, pharmacyStatus])
+}
+
+model Medicine {
+  id                  String             @id @default(uuid())
+  name                String             @unique
+  genericName         String?
+  category            String?            // e.g. "Analgesic / Antipyretic", "Antibiotic", "Antihistamine", "Antihypertensive", "Antacid"
+  dosageForm          String?            // e.g. "Tablet", "Capsule", "Syrup", "Injection", "Inhaler"
+  strength            String?            // e.g. "650mg", "500mg", "10mg"
+  defaultDosage       String?            @default("1 tablet")
+  defaultFrequency    String?            @default("BD (Twice daily)")
+  defaultDuration     String?            @default("5 days")
+  defaultInstructions String?            @default("After food")
+  isActive            Boolean            @default(true)
+  prescriptionItems   PrescriptionItem[]
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@index([name])
+  @@index([genericName])
+  @@index([category])
+}
+
+model PrescriptionItem {
+  id                 String       @id @default(uuid())
+  prescriptionId     String
+  prescription       Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  medicineId         String?
+  medicine           Medicine?    @relation(fields: [medicineId], references: [id], onDelete: SetNull)
+  medicineName       String
+  dosage             String
+  frequency          String
+  duration           String
+  instructions       String?      @db.Text
+  priority           Int          @default(1)
+  isSubstituted      Boolean      @default(false)
+  originalMedicine   String?
+  substitutionReason String?      @db.Text
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 
-  @@index([pharmacyId, pharmacyStatus])
+  @@index([prescriptionId])
+  @@index([medicineName])
 }
 
 model Pharmacy {

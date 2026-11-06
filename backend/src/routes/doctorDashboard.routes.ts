@@ -17,6 +17,10 @@ router.post('/appointments/:appointmentId/save-changes', DoctorDashboardControll
 router.post('/appointments/:appointmentId/complete', DoctorDashboardController.completeConsultation);
 router.get('/appointments/:appointmentId/prescription', DoctorDashboardController.getPrescription);
 
+// Medicine Catalogue Search
+router.get('/medicines/search', DoctorDashboardController.searchMedicines);
+router.get('/medicines', DoctorDashboardController.searchMedicines);
+
 // Prescription Templates
 router.get('/templates', DoctorDashboardController.getTemplates);
 router.post('/templates', DoctorDashboardController.createTemplate);
